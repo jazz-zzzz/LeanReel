@@ -232,48 +232,37 @@ def main():
         file_panel.apply_strategy_to_row(active_custom_path, strategy)
 
     def on_start_requested():
-        default_strategy = strategy_panel.current_preset_strategy or strategy_panel.current_strategy
-        if default_strategy is None:
-            win.set_status("没有可用策略")
-            return
-        tasks = build_encode_tasks(
-            current_snapshots,
-            current_folder_paths,
-            default_strategy,
-            strategy_overrides,
-        )
-        if not tasks:
-            win.set_status("没有可压缩文件")
-            return
-        queue_panel.task_list.clear()
-        for task in tasks:
-            queue_panel.add_task_row(task)
+        try:
+            default_strategy = strategy_panel.current_preset_strategy or strategy_panel.current_strategy
+            if default_strategy is None:
+                win.set_status("没有可用策略")
+                return
+            tasks = build_encode_tasks(
+                current_snapshots,
+                current_folder_paths,
+                default_strategy,
+                strategy_overrides,
+            )
+            if not tasks:
+                win.set_status("没有可压缩文件")
+                return
+            queue_panel.clear_tasks()
+            for task in tasks:
+                queue_panel.add_task_row(task)
 
-        progress_lock = threading.Lock()
-        completed = [0]
-        total = len(tasks)
-
-        def _progress_callback(task):
-            # 由 WorkerManager 在编码线程中调用
-            pass
-
-        def _encoding_progress(task):
-            with progress_lock:
-                if task.status.value in ("completed", "failed", "skipped"):
-                    completed[0] += 1
-            notifier.progress.emit(completed[0], total)
-
-        manager = WorkerManager(
-            FFmpegExecutor(temp_dir=strategy_panel.temp_dir, progress_callback=_progress_callback),
-            strategy_panel.worker_count
-        )
-        win.show_queue()
-        manager.start(tasks)
-        queue_panel.update_progress(manager.get_progress())
-        win.set_status(
-            f"编码完成：成功 {manager.completed_count}/{manager.total_tasks}"
-            + (f"，失败 {manager.failed_count}" if manager.failed_count else "")
-        )
+            manager = WorkerManager(
+                FFmpegExecutor(temp_dir=strategy_panel.temp_dir),
+                strategy_panel.worker_count
+            )
+            win.show_queue()
+            manager.start(tasks)
+            queue_panel.update_progress(manager.get_progress())
+            win.set_status(
+                f"编码完成：成功 {manager.completed_count}/{manager.total_tasks}"
+                + (f"，失败 {manager.failed_count}" if manager.failed_count else "")
+            )
+        except Exception as e:
+            win.set_status(f"错误：{e}")
 
     def refresh_libraries():
         libs = lib_mgr.get_all_libraries()

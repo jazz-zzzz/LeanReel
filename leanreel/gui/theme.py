@@ -18,7 +18,7 @@ C_YELLOW = "#c8a23e"      # 警告黄
 C_BLUE = "#5b8db8"        # 信息蓝
 C_GRAY = "#5c5851"        # 灰色
 C_ROW_ALT = "#171512"     # 交替行色
-C_SELECTION = "#2a2215"   # 选中行色
+C_SELECTION = "#3d2e14"   # 选中行色 暖琥珀底
 C_PROGRESS_BG = "#24221d"
 C_PROGRESS_CHUNK = "#c8963e"
 
@@ -74,6 +74,7 @@ QTreeWidget::item:hover {{
 }}
 QTreeWidget::item:selected {{
     background-color: {C_SELECTION};
+    color: #f0e8d5;
 }}
 QTreeWidget QHeaderView::section {{
     background-color: {C_SURFACE};
@@ -244,13 +245,15 @@ QProgressBar::chunk {{
 QStatusBar {{
     background-color: {C_SURFACE};
     border-top: 1px solid {C_BORDER};
+    min-height: 22px;
 }}
 QStatusBar::item {{
     border: none;
 }}
 QStatusBar QLabel {{
     padding: 2px 12px;
-    color: {C_TEXT_SECONDARY};
+    color: {C_TEXT};
+    font-size: 12px;
 }}
 
 /* ── 菜单 ── */

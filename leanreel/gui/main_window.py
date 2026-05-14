@@ -62,8 +62,10 @@ class MainWindow(QMainWindow):
 
     def _setup_status(self):
         self.status = QStatusBar()
+        self.status.setFixedHeight(28)
         self.setStatusBar(self.status)
         self.status_label = QLabel("就绪")
+        self.status_label.setStyleSheet("color: #e8e3db; font-size: 12px; padding: 2px 16px;")
         self.status.addWidget(self.status_label, 1)
 
     def set_status(self, text: str):

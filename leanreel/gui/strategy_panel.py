@@ -31,8 +31,12 @@ QPushButton:hover {{
     background-color: #24221d;
 }}
 QPushButton:checked {{
-    border-color: #c8963e;
-    background-color: #2a2215;
+    border: 2px solid #d4a853;
+    background-color: #3d2e14;
+}}
+QPushButton:checked:hover {{
+    border-color: #e0b85c;
+    background-color: #45341a;
 }}
 """
 
@@ -184,28 +188,17 @@ class StrategyPanel(QWidget):
 
     def _make_card(self, s: Strategy, index: int) -> QPushButton:
         tag = "GPU" if s.video.is_gpu else ("CPU" if s.video.encoder.startswith("lib") else "COPY")
-        tag_color = "#c8963e" if s.video.is_gpu else ("#5b8db8" if s.video.encoder.startswith("lib") else "#6b6560")
         savings = getattr(s, "estimated_savings", "") or ""
         desc = getattr(s, "description", "") or ""
         if len(desc) > 52:
             desc = desc[:50] + "..."
 
-        text = (
-            f"<span style='font-size:13px;font-weight:bold;color:#e8e3db;'>{s.name}</span>"
-            f"&nbsp;<span style='font-size:10px;color:{tag_color};background:#24221d;border-radius:3px;padding:1px 5px;'>{tag}</span>"
-        )
-        if savings:
-            text += f"<br><span style='font-size:11px;color:#8a857c;'>节省 {savings}</span>"
+        prefix = "●" if index == 0 else "○"
+        plain = f"{prefix} {s.name}  [{tag}]  节省 {savings}"
         if desc:
-            text += f"<span style='font-size:11px;color:#6b6560;'> · {desc}</span>"
+            plain += f"\n    {desc}"
 
-        btn = QPushButton("")
-        btn.setText(text)  # Rich text doesn't work in QPushButton text in all styles
-        # Use plain text instead
-        plain = f"{s.name}  [{tag}]  节省{savings}"
-        if desc:
-            plain += f"\n{desc}"
-        btn.setText(plain)
+        btn = QPushButton(plain)
         btn.setCheckable(True)
         btn.setStyleSheet(_CARD_STYLE)
         btn.clicked.connect(lambda checked=False, i=index: self._on_card_clicked(i))
@@ -247,7 +240,23 @@ class StrategyPanel(QWidget):
     def _on_card_clicked(self, index: int):
         self._active_preset_index = index
         self.custom_group.hide()
+        self._update_card_indicators()
         self.strategy_changed.emit(index)
+
+    def _update_card_indicators(self):
+        for i, btn in enumerate(self.card_group.buttons()):
+            s = self._strategies[i]
+            tag = "GPU" if s.video.is_gpu else ("CPU" if s.video.encoder.startswith("lib") else "COPY")
+            savings = getattr(s, "estimated_savings", "") or ""
+            desc = getattr(s, "description", "") or ""
+            if len(desc) > 52:
+                desc = desc[:50] + "..."
+            prefix = "●" if i == self._active_preset_index else "○"
+            plain = f"{prefix} {s.name}  [{tag}]  节省 {savings}"
+            if desc:
+                plain += f"\n    {desc}"
+            btn.setText(plain)
+            btn.setChecked(i == self._active_preset_index)
 
     def show_custom_strategy(self):
         self.custom_group.show()
