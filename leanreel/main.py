@@ -186,20 +186,50 @@ def main():
 
     notifier.probed.connect(file_panel.update_snapshot_row)
     notifier.progress.connect(
-        lambda done, total: win.set_status(f"扫描中：{done}/{total} 个文件已探测...")
+        lambda done, total: win.set_status(f"探测中：{done}/{total} ...")
     )
     notifier.all_done.connect(
-        lambda: win.set_status(f"扫描完成：{len(current_snapshots)} 个文件")
+        lambda: win.set_status("编码信息探测完成")
     )
 
     def on_library_selected(lib_id):
         nonlocal current_snapshots, current_folder_paths, strategy_overrides
-        snapshots, folder_paths = load_library_snapshots(db, scanner, lib_id)
+        folders = db.get_folders_for_library(lib_id)
+        snapshots: list = []
+        folder_paths: dict[int, str] = {}
+        for folder in folders:
+            folder_paths[folder.id] = folder.path
+            snapshots.extend(scanner.scan_folder_fast(folder.id, folder.path))
         current_folder_paths = folder_paths
         strategy_overrides = {}
         current_snapshots = snapshots
         _populate_file_list(snapshots)
-        win.set_status(f"已加载 {len(snapshots)} 个文件")
+
+        pending = scanner.pending_count
+        if pending > 0:
+            win.set_status(f"加载 {len(snapshots)} 个文件，正在补充编码信息...")
+
+            def on_probed(snap):
+                notifier.probed.emit(snap)
+
+            done_count = [0]
+            lock = threading.Lock()
+
+            def on_progress(_snap):
+                with lock:
+                    done_count[0] += 1
+                    notifier.progress.emit(done_count[0], pending)
+
+            def _probe_loop():
+                import time
+                while scanner.probe_next(on_probed):
+                    on_progress(None)
+                notifier.all_done.emit()
+
+            t = threading.Thread(target=_probe_loop, daemon=True)
+            t.start()
+        else:
+            win.set_status(f"已加载 {len(snapshots)} 个文件")
 
     def on_strategy_override_changed(relative_path, strategy_name):
         nonlocal active_custom_path
