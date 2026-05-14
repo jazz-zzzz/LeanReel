@@ -74,7 +74,7 @@ class SubtitleRule:
 
 @dataclass
 class FilterRule:
-    skip_x265: bool = True
+    skip_x265: bool = False
     min_size_gb: Optional[float] = None
     only_remux: bool = False
 
@@ -85,7 +85,7 @@ class FilterRule:
     @classmethod
     def from_dict(cls, d: dict) -> "FilterRule":
         return cls(
-            skip_x265=d.get("skip_x265", True),
+            skip_x265=d.get("skip_x265", False),
             min_size_gb=d.get("min_size_gb"),
             only_remux=d.get("only_remux", False),
         )
