@@ -11,7 +11,7 @@ from leanreel.data.models import (
 
 class Database:
     def __init__(self, db_path: str = ":memory:"):
-        self.conn = sqlite3.connect(db_path)
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
@@ -44,6 +44,8 @@ class Database:
             subtitle_tracks TEXT DEFAULT '[]',
             duration_seconds REAL DEFAULT 0,
             bitrate_bps INTEGER DEFAULT 0,
+            file_mtime REAL DEFAULT 0,
+            probe_ok INTEGER DEFAULT 0,
             scanned_at TEXT DEFAULT (datetime('now')),
             UNIQUE(library_folder_id, relative_path)
         );
@@ -59,6 +61,15 @@ class Database:
             created_at TEXT DEFAULT (datetime('now'))
         );
         """)
+        self._migrate()
+
+    def _migrate(self):
+        """增量迁移：为旧数据库添加缺失列"""
+        existing = {row[1] for row in self.conn.execute("PRAGMA table_info(file_snapshot)")}
+        if "file_mtime" not in existing:
+            self.conn.execute("ALTER TABLE file_snapshot ADD COLUMN file_mtime REAL DEFAULT 0")
+        if "probe_ok" not in existing:
+            self.conn.execute("ALTER TABLE file_snapshot ADD COLUMN probe_ok INTEGER DEFAULT 0")
 
     def execute(self, sql: str, params=None):
         try:

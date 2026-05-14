@@ -1,8 +1,11 @@
 """LeanReel 入口"""
 import sys
 import os
+import threading
 from pathlib import Path
+
 from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QObject, Signal
 
 from leanreel.data.database import Database
 from leanreel.core.library import LibraryManager
@@ -14,12 +17,19 @@ from leanreel.gui.library_panel import LibraryPanel
 from leanreel.gui.file_list import FileListPanel
 from leanreel.gui.strategy_panel import StrategyPanel
 from leanreel.gui.queue_panel import QueuePanel
+from leanreel.gui.theme import apply_theme
 from leanreel.executor.ffmpeg import FFmpegExecutor
 from leanreel.executor.worker import EncodeTask, WorkerManager
 
 
+class ProbeNotifier(QObject):
+    """线程安全的探测完成通知器"""
+    probed = Signal(object)
+    all_done = Signal()
+    progress = Signal(int, int)  # done, total
+
+
 def get_data_dir() -> Path:
-    """获取数据目录（用户配置和数据库）"""
     if sys.platform == "win32":
         base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
     else:
@@ -30,7 +40,6 @@ def get_data_dir() -> Path:
 
 
 def get_strategies_dir() -> Path:
-    """获取策略目录"""
     user_dir = get_data_dir() / "strategies"
     user_dir.mkdir(parents=True, exist_ok=True)
     builtin = Path(__file__).parent / "resources" / "strategies"
@@ -44,7 +53,6 @@ def get_strategies_dir() -> Path:
 
 
 def make_output_path(source: Path) -> Path:
-    """Build a non-destructive default output path."""
     return source.with_name(f"{source.stem}_SS{source.suffix}")
 
 
@@ -54,7 +62,6 @@ def build_encode_tasks(
     strategy,
     strategy_overrides: dict[str, object] | None = None,
 ) -> list[EncodeTask]:
-    """Create encode tasks from displayed snapshots."""
     tasks: list[EncodeTask] = []
     strategy_overrides = strategy_overrides or {}
     for snap in snapshots:
@@ -75,11 +82,6 @@ def build_encode_tasks(
 
 
 def load_library_snapshots(db: Database, scanner: Scanner, lib_id: int):
-    """Load a library by refreshing each folder through Scanner.
-
-    Scanner skips valid cached metadata, but refreshes stale entries without codec
-    data, so selecting a library can recover missing encoding information.
-    """
     folders = db.get_folders_for_library(lib_id)
     snapshots = []
     folder_paths = {}
@@ -92,12 +94,11 @@ def load_library_snapshots(db: Database, scanner: Scanner, lib_id: int):
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("LeanReel")
+    apply_theme(app)
 
-    # 初始化数据层
     db_path = str(get_data_dir() / "leanreel.db")
     db = Database(db_path)
 
-    # 初始化业务层
     lib_mgr = LibraryManager(db)
     strategies = load_strategies(str(get_strategies_dir()))
     matcher = Matcher(strategies)
@@ -107,7 +108,8 @@ def main():
     strategy_overrides: dict[str, object] = {}
     active_custom_path: str | None = None
 
-    # 初始化 GUI
+    notifier = ProbeNotifier()
+
     win = MainWindow()
     lib_panel = LibraryPanel()
     file_panel = FileListPanel()
@@ -116,29 +118,13 @@ def main():
 
     win.set_library_panel(lib_panel)
     win.set_file_list_panel(file_panel)
-    win.set_strategy_panel(strategy_panel)
+    win.set_strategy_widget(strategy_panel)
     win.set_queue_panel(queue_panel)
 
-    # 填充策略列表
     strategy_panel.set_strategies(strategies)
 
-    # 连接信号
-    def on_library_added(name):
-        try:
-            lib = lib_mgr.create_library(name)
-            refresh_libraries()
-        except ValueError as e:
-            win.status.showMessage(str(e))
-
-    def on_folder_added(lib_id, path):
-        nonlocal current_snapshots, current_folder_paths, strategy_overrides
-        folder = lib_mgr.add_folder(lib_id, path)
-        refresh_libraries()
-        win.status.showMessage(f"正在扫描 {path}...")
-        snapshots = scanner.scan_folder(folder.id, path)
-        current_snapshots = snapshots
-        current_folder_paths = {folder.id: path}
-        strategy_overrides = {}
+    def _populate_file_list(snapshots):
+        """用快照列表填充文件面板，返回匹配字典"""
         matched = {}
         for s in snapshots:
             strategy = matcher.match(s)
@@ -147,7 +133,64 @@ def main():
                 "estimate": estimate_savings(s, strategy),
             }
         file_panel.populate(snapshots, matched, strategies)
-        win.status.showMessage(f"扫描完成: {len(snapshots)} 个文件")
+        return matched
+
+    def on_library_added(name):
+        try:
+            lib = lib_mgr.create_library(name)
+            refresh_libraries()
+        except ValueError as e:
+            win.set_status(str(e))
+
+    def on_folder_added(lib_id, path):
+        nonlocal current_snapshots, current_folder_paths, strategy_overrides
+        folder = lib_mgr.add_folder(lib_id, path)
+        refresh_libraries()
+        win.set_status(f"扫描 {path}...")
+
+        # 阶段1：快速扫描，立即显示文件列表
+        snapshots = scanner.scan_folder_fast(folder.id, path)
+        current_snapshots = snapshots
+        current_folder_paths = {folder.id: path}
+        strategy_overrides = {}
+
+        _populate_file_list(snapshots)
+        pending = scanner.pending_count
+        if pending > 0:
+            win.set_status(f"扫描中：0/{pending} 个文件已探测...")
+
+            def on_probed(snap):
+                notifier.probed.emit(snap)
+
+            done_count = [0]
+            lock = threading.Lock()
+
+            def on_progress(snap):
+                with lock:
+                    done_count[0] += 1
+                    notifier.progress.emit(done_count[0], pending)
+
+            def on_finished():
+                notifier.all_done.emit()
+
+            def _probe_loop():
+                import time
+                while scanner.probe_next(on_probed):
+                    on_progress(None)
+                on_finished()
+
+            t = threading.Thread(target=_probe_loop, daemon=True)
+            t.start()
+        else:
+            win.set_status(f"扫描完成：{len(snapshots)} 个文件")
+
+    notifier.probed.connect(file_panel.update_snapshot_row)
+    notifier.progress.connect(
+        lambda done, total: win.set_status(f"扫描中：{done}/{total} 个文件已探测...")
+    )
+    notifier.all_done.connect(
+        lambda: win.set_status(f"扫描完成：{len(current_snapshots)} 个文件")
+    )
 
     def on_library_selected(lib_id):
         nonlocal current_snapshots, current_folder_paths, strategy_overrides
@@ -155,14 +198,8 @@ def main():
         current_folder_paths = folder_paths
         strategy_overrides = {}
         current_snapshots = snapshots
-        matched = {}
-        for s in snapshots:
-            strategy = matcher.match(s)
-            matched[s.relative_path] = {
-                "strategy": strategy,
-                "estimate": estimate_savings(s, strategy),
-            }
-        file_panel.populate(snapshots, matched, strategies)
+        _populate_file_list(snapshots)
+        win.set_status(f"已加载 {len(snapshots)} 个文件")
 
     def on_strategy_override_changed(relative_path, strategy_name):
         nonlocal active_custom_path
@@ -191,7 +228,7 @@ def main():
     def on_start_requested():
         default_strategy = strategy_panel.current_preset_strategy or strategy_panel.current_strategy
         if default_strategy is None:
-            win.status.showMessage("没有可用策略")
+            win.set_status("没有可用策略")
             return
         tasks = build_encode_tasks(
             current_snapshots,
@@ -200,18 +237,37 @@ def main():
             strategy_overrides,
         )
         if not tasks:
-            win.status.showMessage("没有可压缩文件")
+            win.set_status("没有可压缩文件")
             return
         queue_panel.task_list.clear()
         for task in tasks:
             queue_panel.add_task_row(task)
+
+        progress_lock = threading.Lock()
+        completed = [0]
+        total = len(tasks)
+
+        def _progress_callback(task):
+            # 由 WorkerManager 在编码线程中调用
+            pass
+
+        def _encoding_progress(task):
+            with progress_lock:
+                if task.status.value in ("completed", "failed", "skipped"):
+                    completed[0] += 1
+            notifier.progress.emit(completed[0], total)
+
         manager = WorkerManager(
-            FFmpegExecutor(temp_dir=strategy_panel.temp_dir),
+            FFmpegExecutor(temp_dir=strategy_panel.temp_dir, progress_callback=_progress_callback),
             strategy_panel.worker_count
         )
+        win.show_queue()
         manager.start(tasks)
         queue_panel.update_progress(manager.get_progress())
-        win.status.showMessage(f"压缩任务完成: {manager.completed_count}/{manager.total_tasks}")
+        win.set_status(
+            f"编码完成：成功 {manager.completed_count}/{manager.total_tasks}"
+            + (f"，失败 {manager.failed_count}" if manager.failed_count else "")
+        )
 
     def refresh_libraries():
         libs = lib_mgr.get_all_libraries()

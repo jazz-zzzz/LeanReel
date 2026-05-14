@@ -10,8 +10,16 @@ from PySide6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem
 )
 from PySide6.QtCore import Signal, Qt
+from PySide6.QtGui import QColor
 
 _HEADERS = ["文件名", "体积", "编码信息", "HDR", "匹配策略", "预计节省"]
+
+# ── 列配色 ──
+_COLOR_CODEC_OK = QColor("#8db87c")
+_COLOR_CODEC_MISSING = QColor("#6b6560")
+_COLOR_HDR_DV = QColor("#6ba8d6")
+_COLOR_HDR_HDR10 = QColor("#d4a853")
+_COLOR_HDR_SDR = QColor("#6b6560")
 
 
 class SortableTableWidgetItem(QTableWidgetItem):
@@ -164,8 +172,14 @@ class FileListPanel(QWidget):
                 row, 1,
                 SortableTableWidgetItem(_format_bytes(snap.size_bytes), snap.size_bytes),
             )
-            self.table.setItem(row, 2, QTableWidgetItem(self._format_codec(snap)))
-            self.table.setItem(row, 3, QTableWidgetItem(self._format_hdr(snap.hdr_type)))
+            codec_item = QTableWidgetItem(self._format_codec(snap))
+            codec_item.setForeground(
+                _COLOR_CODEC_OK if getattr(snap, "video_codec", "") else _COLOR_CODEC_MISSING
+            )
+            self.table.setItem(row, 2, codec_item)
+            hdr_item = QTableWidgetItem(self._format_hdr(snap.hdr_type))
+            hdr_item.setForeground(self._hdr_color(getattr(snap, "hdr_type", None)))
+            self.table.setItem(row, 3, hdr_item)
             strategy_name, savings_text, savings_sort = self._resolve_match_display(
                 snap, matched_strategies.get(snap.relative_path)
             )
@@ -188,6 +202,15 @@ class FileListPanel(QWidget):
 
     def _format_hdr(self, hdr_type: Any) -> str:
         return getattr(hdr_type, "value", str(hdr_type))
+
+    @staticmethod
+    def _hdr_color(hdr_type) -> QColor:
+        val = getattr(hdr_type, "value", str(hdr_type))
+        if "DV" in val or "Dolby" in val:
+            return _COLOR_HDR_DV
+        if "HDR" in val:
+            return _COLOR_HDR_HDR10
+        return _COLOR_HDR_SDR
 
     @staticmethod
     def _format_codec(snap: Any) -> str:
@@ -317,6 +340,24 @@ class FileListPanel(QWidget):
             item = self.table.item(row, 4)
             if item:
                 item.setText(strategy_name)
+
+    def update_snapshot_row(self, snap: Any):
+        """后台探测完成后增量更新单行编码信息。"""
+        relative_path = str(getattr(snap, "relative_path", ""))
+        if not relative_path:
+            return
+
+        self._snapshots_by_path[relative_path] = snap
+        row = self._find_row_by_relative_path(relative_path)
+        if row is not None:
+            codec_item = QTableWidgetItem(self._format_codec(snap))
+            codec_item.setForeground(
+                _COLOR_CODEC_OK if getattr(snap, "video_codec", "") else _COLOR_CODEC_MISSING
+            )
+            self.table.setItem(row, 2, codec_item)
+            hdr_item = QTableWidgetItem(self._format_hdr(snap.hdr_type))
+            hdr_item.setForeground(self._hdr_color(getattr(snap, "hdr_type", None)))
+            self.table.setItem(row, 3, hdr_item)
 
     def _find_row_by_relative_path(self, relative_path: str) -> int | None:
         for row in range(self.table.rowCount()):

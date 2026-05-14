@@ -1,7 +1,7 @@
-"""LeanReel 主窗口"""
+"""LeanReel 主窗口 — TMM 风格布局"""
 from PySide6.QtWidgets import (
     QMainWindow, QMenuBar, QStatusBar, QHBoxLayout, QWidget,
-    QSplitter, QDockWidget
+    QSplitter, QDockWidget, QLabel
 )
 from PySide6.QtCore import Qt
 
@@ -10,35 +10,36 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("LeanReel")
-        self.resize(1280, 800)
+        self.resize(1400, 900)
+        self.setMinimumSize(900, 600)
         self._setup_central()
         self._setup_menu()
         self._setup_status()
-        self._setup_queue()
+        self._setup_docks()
 
     def _setup_central(self):
-        """中心区域：水平分割器 放置 库面板 | 文件列表 | 策略面板"""
         self.central = QWidget()
         self.setCentralWidget(self.central)
         self.layout = QHBoxLayout(self.central)
-        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setContentsMargins(4, 4, 4, 4)
+        self.layout.setSpacing(0)
 
         self.splitter = QSplitter(Qt.Horizontal)
-        # 占位 — 子面板将在后续任务中填入
+        self.splitter.setHandleWidth(3)
+
         self.library_panel = QWidget()
         self.file_list_panel = QWidget()
-        self.strategy_panel = QWidget()
+        self.strategy_placeholder = QWidget()
 
         self.splitter.addWidget(self.library_panel)
         self.splitter.addWidget(self.file_list_panel)
-        self.splitter.addWidget(self.strategy_panel)
-        self.splitter.setSizes([180, 700, 220])
+        self.splitter.addWidget(self.strategy_placeholder)
+        self.splitter.setSizes([220, 700, 240])
 
         self.layout.addWidget(self.splitter)
 
     def _setup_menu(self):
         menu = self.menuBar()
-
         file_menu = menu.addMenu("文件(&F)")
         file_menu.addAction("新建库...")
         file_menu.addAction("打开库目录...")
@@ -47,7 +48,7 @@ class MainWindow(QMainWindow):
 
         tools_menu = menu.addMenu("工具(&T)")
         tools_menu.addAction("扫描所有库")
-        tools_menu.addAction("队列面板")
+        tools_menu.addAction("显示/隐藏队列")
 
         help_menu = menu.addMenu("帮助(&H)")
         help_menu.addAction("关于 LeanReel")
@@ -55,19 +56,25 @@ class MainWindow(QMainWindow):
     def _setup_status(self):
         self.status = QStatusBar()
         self.setStatusBar(self.status)
-        self.status.showMessage("就绪")
+        self.status_label = QLabel("就绪")
+        self.status.addWidget(self.status_label, 1)
+
+    def set_status(self, text: str):
+        self.status_label.setText(text)
 
     def set_library_panel(self, widget: QWidget):
         self.splitter.replaceWidget(0, widget)
+        widget.setVisible(True)
 
     def set_file_list_panel(self, widget: QWidget):
         self.splitter.replaceWidget(1, widget)
+        widget.setVisible(True)
 
-    def set_strategy_panel(self, widget: QWidget):
+    def set_strategy_widget(self, widget: QWidget):
         self.splitter.replaceWidget(2, widget)
+        widget.setVisible(True)
 
-    def _setup_queue(self):
-        """底部可折叠队列面板"""
+    def _setup_docks(self):
         self.queue_dock = QDockWidget("任务队列", self)
         self.queue_dock.setAllowedAreas(Qt.BottomDockWidgetArea)
         self.queue_panel = QWidget()
@@ -77,3 +84,10 @@ class MainWindow(QMainWindow):
 
     def set_queue_panel(self, widget: QWidget):
         self.queue_dock.setWidget(widget)
+
+    def show_queue(self):
+        self.queue_dock.show()
+        self.queue_dock.raise_()
+
+    def hide_queue(self):
+        self.queue_dock.hide()

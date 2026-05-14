@@ -58,6 +58,8 @@ class FileSnapshot:
     subtitle_tracks: list[SubtitleTrack] = field(default_factory=list)
     duration_seconds: float = 0.0
     bitrate_bps: int = 0
+    file_mtime: float = 0.0
+    probe_ok: bool = False
     scanned_at: str = ""
 
 

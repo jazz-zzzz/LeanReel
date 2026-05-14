@@ -1,61 +1,90 @@
-"""策略面板 — 预设选择 + 并行设置 + 输出设置"""
+"""策略面板 — 卡片式预设选择 + 并行/输出设置，TMM 风格"""
 from pathlib import Path
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QComboBox, QLabel, QSpinBox,
     QCheckBox, QPushButton, QGroupBox, QFormLayout,
-    QLineEdit, QFileDialog, QHBoxLayout, QToolButton
+    QLineEdit, QFileDialog, QHBoxLayout, QToolButton,
+    QButtonGroup, QScrollArea
 )
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, Qt
 
 from leanreel.core.strategy import Strategy
 
 _CPU_ENCODERS = ["libx265", "libx264"]
 _GPU_ENCODERS = ["hevc_nvenc", "h264_nvenc"]
 _ALL_ENCODERS = [*_CPU_ENCODERS, *_GPU_ENCODERS, "copy"]
-
 _CPU_PRESETS = ["medium", "slow", "slower", "fast"]
 _NV_PRESETS = ["p1", "p2", "p3", "p4", "p5", "p6", "p7"]
+
+_CARD_STYLE = """
+QPushButton {{
+    background-color: #1c1a16;
+    border: 2px solid #2e2b25;
+    border-radius: 8px;
+    padding: 10px 14px;
+    text-align: left;
+    min-height: 56px;
+}}
+QPushButton:hover {{
+    border-color: #5c4a2e;
+    background-color: #24221d;
+}}
+QPushButton:checked {{
+    border-color: #c8963e;
+    background-color: #2a2215;
+}}
+"""
 
 
 class StrategyPanel(QWidget):
     start_requested = Signal()
-    strategy_changed = Signal(int)  # strategy index
+    strategy_changed = Signal(int)
     custom_strategy_changed = Signal(object)
 
     def __init__(self):
         super().__init__()
         self._strategies = []
         self._temp_dir = str(Path.home() / "Temp" / "LeanReel")
+        self._active_preset_index = 0
         self.setup_ui()
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(6)
 
-        # 策略组
-        strat_group = QGroupBox("压缩策略")
-        strat_layout = QVBoxLayout(strat_group)
-        self.strategy_combo = QComboBox()
-        self.strategy_combo.currentIndexChanged.connect(
-            lambda i: self.strategy_changed.emit(i)
-        )
-        self.strategy_desc = QLabel("选择策略查看详情")
-        self.strategy_desc.setWordWrap(True)
-        self.strategy_desc.setStyleSheet("color: #888; font-size: 11px;")
-        strat_layout.addWidget(self.strategy_combo)
-        strat_layout.addWidget(self.strategy_desc)
-        layout.addWidget(strat_group)
+        # ── 预设卡片 ──
+        presets_label = QLabel("压缩策略")
+        presets_label.setStyleSheet("font-weight: bold; color: #8a857c; font-size: 11px; padding: 2px 4px;")
+        layout.addWidget(presets_label)
 
+        self.card_area = QScrollArea()
+        self.card_area.setWidgetResizable(True)
+        self.card_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.card_area.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        self.card_container = QWidget()
+        self.card_layout = QVBoxLayout(self.card_container)
+        self.card_layout.setContentsMargins(0, 0, 0, 0)
+        self.card_layout.setSpacing(4)
+        self.card_layout.addStretch()
+        self.card_area.setWidget(self.card_container)
+        layout.addWidget(self.card_area)
+
+        self.card_group = QButtonGroup(self)
+        self.card_group.setExclusive(True)
+
+        # ── 自定义区域 ──
         self.custom_group = QGroupBox("自定义参数")
+        self.custom_group.setStyleSheet("QGroupBox { padding-top: 18px; margin-top: 8px; }")
         custom_layout = QFormLayout(self.custom_group)
+        custom_layout.setContentsMargins(8, 4, 8, 4)
+        custom_layout.setVerticalSpacing(6)
 
-        # 编码器
         self.custom_encoder_combo = QComboBox()
         self.custom_encoder_combo.addItems(_ALL_ENCODERS)
         self.custom_encoder_combo.currentIndexChanged.connect(self._on_encoder_changed)
 
-        # CPU 参数
         self.custom_crf_spin = QSpinBox()
         self.custom_crf_spin.setRange(0, 35)
         self.custom_crf_spin.setValue(20)
@@ -66,7 +95,6 @@ class StrategyPanel(QWidget):
         self.custom_preset_combo.setCurrentText("slow")
         self.preset_label = QLabel("预设")
 
-        # GPU 参数
         self.custom_cq_spin = QSpinBox()
         self.custom_cq_spin.setRange(0, 51)
         self.custom_cq_spin.setValue(23)
@@ -81,12 +109,11 @@ class StrategyPanel(QWidget):
         self.nvpreset_label = QLabel("NV 预设")
         self.nvpreset_label.hide()
 
-        # 音轨 / 字幕
         self.custom_audio_combo = QComboBox()
         self.custom_audio_combo.addItems(["keep_original", "strip_commentary"])
         self.custom_subtitle_combo = QComboBox()
         self.custom_subtitle_combo.addItems(["keep_chinese", "keep_chinese_english", "keep_all", "remove_all"])
-        self.custom_savings_label = QLabel("预计节省: 35-50%")
+        self.custom_savings_label = QLabel("预计节省：35-50%")
 
         custom_layout.addRow("编码器", self.custom_encoder_combo)
         custom_layout.addRow(self.crf_label, self.custom_crf_spin)
@@ -99,7 +126,6 @@ class StrategyPanel(QWidget):
         self.custom_group.hide()
         layout.addWidget(self.custom_group)
 
-        # 信号连接
         for widget in (
             self.custom_encoder_combo,
             self.custom_crf_spin, self.custom_cq_spin,
@@ -111,9 +137,10 @@ class StrategyPanel(QWidget):
             else:
                 widget.valueChanged.connect(self._emit_custom_strategy)
 
-        # 并行组
+        # ── 并行 ──
         parallel_group = QGroupBox("并行设置")
         parallel_layout = QFormLayout(parallel_group)
+        parallel_layout.setContentsMargins(8, 4, 8, 4)
         self.workers_spin = QSpinBox()
         self.workers_spin.setRange(1, 16)
         self.workers_spin.setValue(4)
@@ -121,19 +148,19 @@ class StrategyPanel(QWidget):
         parallel_layout.addRow("同时编码", self.workers_spin)
         layout.addWidget(parallel_group)
 
-        # 输出组
+        # ── 输出 ──
         output_group = QGroupBox("输出设置")
         output_layout = QVBoxLayout(output_group)
+        output_layout.setContentsMargins(8, 4, 8, 4)
+        output_layout.setSpacing(4)
 
-        # 输出模式
         self.output_mode = QComboBox()
         self.output_mode.addItems(["移至备份目录", "仅输出新文件", "直接替换"])
         output_layout.addWidget(self.output_mode)
 
-        # 临时目录 (I/O 分离)
         temp_layout = QHBoxLayout()
         self.temp_dir_edit = QLineEdit(self._temp_dir)
-        self.temp_dir_edit.setPlaceholderText("编码临时目录（用于 I/O 分离加速）")
+        self.temp_dir_edit.setPlaceholderText("编码临时目录")
         self.browse_btn = QToolButton()
         self.browse_btn.setText("...")
         self.browse_btn.clicked.connect(self._browse_temp_dir)
@@ -145,16 +172,91 @@ class StrategyPanel(QWidget):
         output_layout.addWidget(self.auto_delete_cb)
         layout.addWidget(output_group)
 
-        # 开始按钮
-        self.start_btn = QPushButton("▶ 开始压缩")
-        self.start_btn.setStyleSheet(
-            "QPushButton { background-color: #059669; color: white; "
-            "padding: 8px; border-radius: 4px; font-weight: bold; }"
-            "QPushButton:hover { background-color: #047857; }"
-        )
+        # ── 开始 ──
+        self.start_btn = QPushButton("开始压缩")
+        self.start_btn.setProperty("class", "accent")
+        self.start_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #c8963e; color: #12100e;
+                border: none; border-radius: 6px;
+                padding: 12px 24px; font-weight: bold; font-size: 15px;
+            }
+            QPushButton:hover { background-color: #d9a84c; }
+            QPushButton:pressed { background-color: #b88730; }
+        """)
         self.start_btn.clicked.connect(self.start_requested.emit)
         layout.addWidget(self.start_btn)
-        layout.addStretch()
+
+    def _make_card(self, s: Strategy, index: int) -> QPushButton:
+        tag = "GPU" if s.video.is_gpu else ("CPU" if s.video.encoder.startswith("lib") else "COPY")
+        tag_color = "#c8963e" if s.video.is_gpu else ("#5b8db8" if s.video.encoder.startswith("lib") else "#6b6560")
+        savings = getattr(s, "estimated_savings", "") or ""
+        desc = getattr(s, "description", "") or ""
+        if len(desc) > 52:
+            desc = desc[:50] + "..."
+
+        text = (
+            f"<span style='font-size:13px;font-weight:bold;color:#e8e3db;'>{s.name}</span>"
+            f"&nbsp;<span style='font-size:10px;color:{tag_color};background:#24221d;border-radius:3px;padding:1px 5px;'>{tag}</span>"
+        )
+        if savings:
+            text += f"<br><span style='font-size:11px;color:#8a857c;'>节省 {savings}</span>"
+        if desc:
+            text += f"<span style='font-size:11px;color:#6b6560;'> · {desc}</span>"
+
+        btn = QPushButton("")
+        btn.setText(text)  # Rich text doesn't work in QPushButton text in all styles
+        # Use plain text instead
+        plain = f"{s.name}  [{tag}]  节省{savings}"
+        if desc:
+            plain += f"\n{desc}"
+        btn.setText(plain)
+        btn.setCheckable(True)
+        btn.setStyleSheet(_CARD_STYLE)
+        btn.clicked.connect(lambda checked=False, i=index: self._on_card_clicked(i))
+        return btn
+
+    def set_strategies(self, strategies: list):
+        self._strategies = strategies
+        for btn in self.card_group.buttons():
+            self.card_group.removeButton(btn)
+
+        while self.card_layout.count() > 1:
+            item = self.card_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        for i, s in enumerate(strategies):
+            card = self._make_card(s, i)
+            self.card_group.addButton(card, i)
+            self.card_layout.insertWidget(self.card_layout.count() - 1, card)
+
+        if strategies:
+            self.card_group.buttons()[0].setChecked(True)
+            self._active_preset_index = 0
+
+        self.custom_group.hide()
+        self._update_card_heights()
+
+    def _update_card_heights(self):
+        h = max(1, self.height() - 380)
+        self.card_area.setMaximumHeight(h)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_card_heights()
+
+    def _on_card_clicked(self, index: int):
+        self._active_preset_index = index
+        self.custom_group.hide()
+        self.strategy_changed.emit(index)
+
+    def show_custom_strategy(self):
+        self.custom_group.show()
+        self._emit_custom_strategy()
+
+    def show_preset_strategy(self):
+        self.custom_group.hide()
 
     def _on_encoder_changed(self):
         encoder = self.custom_encoder_combo.currentText()
@@ -179,33 +281,9 @@ class StrategyPanel(QWidget):
             self.temp_dir_edit.setText(d)
             self._temp_dir = d
 
-    def set_strategies(self, strategies: list):
-        self._strategies = strategies
-        self.strategy_combo.clear()
-        for s in strategies:
-            self.strategy_combo.addItem(f"{s.name} ⭐" if s.is_preset else s.name)
-        if strategies:
-            self._update_desc(strategies[0])
-
-    def _update_desc(self, s):
-        self.strategy_desc.setText(
-            f"{s.description}\n预计节省: {s.estimated_savings}\n{s.quality_impact}"
-        )
-
-    def show_custom_strategy(self):
-        self.custom_group.show()
-        self.strategy_desc.setText("正在编辑自定义策略，参数变化会实时刷新列表中的预计节省。")
-        self._emit_custom_strategy()
-
-    def show_preset_strategy(self):
-        self.custom_group.hide()
-        strategy = self.current_strategy
-        if strategy is not None:
-            self._update_desc(strategy)
-
     def _emit_custom_strategy(self):
         strategy = self.custom_strategy
-        self.custom_savings_label.setText(f"预计节省: {strategy.estimated_savings}")
+        self.custom_savings_label.setText(f"预计节省：{strategy.estimated_savings}")
         self.custom_strategy_changed.emit(strategy)
 
     @property
@@ -216,18 +294,18 @@ class StrategyPanel(QWidget):
         if encoder == "copy":
             savings = "5-15%"
         elif is_gpu:
-            cq = self.custom_cq_spin.value()
-            if cq <= 20:
+            cq_val = self.custom_cq_spin.value()
+            if cq_val <= 20:
                 savings = "20-35%"
-            elif cq <= 23:
+            elif cq_val <= 23:
                 savings = "35-50%"
             else:
                 savings = "50-70%"
         else:
-            crf = self.custom_crf_spin.value()
-            if crf <= 18:
+            crf_val = self.custom_crf_spin.value()
+            if crf_val <= 18:
                 savings = "20-35%"
-            elif crf <= 20:
+            elif crf_val <= 20:
                 savings = "35-50%"
             else:
                 savings = "50-70%"
@@ -252,7 +330,7 @@ class StrategyPanel(QWidget):
             "subtitle": {"mode": self.custom_subtitle_combo.currentText()},
             "filters": {"skip_x265": False},
             "estimated_savings": savings,
-            "quality_impact": "自定义参数，节省空间为粗略估算",
+            "quality_impact": "自定义参数",
         })
 
     @property
@@ -271,7 +349,7 @@ class StrategyPanel(QWidget):
 
     @property
     def current_preset_strategy(self):
-        idx = self.strategy_combo.currentIndex()
+        idx = self._active_preset_index
         if 0 <= idx < len(self._strategies):
             return self._strategies[idx]
         return None
