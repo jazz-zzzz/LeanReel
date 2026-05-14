@@ -205,7 +205,10 @@ def main():
         queue_panel.task_list.clear()
         for task in tasks:
             queue_panel.add_task_row(task)
-        manager = WorkerManager(FFmpegExecutor(), strategy_panel.worker_count)
+        manager = WorkerManager(
+            FFmpegExecutor(temp_dir=strategy_panel.temp_dir),
+            strategy_panel.worker_count
+        )
         manager.start(tasks)
         queue_panel.update_progress(manager.get_progress())
         win.status.showMessage(f"压缩任务完成: {manager.completed_count}/{manager.total_tasks}")

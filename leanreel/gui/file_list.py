@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal, Qt
 
-_HEADERS = ["文件名", "体积", "视频编码", "HDR", "匹配策略", "预计节省"]
+_HEADERS = ["文件名", "体积", "编码信息", "HDR", "匹配策略", "预计节省"]
 
 
 class SortableTableWidgetItem(QTableWidgetItem):
@@ -124,7 +124,7 @@ class FileListPanel(QWidget):
             header.setSectionResizeMode(i, QHeaderView.Interactive)
         self.table.setColumnWidth(0, 300)
         self.table.setColumnWidth(1, 100)
-        self.table.setColumnWidth(2, 110)
+        self.table.setColumnWidth(2, 170)
         self.table.setColumnWidth(3, 90)
         self.table.setColumnWidth(4, 170)
         self.table.setColumnWidth(5, 180)
@@ -164,18 +164,19 @@ class FileListPanel(QWidget):
                 row, 1,
                 SortableTableWidgetItem(_format_bytes(snap.size_bytes), snap.size_bytes),
             )
-            self.table.setItem(row, 2, QTableWidgetItem(self._format_codec(snap.video_codec)))
+            self.table.setItem(row, 2, QTableWidgetItem(self._format_codec(snap)))
             self.table.setItem(row, 3, QTableWidgetItem(self._format_hdr(snap.hdr_type)))
             strategy_name, savings_text, savings_sort = self._resolve_match_display(
                 snap, matched_strategies.get(snap.relative_path)
             )
-            self.table.setItem(row, 4, QTableWidgetItem(strategy_name))
             self.table.setItem(row, 5, SortableTableWidgetItem(savings_text, savings_sort))
             if strategies:
                 self.table.setCellWidget(
                     row, 4,
                     self._create_strategy_combo(snap.relative_path, strategy_name),
                 )
+            else:
+                self.table.setItem(row, 4, QTableWidgetItem(strategy_name))
             total_size += snap.size_bytes
 
         total_tb = total_size / (1024**4)
@@ -188,8 +189,30 @@ class FileListPanel(QWidget):
     def _format_hdr(self, hdr_type: Any) -> str:
         return getattr(hdr_type, "value", str(hdr_type))
 
-    def _format_codec(self, codec: str) -> str:
-        return codec or "未识别"
+    @staticmethod
+    def _format_codec(snap: Any) -> str:
+        codec = getattr(snap, "video_codec", "") or ""
+        if not codec:
+            return "未识别"
+        parts = [codec]
+        w = getattr(snap, "video_width", 0) or 0
+        h = getattr(snap, "video_height", 0) or 0
+        if h >= 4320:
+            parts.append("8K")
+        elif h >= 2160:
+            parts.append("4K")
+        elif h >= 1440:
+            parts.append("2K") if w >= 2560 else parts.append(f"{h}p")
+        elif h >= 1080:
+            parts.append("1080p")
+        elif h >= 720:
+            parts.append("720p")
+        elif h > 0:
+            parts.append(f"{h}p")
+        br = getattr(snap, "bitrate_bps", 0) or 0
+        if br > 0:
+            parts.append(f"{br / 1e6:.1f} Mbps")
+        return " ".join(parts)
 
     def _build_strategy_lookup(self, strategies: list | None) -> dict[str, Any]:
         lookup: dict[str, Any] = {}
@@ -246,21 +269,20 @@ class FileListPanel(QWidget):
             child = QTreeWidgetItem([
                 snap.file_name,
                 _format_bytes(snap.size_bytes),
-                self._format_codec(snap.video_codec),
+                self._format_codec(snap),
                 self._format_hdr(snap.hdr_type),
                 strategy_name,
                 savings_text,
             ])
             child.setData(0, Qt.UserRole, snap.relative_path)
             folder_item.addChild(child)
-        self.tree.expandAll()
+        # 默认折叠，用户按需展开目录
 
     def _on_strategy_combo_changed(self, relative_path: str, strategy_name: str):
         row = self._find_row_by_relative_path(relative_path)
         if row is None:
             return
 
-        self.table.item(row, 4).setText(strategy_name)
         snap = self._snapshots_by_path.get(relative_path)
         if snap is not None and strategy_name != "自定义":
             _, savings_text, savings_sort = self._resolve_match_display(
@@ -282,7 +304,6 @@ class FileListPanel(QWidget):
             return
 
         strategy_name, savings_text, savings_sort = self._resolve_match_display(snap, strategy)
-        self.table.item(row, 4).setText(strategy_name)
         self.table.setItem(row, 5, SortableTableWidgetItem(savings_text, savings_sort))
         combo = self.table.cellWidget(row, 4)
         if isinstance(combo, QComboBox):
@@ -292,6 +313,10 @@ class FileListPanel(QWidget):
                 combo.blockSignals(True)
                 combo.setCurrentText(strategy_name)
                 combo.blockSignals(False)
+        else:
+            item = self.table.item(row, 4)
+            if item:
+                item.setText(strategy_name)
 
     def _find_row_by_relative_path(self, relative_path: str) -> int | None:
         for row in range(self.table.rowCount()):

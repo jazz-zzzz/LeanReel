@@ -220,7 +220,7 @@ def test_file_list_allows_per_row_strategy_override_and_updates_savings():
     combo.setCurrentText("轻量压缩")
 
     assert changes == [("movie.mkv", "轻量压缩")]
-    assert panel.table.item(0, 4).text() == "轻量压缩"
+    assert combo.currentText() == "轻量压缩"
     assert "1.0-1.0 GB" in panel.table.item(0, 5).text()
     assert "10%" in panel.table.item(0, 5).text()
     panel.close()
@@ -246,7 +246,7 @@ def test_file_list_custom_strategy_option_emits_request_signal():
     combo.setCurrentText("自定义")
 
     assert requests == ["movie.mkv"]
-    assert panel.table.item(0, 4).text() == "自定义"
+    assert combo.currentText() == "自定义"
     panel.close()
 
 
