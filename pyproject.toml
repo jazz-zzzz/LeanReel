@@ -11,5 +11,9 @@ leanreel = "leanreel.main:main"
 [project.optional-dependencies]
 dev = ["pytest>=8.0.0", "pytest-qt>=4.0.0"]
 
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
