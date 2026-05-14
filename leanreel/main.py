@@ -19,14 +19,16 @@ from leanreel.gui.strategy_panel import StrategyPanel
 from leanreel.gui.queue_panel import QueuePanel
 from leanreel.gui.theme import apply_theme
 from leanreel.executor.ffmpeg import FFmpegExecutor
-from leanreel.executor.worker import EncodeTask, WorkerManager
+from leanreel.executor.worker import EncodeTask, WorkerManager, TaskStatus
 
 
 class ProbeNotifier(QObject):
-    """线程安全的探测完成通知器"""
+    """线程安全的通知器"""
     probed = Signal(object)
     all_done = Signal()
     progress = Signal(int, int)  # done, total
+    task_updated = Signal(object)  # EncodeTask
+    encoding_done = Signal()
 
 
 def get_data_dir() -> Path:
@@ -107,6 +109,7 @@ def main():
     current_folder_paths: dict[int, str] = {}
     strategy_overrides: dict[str, object] = {}
     active_custom_path: str | None = None
+    active_manager: WorkerManager | None = None
 
     notifier = ProbeNotifier()
 
@@ -250,17 +253,20 @@ def main():
             for task in tasks:
                 queue_panel.add_task_row(task)
 
-            manager = WorkerManager(
-                FFmpegExecutor(temp_dir=strategy_panel.temp_dir),
-                strategy_panel.worker_count
-            )
             win.show_queue()
-            manager.start(tasks)
-            queue_panel.update_progress(manager.get_progress())
-            win.set_status(
-                f"编码完成：成功 {manager.completed_count}/{manager.total_tasks}"
-                + (f"，失败 {manager.failed_count}" if manager.failed_count else "")
+            nonlocal active_manager
+            active_manager = WorkerManager(
+                FFmpegExecutor(temp_dir=strategy_panel.temp_dir),
+                strategy_panel.worker_count,
+                progress_callback=lambda t: notifier.task_updated.emit(t),
             )
+
+            def _run_encode():
+                active_manager.start(tasks)
+                notifier.encoding_done.emit()
+
+            t = threading.Thread(target=_run_encode, daemon=True)
+            t.start()
         except Exception as e:
             win.set_status(f"错误：{e}")
 
@@ -283,6 +289,25 @@ def main():
     win.set_toggle_queue_action(lambda: win.show_queue() if win.queue_dock.isHidden() else win.hide_queue())
     queue_panel.pause_requested.connect(lambda: win.set_status("暂停功能开发中"))
     queue_panel.cancel_requested.connect(lambda idx: win.set_status(f"任务 {idx} 已取消"))
+
+    def _on_task_updated(task):
+        queue_panel.update_task_row(task)
+        if active_manager is None:
+            return
+        done = sum(1 for t in active_manager._tasks if t.status.value in ("completed", "failed", "skipped"))
+        total = len(active_manager._tasks)
+        queue_panel.update_progress({"completed": done, "failed": 0, "skipped": 0, "total": total, "percentage": done / total * 100 if total else 0})
+        win.set_status(f"编码中：{done}/{total}")
+
+    def _on_encoding_done():
+        if active_manager is None:
+            return
+        done = sum(1 for t in active_manager._tasks if t.status == TaskStatus.COMPLETED)
+        failed = sum(1 for t in active_manager._tasks if t.status == TaskStatus.FAILED)
+        win.set_status(f"编码完成：成功 {done}/{len(active_manager._tasks)}" + (f"，失败 {failed}" if failed else ""))
+
+    notifier.task_updated.connect(_on_task_updated)
+    notifier.encoding_done.connect(_on_encoding_done)
 
     refresh_libraries()
     win.show()

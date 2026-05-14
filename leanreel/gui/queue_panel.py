@@ -137,3 +137,19 @@ class QueuePanel(QWidget):
 
     def clear_tasks(self):
         self.clear_completed()
+        self.total_progress.setValue(0)
+        self.total_label.setText("就绪")
+
+    def update_task_row(self, task):
+        """更新已存在的任务行（根据 file_name 匹配）"""
+        for i in range(self.task_layout.count()):
+            item = self.task_layout.itemAt(i)
+            if item and item.widget():
+                row = item.widget()
+                # 找到匹配的行，用新的替换
+                labels = row.findChildren(QLabel)
+                if labels and labels[1].text() == task.file_name:
+                    self.task_layout.removeWidget(row)
+                    row.deleteLater()
+                    break
+        self.add_task_row(task)
