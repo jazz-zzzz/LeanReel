@@ -1,0 +1,12 @@
+{
+  "name": "仅去冗余",
+  "description": "不重编码视频和音频。仅删除多余音轨（评论轨、非偏好语言轨）和字幕。零画质损失。",
+  "is_preset": true,
+  "video": {"encoder": "copy", "crf": 0, "preset": "", "pix_fmt": ""},
+  "hdr": {"mode": "pass_through", "dv_handling": "pass_through"},
+  "audio": {"mode": "keep_original", "remove_commentary": true, "preferred_languages": ["chi", "zho", "eng"]},
+  "subtitle": {"mode": "keep_chinese"},
+  "filters": {},
+  "estimated_savings": "5-15%",
+  "quality_impact": "完全无损，仅删除未使用的音轨和字幕"
+}

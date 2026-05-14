@@ -1,0 +1,12 @@
+{
+  "name": "轻量压缩",
+  "description": "仅处理REMUX源文件，使用最保守的CRF值。保留所有音轨和字幕。",
+  "is_preset": true,
+  "video": {"encoder": "libx265", "crf": 18, "preset": "slow", "pix_fmt": "yuv420p10le"},
+  "hdr": {"mode": "preserve_hdr10", "dv_handling": "reinject_rpu"},
+  "audio": {"mode": "keep_original", "remove_commentary": false},
+  "subtitle": {"mode": "keep_all"},
+  "filters": {"skip_x265": true, "min_size_gb": null, "only_remux": true},
+  "estimated_savings": "20-35%",
+  "quality_impact": "极高画质，HDR/DV完整保留，仅REMUX转码"
+}
