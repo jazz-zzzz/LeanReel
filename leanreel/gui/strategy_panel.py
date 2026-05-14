@@ -155,22 +155,16 @@ class StrategyPanel(QWidget):
         output_layout.setContentsMargins(8, 4, 8, 4)
         output_layout.setSpacing(4)
 
-        self.output_mode = QComboBox()
-        self.output_mode.addItems(["移至备份目录", "仅输出新文件", "直接替换"])
-        output_layout.addWidget(self.output_mode)
-
         temp_layout = QHBoxLayout()
         self.temp_dir_edit = QLineEdit(self._temp_dir)
-        self.temp_dir_edit.setPlaceholderText("编码临时目录")
+        self.temp_dir_edit.setPlaceholderText("编码临时目录（本地 SSD 路径）")
         self.browse_btn = QToolButton()
         self.browse_btn.setText("...")
         self.browse_btn.clicked.connect(self._browse_temp_dir)
         temp_layout.addWidget(self.temp_dir_edit)
         temp_layout.addWidget(self.browse_btn)
         output_layout.addLayout(temp_layout)
-
-        self.auto_delete_cb = QCheckBox("确认后自动删除原文件")
-        output_layout.addWidget(self.auto_delete_cb)
+        output_layout.addWidget(QLabel("临时目录用于 I/O 分离加速"))
         layout.addWidget(output_group)
 
         # ── 开始 ──

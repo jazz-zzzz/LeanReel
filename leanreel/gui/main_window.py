@@ -41,17 +41,24 @@ class MainWindow(QMainWindow):
     def _setup_menu(self):
         menu = self.menuBar()
         file_menu = menu.addMenu("文件(&F)")
-        file_menu.addAction("新建库...")
-        file_menu.addAction("打开库目录...")
-        file_menu.addSeparator()
         file_menu.addAction("退出(&X)", self.close)
 
-        tools_menu = menu.addMenu("工具(&T)")
-        tools_menu.addAction("扫描所有库")
-        tools_menu.addAction("显示/隐藏队列")
+        view_menu = menu.addMenu("视图(&V)")
+        self._toggle_queue_action = view_menu.addAction("显示/隐藏队列")
 
         help_menu = menu.addMenu("帮助(&H)")
-        help_menu.addAction("关于 LeanReel")
+        help_menu.addAction("关于 LeanReel", self._show_about)
+
+    def _show_about(self):
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.about(self, "关于 LeanReel",
+            "LeanReel — 视频压缩管理工具\n\n"
+            "GPU 加速 HEVC 编码，完整无损流保留。\n"
+            "I/O 分离加速，支持 SMB/NAS 片库。"
+        )
+
+    def set_toggle_queue_action(self, callback):
+        self._toggle_queue_action.triggered.connect(callback)
 
     def _setup_status(self):
         self.status = QStatusBar()

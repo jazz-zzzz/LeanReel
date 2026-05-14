@@ -199,37 +199,13 @@ def main():
         folder_paths: dict[int, str] = {}
         for folder in folders:
             folder_paths[folder.id] = folder.path
-            snapshots.extend(scanner.scan_folder_fast(folder.id, folder.path))
+            # 直接从数据库加载缓存，不走文件系统（毫秒级）
+            snapshots.extend(scanner.load_cached(folder.id, folder.path))
         current_folder_paths = folder_paths
         strategy_overrides = {}
         current_snapshots = snapshots
         _populate_file_list(snapshots)
-
-        pending = scanner.pending_count
-        if pending > 0:
-            win.set_status(f"加载 {len(snapshots)} 个文件，正在补充编码信息...")
-
-            def on_probed(snap):
-                notifier.probed.emit(snap)
-
-            done_count = [0]
-            lock = threading.Lock()
-
-            def on_progress(_snap):
-                with lock:
-                    done_count[0] += 1
-                    notifier.progress.emit(done_count[0], pending)
-
-            def _probe_loop():
-                import time
-                while scanner.probe_next(on_probed):
-                    on_progress(None)
-                notifier.all_done.emit()
-
-            t = threading.Thread(target=_probe_loop, daemon=True)
-            t.start()
-        else:
-            win.set_status(f"已加载 {len(snapshots)} 个文件")
+        win.set_status(f"已加载 {len(snapshots)} 个文件")
 
     def on_strategy_override_changed(relative_path, strategy_name):
         nonlocal active_custom_path
@@ -315,6 +291,9 @@ def main():
     file_panel.custom_strategy_requested.connect(on_custom_strategy_requested)
     strategy_panel.custom_strategy_changed.connect(on_custom_strategy_changed)
     strategy_panel.start_requested.connect(on_start_requested)
+    win.set_toggle_queue_action(lambda: win.show_queue() if win.queue_dock.isHidden() else win.hide_queue())
+    queue_panel.pause_requested.connect(lambda: win.set_status("暂停功能开发中"))
+    queue_panel.cancel_requested.connect(lambda idx: win.set_status(f"任务 {idx} 已取消"))
 
     refresh_libraries()
     win.show()

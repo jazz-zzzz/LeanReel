@@ -28,6 +28,14 @@ class Scanner:
             self._probe = FFprobeRunner()
         return self._probe
 
+    def load_cached(self, library_folder_id: int, folder_path: str) -> list[FileSnapshot]:
+        """从数据库加载已缓存的快照列表，不走文件系统。毫秒级。"""
+        rows = self.db.execute(
+            "SELECT * FROM file_snapshot WHERE library_folder_id=? ORDER BY relative_path",
+            [library_folder_id]
+        )
+        return [self._row_to_snapshot(r) for r in rows]
+
     def scan_folder(self, library_folder_id: int, folder_path: str) -> list[FileSnapshot]:
         """同步扫描（向后兼容）：并行探测所有未缓存文件，返回最终结果。"""
         from concurrent.futures import ThreadPoolExecutor
@@ -38,11 +46,11 @@ class Scanner:
         probe_jobs = []
 
         for rel_path, abs_path in found_files:
-            file_size = os.path.getsize(abs_path)
             try:
-                file_mtime = os.path.getmtime(abs_path)
+                st = os.stat(abs_path)
+                file_size, file_mtime = st.st_size, st.st_mtime
             except OSError:
-                file_mtime = 0.0
+                file_size, file_mtime = 0, 0.0
 
             existing = self._get_cached_snapshot(library_folder_id, rel_path)
             if existing and existing.size_bytes == file_size and existing.file_mtime == file_mtime:
@@ -109,11 +117,11 @@ class Scanner:
         pending: list[tuple[int, str, str, int]] = []
 
         for rel_path, abs_path in found_files:
-            file_size = os.path.getsize(abs_path)
             try:
-                file_mtime = os.path.getmtime(abs_path)
+                st = os.stat(abs_path)
+                file_size, file_mtime = st.st_size, st.st_mtime
             except OSError:
-                file_mtime = 0.0
+                file_size, file_mtime = 0, 0.0
 
             existing = self._get_cached_snapshot(library_folder_id, rel_path)
             if existing and existing.size_bytes == file_size and existing.file_mtime == file_mtime:
