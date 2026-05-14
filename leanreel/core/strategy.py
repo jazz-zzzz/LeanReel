@@ -50,12 +50,17 @@ class AudioRule:
     remove_commentary: bool = True
 
     def to_dict(self) -> dict:
-        return {"mode": self.mode, "remove_commentary": self.remove_commentary}
+        return {
+            "mode": self.mode,
+            "preferred_languages": list(self.preferred_languages),
+            "remove_commentary": self.remove_commentary,
+        }
 
     @classmethod
     def from_dict(cls, d: dict) -> "AudioRule":
         return cls(
             mode=d.get("mode", "keep_original"),
+            preferred_languages=list(d.get("preferred_languages", ["chi", "zho", "eng"])),
             remove_commentary=d.get("remove_commentary", True),
         )
 

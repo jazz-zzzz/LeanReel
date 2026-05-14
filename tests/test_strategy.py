@@ -39,6 +39,17 @@ def test_strategy_serializes_to_dict():
     assert out["name"] == "均衡压缩"
     assert out["video"]["crf"] == 20
 
+
+def test_audio_rule_preserves_preferred_languages():
+    data = json.loads(SAMPLE_STRATEGY_JSON)
+    data["audio"]["preferred_languages"] = ["jpn", "eng"]
+
+    strategy = Strategy.from_dict(data)
+    out = strategy.to_dict()
+
+    assert strategy.audio.preferred_languages == ["jpn", "eng"]
+    assert out["audio"]["preferred_languages"] == ["jpn", "eng"]
+
 def test_load_strategies_from_dir(tmp_path: Path):
     d = tmp_path / "strategies"
     d.mkdir()

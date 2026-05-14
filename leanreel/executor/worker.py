@@ -24,6 +24,8 @@ class EncodeTask:
     output_path: str
     pass_through: bool = False
     strategy_name: str = ""
+    strategy: object | None = None
+    snapshot: object | None = None
     status: TaskStatus = TaskStatus.PENDING
     progress: float = 0.0
     error_message: str = ""

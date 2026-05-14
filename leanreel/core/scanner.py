@@ -1,10 +1,12 @@
 """文件扫描器 — 递归扫描视频文件，FFprobe 提取元数据并缓存"""
+import json
 import os
+from dataclasses import asdict
 from pathlib import Path
 from typing import Optional
 
 from leanreel.data.database import Database
-from leanreel.data.models import FileSnapshot
+from leanreel.data.models import AudioTrack, FileSnapshot, SubtitleTrack
 
 VIDEO_EXTENSIONS = {".mkv", ".mp4", ".avi", ".ts", ".mov", ".wmv", ".m2ts", ".mts"}
 
@@ -90,7 +92,9 @@ class Scanner:
                scanned_at=datetime('now')""",
             [snap.library_folder_id, snap.relative_path, snap.file_name,
              snap.size_bytes, snap.video_codec, snap.video_width, snap.video_height,
-             snap.hdr_type.value, repr(snap.audio_tracks), repr(snap.subtitle_tracks),
+             snap.hdr_type.value,
+             self._serialize_audio_tracks(snap.audio_tracks),
+             self._serialize_subtitle_tracks(snap.subtitle_tracks),
              snap.duration_seconds, snap.bitrate_bps]
         )
 
@@ -102,5 +106,47 @@ class Scanner:
             size_bytes=row["size_bytes"], video_codec=row["video_codec"],
             video_width=row["video_width"], video_height=row["video_height"],
             hdr_type=HDRType(row["hdr_type"]),
+            audio_tracks=self._deserialize_audio_tracks(row["audio_tracks"]),
+            subtitle_tracks=self._deserialize_subtitle_tracks(row["subtitle_tracks"]),
             duration_seconds=row["duration_seconds"], bitrate_bps=row["bitrate_bps"],
         )
+
+    def _serialize_audio_tracks(self, tracks: list[AudioTrack]) -> str:
+        return json.dumps([asdict(track) for track in tracks], ensure_ascii=False)
+
+    def _serialize_subtitle_tracks(self, tracks: list[SubtitleTrack]) -> str:
+        return json.dumps([asdict(track) for track in tracks], ensure_ascii=False)
+
+    def _deserialize_audio_tracks(self, raw: str) -> list[AudioTrack]:
+        return [
+            AudioTrack(
+                codec=item.get("codec", ""),
+                channels=item.get("channels", 0),
+                language=item.get("language", ""),
+                title=item.get("title", ""),
+                is_commentary=item.get("is_commentary", False),
+            )
+            for item in self._load_track_json(raw)
+        ]
+
+    def _deserialize_subtitle_tracks(self, raw: str) -> list[SubtitleTrack]:
+        return [
+            SubtitleTrack(
+                codec=item.get("codec", ""),
+                language=item.get("language", ""),
+                title=item.get("title", ""),
+                is_forced=item.get("is_forced", False),
+            )
+            for item in self._load_track_json(raw)
+        ]
+
+    def _load_track_json(self, raw: str) -> list[dict]:
+        if not raw:
+            return []
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(data, list):
+            return []
+        return [item for item in data if isinstance(item, dict)]

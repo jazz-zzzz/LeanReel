@@ -33,6 +33,21 @@ def test_insert_and_get_library(db: Database):
     assert libs[0].id == 1
 
 
+def test_write_persists_across_connections(tmp_path: Path):
+    db_path = tmp_path / "persistent.db"
+    first = Database(str(db_path))
+    first.execute("INSERT INTO library (name) VALUES (?)", ["Film"])
+    first.close()
+
+    second = Database(str(db_path))
+    try:
+        libs = second.get_all_libraries()
+    finally:
+        second.close()
+
+    assert [lib.name for lib in libs] == ["Film"]
+
+
 def test_insert_duplicate_library_name(db: Database):
     db.insert_library(Library(name="Film"))
     with pytest.raises(Exception):

@@ -4,7 +4,11 @@
 a = Analysis(
     ['leanreel/main.py'],
     pathex=[],
-    binaries=[],
+    binaries=[
+        ('leanreel/resources/ffmpeg/ffmpeg.exe', 'leanreel/resources/ffmpeg'),
+        ('leanreel/resources/ffmpeg/ffprobe.exe', 'leanreel/resources/ffmpeg'),
+        ('leanreel/resources/dovi_tool/dovi_tool.exe', 'leanreel/resources/dovi_tool'),
+    ],
     datas=[
         ('leanreel/resources/strategies', 'leanreel/resources/strategies'),
     ],

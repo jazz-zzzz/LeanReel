@@ -1,6 +1,6 @@
 """FFmpeg 命令构建测试"""
 import pytest
-from leanreel.executor.ffmpeg import FFmpegBuilder
+from leanreel.executor.ffmpeg import FFmpegBuilder, FFmpegExecutor
 from leanreel.core.strategy import Strategy
 from leanreel.data.models import FileSnapshot, HDRType
 
@@ -51,3 +51,52 @@ def test_build_sdr_no_hdr_flags(balanced_strategy):
     cmd = FFmpegBuilder.build(snap, balanced_strategy, "in.mkv", "out.mkv")
     joined = " ".join(cmd)
     assert "-color_primaries" not in joined
+
+
+def test_build_command_does_not_overwrite_existing_output_by_default(balanced_strategy):
+    snap = FileSnapshot(video_codec="h264")
+    cmd = FFmpegBuilder.build(snap, balanced_strategy, "in.mkv", "out.mkv")
+    assert "-y" not in cmd
+    assert "-n" in cmd
+
+
+def test_ffmpeg_executor_runs_built_command(monkeypatch, balanced_strategy, tmp_path):
+    from leanreel.executor import ffmpeg
+    from leanreel.executor.worker import EncodeTask
+
+    calls = []
+
+    def fake_run(cmd, progress_callback=None):
+        calls.append(cmd)
+        return 0
+
+    monkeypatch.setattr(ffmpeg, "run_ffmpeg", fake_run)
+    task = EncodeTask(
+        file_name="sample.mkv",
+        input_path=str(tmp_path / "sample.mkv"),
+        output_path=str(tmp_path / "sample.out.mkv"),
+        strategy=balanced_strategy,
+        snapshot=FileSnapshot(video_codec="h264"),
+    )
+
+    FFmpegExecutor().encode(task)
+
+    assert calls
+    assert calls[0][-1] == str(tmp_path / "sample.out.mkv")
+
+
+def test_ffmpeg_executor_raises_when_command_fails(monkeypatch, balanced_strategy, tmp_path):
+    from leanreel.executor import ffmpeg
+    from leanreel.executor.worker import EncodeTask
+
+    monkeypatch.setattr(ffmpeg, "run_ffmpeg", lambda cmd, progress_callback=None: 1)
+    task = EncodeTask(
+        file_name="sample.mkv",
+        input_path=str(tmp_path / "sample.mkv"),
+        output_path=str(tmp_path / "sample.out.mkv"),
+        strategy=balanced_strategy,
+        snapshot=FileSnapshot(video_codec="h264"),
+    )
+
+    with pytest.raises(RuntimeError):
+        FFmpegExecutor().encode(task)

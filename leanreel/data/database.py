@@ -61,8 +61,16 @@ class Database:
         """)
 
     def execute(self, sql: str, params=None):
-        cur = self.conn.execute(sql, params or [])
-        return [dict(row) for row in cur.fetchall()]
+        try:
+            cur = self.conn.execute(sql, params or [])
+            rows = [dict(row) for row in cur.fetchall()] if cur.description else []
+            if self.conn.in_transaction:
+                self.conn.commit()
+            return rows
+        except Exception:
+            if self.conn.in_transaction:
+                self.conn.rollback()
+            raise
 
     @property
     def last_insert_id(self) -> int:

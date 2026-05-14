@@ -5,6 +5,7 @@ from typing import Optional
 
 from leanreel.data.models import FileSnapshot, HDRType
 from leanreel.core.strategy import Strategy
+from leanreel.executor.resources import bundled_resource_path
 
 _DOVI_TOOL_PATH = None
 
@@ -13,7 +14,7 @@ def get_dovi_tool_path() -> str:
     global _DOVI_TOOL_PATH
     if _DOVI_TOOL_PATH:
         return _DOVI_TOOL_PATH
-    builtin = Path(__file__).parent.parent / "resources" / "dovi_tool" / "dovi_tool.exe"
+    builtin = bundled_resource_path("dovi_tool", "dovi_tool.exe")
     if builtin.exists():
         return str(builtin)
     return "dovi_tool"
