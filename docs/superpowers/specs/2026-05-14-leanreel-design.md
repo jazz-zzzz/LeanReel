@@ -1,4 +1,4 @@
-# SpaceSaver — 设计规格说明书
+# LeanReel — 设计规格说明书
 
 > 跨平台视觉无损视频压缩工具，面向个人媒体库管理。Python + PySide6 桌面应用。
 
@@ -9,7 +9,7 @@
 
 ## 1. 项目定位
 
-SpaceSaver 是一个跨平台（Windows + macOS）桌面应用，帮助用户对视频媒体库进行**视觉无损压缩**，在画质不可感知的前提下显著减小文件体积。
+LeanReel 是一个跨平台（Windows + macOS）桌面应用，帮助用户对视频媒体库进行**视觉无损压缩**，在画质不可感知的前提下显著减小文件体积。
 
 ### 1.1 核心原则
 
@@ -313,8 +313,8 @@ CREATE TABLE compression_history (
 ## 9. 文件结构（规划）
 
 ```
-SpaceSaver/
-├── spacesaver/
+LeanReel/
+├── leanreel/
 │   ├── __init__.py
 │   ├── main.py              # 入口
 │   ├── gui/
