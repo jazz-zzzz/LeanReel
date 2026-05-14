@@ -47,6 +47,7 @@ class StrategyPanel(QWidget):
         self._strategies = []
         self._temp_dir = str(Path.home() / "Temp" / "LeanReel")
         self._active_preset_index = 0
+        self._resizing = False
         self.setup_ui()
 
     def setup_ui(self):
@@ -239,12 +240,15 @@ class StrategyPanel(QWidget):
         self._update_card_heights()
 
     def _update_card_heights(self):
-        h = max(1, self.height() - 380)
+        h = max(120, self.height() - 400)
         self.card_area.setMaximumHeight(h)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._update_card_heights()
+        if not self._resizing:
+            self._resizing = True
+            self._update_card_heights()
+            self._resizing = False
 
     def _on_card_clicked(self, index: int):
         self._active_preset_index = index
