@@ -7,13 +7,15 @@ from PySide6.QtWidgets import QApplication
 from leanreel.data.database import Database
 from leanreel.core.library import LibraryManager
 from leanreel.core.strategy import load_strategies
-from leanreel.core.matcher import Matcher
+from leanreel.core.matcher import Matcher, estimate_savings
 from leanreel.core.scanner import Scanner
 from leanreel.gui.main_window import MainWindow
 from leanreel.gui.library_panel import LibraryPanel
 from leanreel.gui.file_list import FileListPanel
 from leanreel.gui.strategy_panel import StrategyPanel
 from leanreel.gui.queue_panel import QueuePanel
+from leanreel.executor.ffmpeg import FFmpegExecutor
+from leanreel.executor.worker import EncodeTask, WorkerManager
 
 
 def get_data_dir() -> Path:
@@ -41,6 +43,37 @@ def get_strategies_dir() -> Path:
     return user_dir
 
 
+def make_output_path(source: Path) -> Path:
+    """Build a non-destructive default output path."""
+    return source.with_name(f"{source.stem}_SS{source.suffix}")
+
+
+def build_encode_tasks(
+    snapshots,
+    folder_paths: dict[int, str],
+    strategy,
+    strategy_overrides: dict[str, object] | None = None,
+) -> list[EncodeTask]:
+    """Create encode tasks from displayed snapshots."""
+    tasks: list[EncodeTask] = []
+    strategy_overrides = strategy_overrides or {}
+    for snap in snapshots:
+        folder_path = folder_paths.get(snap.library_folder_id)
+        if not folder_path:
+            continue
+        selected_strategy = strategy_overrides.get(snap.relative_path, strategy)
+        input_path = Path(folder_path) / snap.relative_path
+        tasks.append(EncodeTask(
+            file_name=snap.file_name,
+            input_path=str(input_path),
+            output_path=str(make_output_path(input_path)),
+            strategy_name=selected_strategy.name,
+            strategy=selected_strategy,
+            snapshot=snap,
+        ))
+    return tasks
+
+
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("LeanReel")
@@ -54,6 +87,10 @@ def main():
     strategies = load_strategies(str(get_strategies_dir()))
     matcher = Matcher(strategies)
     scanner = Scanner(db)
+    current_snapshots = []
+    current_folder_paths: dict[int, str] = {}
+    strategy_overrides: dict[str, object] = {}
+    active_custom_path: str | None = None
 
     # 初始化 GUI
     win = MainWindow()
@@ -79,39 +116,92 @@ def main():
             win.status.showMessage(str(e))
 
     def on_folder_added(lib_id, path):
+        nonlocal current_snapshots, current_folder_paths, strategy_overrides
         folder = lib_mgr.add_folder(lib_id, path)
         refresh_libraries()
         win.status.showMessage(f"正在扫描 {path}...")
         snapshots = scanner.scan_folder(folder.id, path)
+        current_snapshots = snapshots
+        current_folder_paths = {folder.id: path}
+        strategy_overrides = {}
         matched = {}
         for s in snapshots:
             strategy = matcher.match(s)
-            matched[s.relative_path] = strategy.name
-        file_panel.populate(snapshots, matched)
+            matched[s.relative_path] = {
+                "strategy": strategy,
+                "estimate": estimate_savings(s, strategy),
+            }
+        file_panel.populate(snapshots, matched, strategies)
         win.status.showMessage(f"扫描完成: {len(snapshots)} 个文件")
 
     def on_library_selected(lib_id):
+        nonlocal current_snapshots, current_folder_paths, strategy_overrides
         rows = db.execute(
-            """SELECT fs.* FROM file_snapshot fs
+            """SELECT fs.*, lf.path AS folder_path FROM file_snapshot fs
                JOIN library_folder lf ON fs.library_folder_id = lf.id
                WHERE lf.library_id = ?""", [lib_id]
         )
-        from leanreel.data.models import FileSnapshot
         snapshots = []
+        current_folder_paths = {}
+        strategy_overrides = {}
         for r in rows:
-            snapshots.append(FileSnapshot(
-                id=r["id"], library_folder_id=r["library_folder_id"],
-                relative_path=r["relative_path"], file_name=r["file_name"],
-                size_bytes=r["size_bytes"], video_codec=r["video_codec"],
-                video_width=r["video_width"], video_height=r["video_height"],
-                hdr_type=r["hdr_type"],
-                duration_seconds=r["duration_seconds"], bitrate_bps=r["bitrate_bps"],
-            ))
+            current_folder_paths[r["library_folder_id"]] = r["folder_path"]
+            snapshots.append(scanner._row_to_snapshot(r))
+        current_snapshots = snapshots
         matched = {}
         for s in snapshots:
             strategy = matcher.match(s)
-            matched[s.relative_path] = strategy.name
-        file_panel.populate(snapshots, matched)
+            matched[s.relative_path] = {
+                "strategy": strategy,
+                "estimate": estimate_savings(s, strategy),
+            }
+        file_panel.populate(snapshots, matched, strategies)
+
+    def on_strategy_override_changed(relative_path, strategy_name):
+        nonlocal active_custom_path
+        if strategy_name == "自定义":
+            active_custom_path = relative_path
+            return
+        strategy_panel.show_preset_strategy()
+        active_custom_path = None
+        strategy = next((s for s in strategies if s.name == strategy_name), None)
+        if strategy is None:
+            strategy_overrides.pop(relative_path, None)
+        else:
+            strategy_overrides[relative_path] = strategy
+
+    def on_custom_strategy_requested(relative_path):
+        nonlocal active_custom_path
+        active_custom_path = relative_path
+        strategy_panel.show_custom_strategy()
+
+    def on_custom_strategy_changed(strategy):
+        if not active_custom_path:
+            return
+        strategy_overrides[active_custom_path] = strategy
+        file_panel.apply_strategy_to_row(active_custom_path, strategy)
+
+    def on_start_requested():
+        default_strategy = strategy_panel.current_preset_strategy or strategy_panel.current_strategy
+        if default_strategy is None:
+            win.status.showMessage("没有可用策略")
+            return
+        tasks = build_encode_tasks(
+            current_snapshots,
+            current_folder_paths,
+            default_strategy,
+            strategy_overrides,
+        )
+        if not tasks:
+            win.status.showMessage("没有可压缩文件")
+            return
+        queue_panel.task_list.clear()
+        for task in tasks:
+            queue_panel.add_task_row(task)
+        manager = WorkerManager(FFmpegExecutor(), strategy_panel.worker_count)
+        manager.start(tasks)
+        queue_panel.update_progress(manager.get_progress())
+        win.status.showMessage(f"压缩任务完成: {manager.completed_count}/{manager.total_tasks}")
 
     def refresh_libraries():
         libs = lib_mgr.get_all_libraries()
@@ -123,6 +213,12 @@ def main():
     lib_panel.library_added.connect(on_library_added)
     lib_panel.folder_added.connect(on_folder_added)
     lib_panel.library_selected.connect(on_library_selected)
+    lib_panel.library_deleted.connect(lib_mgr.delete_library)
+    lib_panel.folder_removed.connect(lib_mgr.remove_folder)
+    file_panel.strategy_override_changed.connect(on_strategy_override_changed)
+    file_panel.custom_strategy_requested.connect(on_custom_strategy_requested)
+    strategy_panel.custom_strategy_changed.connect(on_custom_strategy_changed)
+    strategy_panel.start_requested.connect(on_start_requested)
 
     refresh_libraries()
     win.show()

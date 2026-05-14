@@ -6,6 +6,7 @@ from typing import Optional
 
 from leanreel.data.models import FileSnapshot, HDRType
 from leanreel.core.strategy import Strategy
+from leanreel.executor.resources import bundled_resource_path
 
 _FFMPEG_PATH = None
 
@@ -14,7 +15,7 @@ def get_ffmpeg_path() -> str:
     global _FFMPEG_PATH
     if _FFMPEG_PATH:
         return _FFMPEG_PATH
-    builtin = Path(__file__).parent.parent / "resources" / "ffmpeg" / "ffmpeg.exe"
+    builtin = bundled_resource_path("ffmpeg", "ffmpeg.exe")
     if builtin.exists():
         return str(builtin)
     return "ffmpeg"
@@ -31,7 +32,7 @@ class FFmpegBuilder:
     @staticmethod
     def build(snapshot: FileSnapshot, strategy: Strategy,
               input_path: str, output_path: str) -> list[str]:
-        cmd = [get_ffmpeg_path(), "-y", "-i", input_path]
+        cmd = [get_ffmpeg_path(), "-n", "-i", input_path]
 
         # 映射流
         cmd.extend(["-map", "0:v"])
@@ -73,6 +74,26 @@ class FFmpegBuilder:
 
         cmd.append(output_path)
         return cmd
+
+
+class FFmpegExecutor:
+    """Executor adapter used by WorkerManager."""
+
+    def __init__(self, progress_callback=None):
+        self.progress_callback = progress_callback
+
+    def encode(self, task) -> None:
+        if task.snapshot is None or task.strategy is None:
+            raise ValueError("EncodeTask requires snapshot and strategy")
+        cmd = FFmpegBuilder.build(
+            task.snapshot,
+            task.strategy,
+            task.input_path,
+            task.output_path,
+        )
+        exit_code = run_ffmpeg(cmd, self.progress_callback)
+        if exit_code != 0:
+            raise RuntimeError(f"FFmpeg failed with exit code {exit_code}: {task.file_name}")
 
 
 def run_ffmpeg(cmd: list[str], progress_callback=None) -> int:

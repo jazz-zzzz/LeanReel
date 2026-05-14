@@ -11,6 +11,8 @@ class LibraryPanel(QWidget):
     folder_selected = Signal(int)          # folder_id
     library_added = Signal(str)            # name
     folder_added = Signal(int, str)        # library_id, path
+    library_deleted = Signal(int)          # library_id
+    folder_removed = Signal(int)           # folder_id
 
     def __init__(self):
         super().__init__()
@@ -73,3 +75,9 @@ class LibraryPanel(QWidget):
         path = QFileDialog.getExistingDirectory(self, "选择文件夹")
         if path:
             self.folder_added.emit(lib_id, path)
+
+    def _delete_library(self, lib_id):
+        self.library_deleted.emit(lib_id)
+
+    def _remove_folder(self, folder_id):
+        self.folder_removed.emit(folder_id)

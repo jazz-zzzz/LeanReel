@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from leanreel.data.models import FileSnapshot, AudioTrack, SubtitleTrack, HDRType
+from leanreel.executor.resources import bundled_resource_path
 
 # FFprobe 二进制路径（打包时替换为相对路径）
 _FFPROBE_PATH = None
@@ -17,7 +18,7 @@ def get_ffprobe_path() -> str:
     if _FFPROBE_PATH:
         return _FFPROBE_PATH
     # 开发环境：从资源目录找
-    builtin = Path(__file__).parent.parent / "resources" / "ffmpeg" / "ffprobe.exe"
+    builtin = bundled_resource_path("ffmpeg", "ffprobe.exe")
     if builtin.exists():
         return str(builtin)
     return "ffprobe"
