@@ -1,0 +1,15 @@
+[project]
+name = "leanreel"
+version = "0.1.0"
+description = "视觉无损视频压缩工具"
+requires-python = ">=3.11"
+dependencies = ["PySide6>=6.6.0"]
+
+[project.scripts]
+leanreel = "leanreel.main:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0", "pytest-qt>=4.0.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
