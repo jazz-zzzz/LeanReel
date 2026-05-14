@@ -1,7 +1,7 @@
 """LeanReel 主窗口"""
 from PySide6.QtWidgets import (
     QMainWindow, QMenuBar, QStatusBar, QHBoxLayout, QWidget,
-    QSplitter
+    QSplitter, QDockWidget
 )
 from PySide6.QtCore import Qt
 
@@ -14,6 +14,7 @@ class MainWindow(QMainWindow):
         self._setup_central()
         self._setup_menu()
         self._setup_status()
+        self._setup_queue()
 
     def _setup_central(self):
         """中心区域：水平分割器 放置 库面板 | 文件列表 | 策略面板"""
@@ -64,3 +65,15 @@ class MainWindow(QMainWindow):
 
     def set_strategy_panel(self, widget: QWidget):
         self.splitter.replaceWidget(2, widget)
+
+    def _setup_queue(self):
+        """底部可折叠队列面板"""
+        self.queue_dock = QDockWidget("任务队列", self)
+        self.queue_dock.setAllowedAreas(Qt.BottomDockWidgetArea)
+        self.queue_panel = QWidget()
+        self.queue_dock.setWidget(self.queue_panel)
+        self.addDockWidget(Qt.BottomDockWidgetArea, self.queue_dock)
+        self.queue_dock.hide()
+
+    def set_queue_panel(self, widget: QWidget):
+        self.queue_dock.setWidget(widget)
