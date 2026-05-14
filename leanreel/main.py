@@ -74,6 +74,21 @@ def build_encode_tasks(
     return tasks
 
 
+def load_library_snapshots(db: Database, scanner: Scanner, lib_id: int):
+    """Load a library by refreshing each folder through Scanner.
+
+    Scanner skips valid cached metadata, but refreshes stale entries without codec
+    data, so selecting a library can recover missing encoding information.
+    """
+    folders = db.get_folders_for_library(lib_id)
+    snapshots = []
+    folder_paths = {}
+    for folder in folders:
+        folder_paths[folder.id] = folder.path
+        snapshots.extend(scanner.scan_folder(folder.id, folder.path))
+    return snapshots, folder_paths
+
+
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("LeanReel")
@@ -136,17 +151,9 @@ def main():
 
     def on_library_selected(lib_id):
         nonlocal current_snapshots, current_folder_paths, strategy_overrides
-        rows = db.execute(
-            """SELECT fs.*, lf.path AS folder_path FROM file_snapshot fs
-               JOIN library_folder lf ON fs.library_folder_id = lf.id
-               WHERE lf.library_id = ?""", [lib_id]
-        )
-        snapshots = []
-        current_folder_paths = {}
+        snapshots, folder_paths = load_library_snapshots(db, scanner, lib_id)
+        current_folder_paths = folder_paths
         strategy_overrides = {}
-        for r in rows:
-            current_folder_paths[r["library_folder_id"]] = r["folder_path"]
-            snapshots.append(scanner._row_to_snapshot(r))
         current_snapshots = snapshots
         matched = {}
         for s in snapshots:

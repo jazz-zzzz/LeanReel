@@ -61,6 +61,86 @@ def test_file_list_displays_codec_strategy_and_estimated_savings():
     panel.close()
 
 
+def test_file_list_shows_unknown_when_codec_missing():
+    from leanreel.data.models import FileSnapshot
+    from leanreel.gui.file_list import FileListPanel
+
+    app = get_app()
+    panel = FileListPanel()
+    snap = FileSnapshot(
+        relative_path="clip.mkv",
+        file_name="clip.mkv",
+        size_bytes=1024,
+        video_codec="",
+    )
+
+    panel.populate([snap], {"clip.mkv": "未匹配"})
+
+    assert panel.table.item(0, 2).text() == "未识别"
+    panel.close()
+
+
+def test_file_list_columns_are_user_resizable():
+    from PySide6.QtWidgets import QHeaderView
+    from leanreel.gui.file_list import FileListPanel
+
+    app = get_app()
+    panel = FileListPanel()
+
+    header = panel.table.horizontalHeader()
+
+    assert header.sectionResizeMode(0) == QHeaderView.Interactive
+    assert header.sectionResizeMode(4) == QHeaderView.Interactive
+    panel.close()
+
+
+def test_strategy_combo_has_enough_width_to_avoid_text_overlap():
+    from leanreel.core.strategy import Strategy
+    from leanreel.data.models import FileSnapshot
+    from leanreel.gui.file_list import FileListPanel
+
+    app = get_app()
+    panel = FileListPanel()
+    strategy = Strategy(name="均衡压缩", estimated_savings="35-50%")
+    snap = FileSnapshot(relative_path="movie.mkv", file_name="movie.mkv", size_bytes=10 * 1024**3)
+
+    panel.populate([snap], {"movie.mkv": strategy}, strategies=[strategy])
+    combo = panel.table.cellWidget(0, 4)
+
+    assert combo.minimumWidth() >= 140
+    assert panel.table.columnWidth(4) >= 160
+    panel.close()
+
+
+def test_file_list_can_switch_between_flat_and_tree_modes():
+    from leanreel.data.models import FileSnapshot
+    from leanreel.gui.file_list import FileListPanel
+
+    app = get_app()
+    panel = FileListPanel()
+    snapshots = [
+        FileSnapshot(relative_path="Season 1/a.mkv", file_name="a.mkv", size_bytes=1024),
+        FileSnapshot(relative_path="Season 2/b.mkv", file_name="b.mkv", size_bytes=1024),
+    ]
+
+    panel.populate(snapshots, {})
+
+    assert panel.current_view_mode == "flat"
+    assert panel.stack.currentWidget() is panel.table
+    assert not panel.table.isHidden()
+    assert panel.tree.isHidden()
+
+    panel.set_view_mode("tree")
+
+    assert panel.current_view_mode == "tree"
+    assert panel.stack.currentWidget() is panel.tree
+    assert not panel.tree.isHidden()
+    assert panel.table.isHidden()
+    assert panel.tree.topLevelItemCount() == 2
+    assert panel.tree.topLevelItem(0).childCount() == 1
+    panel.close()
+
+
 def test_file_list_sorts_size_and_estimated_savings_numerically():
     from leanreel.data.models import FileSnapshot
     from leanreel.gui.file_list import FileListPanel
