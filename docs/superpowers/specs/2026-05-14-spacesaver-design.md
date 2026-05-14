@@ -33,7 +33,8 @@ SpaceSaver 是一个跨平台（Windows + macOS）桌面应用，帮助用户对
 |---|------|------|
 | GUI | PySide6 | 跨平台原生渲染，Qt 成熟稳定 |
 | 业务逻辑 | Python 3.11+ | FFmpeg 生态最好，快速迭代 |
-| 编码执行 | FFmpeg（内置便携版） | 打包自带 `ffmpeg.exe`/`ffmpeg`，不依赖系统安装 |
+| 编码执行 | FFmpeg + dovi_tool（内置便携版） | 打包自带二进制，不依赖系统安装 |
+| DV 处理 | dovi_tool | 提取/注入 Dolby Vision RPU，处理 Profile 7 双层结构 |
 | 数据存储 | SQLite | 零配置，单文件，足够承载 |
 | 策略定义 | JSON 文件 | 人类可读可编辑，新增策略不改代码 |
 | 打包 | PyInstaller | 单目录/单文件输出，Win+Mac |
@@ -48,10 +49,10 @@ SpaceSaver 是一个跨平台（Windows + macOS）桌面应用，帮助用户对
 │  主窗口 · 库面板 · 文件列表 · 策略配置 · 队列面板       │
 ├─────────────────────────────────────────────────────┤
 │                    业务层 (Python)                    │
-│  库管理 · 文件扫描 · 策略引擎 · 规则匹配 · 空间预估     │
+│  库管理 · 文件扫描 · 策略引擎 · 规则匹配 · HDR/DV 检测  │
 ├─────────────────────────────────────────────────────┤
 │                    执行层 (Python)                    │
-│  FFmpeg 封装 · 并行 Worker · 进度上报 · 错误恢复        │
+│  FFmpeg 封装 · dovi_tool · 并行 Worker · 进度上报      │
 ├─────────────────────────────────────────────────────┤
 │                    数据层                             │
 │  SQLite (库/文件/历史) · JSON (策略) · Config (设置)   │
@@ -64,7 +65,7 @@ SpaceSaver 是一个跨平台（Windows + macOS）桌面应用，帮助用户对
 
 **业务层** — 所有决策逻辑所在。策略匹配、体积预估、任务生成均在业务层完成。
 
-**执行层** — 封装 FFmpeg 子进程调用。管理 Worker 池，上报进度，处理崩溃恢复。
+**执行层** — 封装 FFmpeg 和 dovi_tool 子进程调用。管理 Worker 池，上报进度，处理崩溃恢复。
 
 **数据层** — SQLite 存储持久数据（库配置、文件快照、压缩历史），JSON 存储策略定义模板。
 
@@ -90,19 +91,51 @@ SpaceSaver 是一个跨平台（Windows + macOS）桌面应用，帮助用户对
 
 #### 4.3.1 四个内置预设
 
-| 预设 | 视频规则 | 音频规则 | 字幕/轨 | 预计节省 | 画质影响 |
-|------|---------|---------|---------|---------|---------|
-| **极限压缩** | x264/AVC→x265 CRF22 | 无损音轨→Opus 192k | 去非中文轨 | 50-70% | 轻微可见，音频有损 |
-| **均衡压缩** ⭐ | x264/AVC/REMUX→x265 CRF20 | DTS-HD/TrueHD→FLAC | 去评论轨 | 35-50% | 视觉无损，音频无损 |
-| **轻量压缩** | 仅 REMUX→x265 CRF18 | 无损音轨→FLAC | 全部保留 | 20-35% | 视觉无损，音频无损 |
-| **仅去冗余** | 不重编码 | 不重编码 | 去多余轨 | 5-15% | 完全无损 |
+| 预设 | 视频规则 | 音频规则 | HDR/DV处理 | 字幕/轨 | 预计节省 |
+|------|---------|---------|-----------|---------|---------|
+| **极限压缩** | x264/AVC→x265 CRF22 | 保持原音频 | HDR10保留,DV降为HDR10 | 去非中文轨 | 50-70% |
+| **均衡压缩** ⭐ | x264/AVC/REMUX→x265 CRF20 | 保持原音频 | HDR10保留,DV注回RPU | 去评论轨 | 35-50% |
+| **轻量压缩** | 仅 REMUX→x265 CRF18 | 保持原音频 | HDR10保留,DV注回RPU | 全部保留 | 20-35% |
+| **仅去冗余** | 不重编码 | 保持原音频 | 不处理 | 去多余轨 | 5-15% |
 
-#### 4.3.2 高级模式（规则链）
+#### 4.3.2 HDR / Dolby Vision 处理
+
+HDR/DV 内容在重编码时需要特殊处理，否则会丢失动态元数据或色彩信息。
+
+**HDR 类型检测（FFprobe 自动识别）：**
+
+| 类型 | FFprobe 标识 | 来源 | 重编码风险 | 处理方案 |
+|------|-------------|------|-----------|---------|
+| **SDR** | 无 HDR 元数据 | 普通 BluRay/WEB | 无 | 正常编码 |
+| **HDR10** | `color_transfer=smpte2084`, `color_primaries=bt2020` | UHD BluRay | 低 | x265 保留色彩空间+PQ+MD |
+| **HDR10+** | 含 `mastering_display` + 动态元数据 SEI | UHD BluRay | 低 | x265 `--hdr10+` 参数 |
+| **DV Profile 5** | `dolby_vision=5`, 单层 IPTPQc2 | 流媒体 WEB-DL | 中 | x265 `--dolby-vision-profile 5` |
+| **DV Profile 7** | `dolby_vision=7`, 双层 BL+EL+RPU | UHD 原盘 REMUX | **高** | 需 dovi_tool 提取RPU→编码→回注 |
+| **DV Profile 8** | `dolby_vision=8`, 单层 HDR10+RPU | WEB-DL / 重编码 | 中 | x265 `--dolby-vision-profile 8.1` |
+
+**DV Profile 7 处理流程（最关键的路径）：**
+
+```
+1. FFprobe 识别 → DV Profile 7 → 弹出确认对话框
+2. dovi_tool extract-rpu → 提取 RPU.bin
+3. x265 编码 HDR10 基层（--hdr10 --colorprim bt2020 --transfer smpte2084 --colormatrix bt2020nc）
+4. dovi_tool inject-rpu → 将 RPU 回注到编码后的 HEVC 流
+5. MKV 封装，保留 DV 元数据
+```
+
+**用户交互：**
+- 扫描时标注每个文件的 HDR 类型（图标 + 标签）
+- DV Profile 7 文件在应用策略前弹出确认框，说明处理步骤和风险
+- 提供"降级为 HDR10"选项（放弃 DV 增强层，节省处理复杂度）
+- DV 处理失败时保留原 RPU 文件和日志，支持手动恢复
+
+#### 4.3.3 高级模式（规则链）
 
 用户可以自定义规则链，每项规则含：
 
 - **视频规则**：x264/AVC→x265 / REMUX→x265 / 保持原编码 / 自定义编码器，指定 CRF 值
-- **音频规则**：DTS-HD/TrueHD→FLAC / →Opus (可选码率) / →AAC / 保持原格式 / 删除所有音轨保留第一条
+- **HDR/DV规则**：保留HDR10元数据 / 保留并回注DV RPU / 降级为HDR10（丢弃DV增强层）
+- **音频规则**：保持原音频（默认，不重编码）/ 去除非指定语言音轨 / 去除评论轨 / 仅保留第一条音轨
 - **字幕规则**：仅保留中文 / 保留中英 / 全部保留 / 全部删除 / 自定义语言列表
 - **过滤器**：跳过已 x265 文件 / 仅处理 REMUX / 仅处理大于 N GB / 仅处理特定编码
 
@@ -118,14 +151,15 @@ SpaceSaver 是一个跨平台（Windows + macOS）桌面应用，帮助用户对
 ```json
 {
   "name": "均衡压缩",
-  "description": "视觉无损，适合大多数场景",
+  "description": "视觉无损，适合大多数场景。HDR保留，DV回注RPU。音频不重编码。",
   "is_preset": true,
   "video": {"encoder": "libx265", "crf": 20, "preset": "slow", "pix_fmt": "yuv420p10le"},
-  "audio": {"mode": "lossless_to_flac", "keep_first_only": false},
+  "hdr": {"mode": "preserve_hdr10", "dv_handling": "reinject_rpu"},
+  "audio": {"mode": "keep_original", "remove_commentary": true, "remove_non_preferred_langs": false},
   "subtitle": {"mode": "keep_chinese"},
   "filters": {"skip_x265": true, "min_size_gb": null},
   "estimated_savings": "35-50%",
-  "quality_impact": "视觉无损，音频无损"
+  "quality_impact": "视觉无损，HDR/DV完整保留，音频原样保留"
 }
 ```
 
@@ -233,6 +267,7 @@ CREATE TABLE file_snapshot (
     video_codec TEXT,
     video_width INTEGER,
     video_height INTEGER,
+    hdr_type TEXT,            -- 'SDR', 'HDR10', 'HDR10+', 'DV_P5', 'DV_P7', 'DV_P8'
     audio_tracks TEXT,       -- JSON array
     subtitle_tracks TEXT,    -- JSON array
     duration_seconds REAL,
@@ -299,7 +334,8 @@ SpaceSaver/
 │   │   ├── __init__.py
 │   │   ├── worker.py        # Worker 管理
 │   │   ├── ffmpeg.py        # FFmpeg 调用封装
-│   │   └── probe.py         # FFprobe 封装
+│   │   ├── probe.py         # FFprobe 封装
+│   │   └── dovi.py          # dovi_tool 调用封装 (RPU提取/注入)
 │   ├── data/
 │   │   ├── __init__.py
 │   │   ├── database.py      # SQLite 操作
@@ -310,7 +346,8 @@ SpaceSaver/
 │       │   ├── balanced.json
 │       │   ├── light.json
 │       │   └── strip_only.json
-│       └── ffmpeg/          # 便携 FFmpeg 二进制
+│       ├── ffmpeg/          # 便携 FFmpeg 二进制
+│       └── dovi_tool/       # 便携 dovi_tool 二进制
 ├── tests/
 ├── docs/superpowers/specs/
 ├── requirements.txt
