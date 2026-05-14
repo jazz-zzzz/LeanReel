@@ -1,0 +1,56 @@
+"""数据模型单元测试"""
+import pytest
+from leanreel.data.models import (
+    Library, LibraryFolder, FileSnapshot,
+    CompressionRecord, AudioTrack, SubtitleTrack, HDRType
+)
+
+
+def test_library_creation():
+    lib = Library(name="Film")
+    assert lib.name == "Film"
+
+
+def test_library_folder_creation():
+    folder = LibraryFolder(library_id=1, path="/mnt/nas/Film")
+    assert folder.path == "/mnt/nas/Film"
+    assert folder.library_id == 1
+
+
+def test_file_snapshot_minimal():
+    snap = FileSnapshot(
+        library_folder_id=1,
+        relative_path="Dunkirk.mkv",
+        file_name="Dunkirk.mkv",
+        size_bytes=1024,
+        video_codec="hevc",
+        video_width=3840,
+        video_height=2160,
+        hdr_type=HDRType.HDR10,
+        audio_tracks=[AudioTrack(codec="truehd", channels=8, language="eng")],
+        subtitle_tracks=[SubtitleTrack(codec="hdmv_pgs", language="chi")],
+        duration_seconds=6420.0,
+        bitrate_bps=50000000,
+    )
+    assert snap.hdr_type == HDRType.HDR10
+    assert len(snap.audio_tracks) == 1
+    assert snap.audio_tracks[0].channels == 8
+
+
+def test_compression_record():
+    record = CompressionRecord(
+        file_snapshot_id=1,
+        strategy_name="均衡压缩",
+        original_size=50000000000,
+        compressed_size=20000000000,
+        status="completed",
+        duration_seconds=15000,
+    )
+    assert record.original_size > record.compressed_size
+    assert record.status == "completed"
+
+
+def test_hdr_type_enum():
+    assert HDRType.SDR == "SDR"
+    assert HDRType.HDR10 == "HDR10"
+    assert HDRType.DV_P7 == "DV_P7"
