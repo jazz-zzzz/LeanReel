@@ -94,6 +94,7 @@ class FileListPanel(QWidget):
         self._last_matches: dict[str, Any] = {}
         self._last_strategies: list[Any] | None = None
         self.current_view_mode = "flat"
+        self._row_index: dict[str, int] = {}
         self.setup_ui()
 
     def setup_ui(self):
@@ -165,8 +166,10 @@ class FileListPanel(QWidget):
         self.table.setSortingEnabled(False)
         self.table.clearContents()
         self.table.setRowCount(len(snapshots))
+        self._row_index.clear()
         total_size = 0
         for row, snap in enumerate(snapshots):
+            self._row_index[snap.relative_path] = row
             file_item = QTableWidgetItem(snap.file_name)
             file_item.setData(Qt.UserRole, snap.relative_path)
             self.table.setItem(row, 0, file_item)
@@ -362,11 +365,7 @@ class FileListPanel(QWidget):
             self.table.setItem(row, 3, hdr_item)
 
     def _find_row_by_relative_path(self, relative_path: str) -> int | None:
-        for row in range(self.table.rowCount()):
-            item = self.table.item(row, 0)
-            if item and item.data(Qt.UserRole) == relative_path:
-                return row
-        return None
+        return self._row_index.get(relative_path)
 
     def _resolve_match_display(self, snap: Any, match: Any) -> tuple[str, str, int | float]:
         if match is None:

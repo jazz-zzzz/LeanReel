@@ -54,3 +54,50 @@ def test_hdr_type_enum():
     assert HDRType.SDR == "SDR"
     assert HDRType.HDR10 == "HDR10"
     assert HDRType.DV_P7 == "DV_P7"
+
+
+def test_library_creation_different_names():
+    lib1 = Library(name="TV Series")
+    lib2 = Library(name="Anime")
+    assert lib1.name != lib2.name
+    assert lib1.id is None  # 未持久化时 id 为 None
+
+
+def test_file_snapshot_defaults():
+    snap = FileSnapshot()
+    assert snap.hdr_type == HDRType.SDR
+    assert snap.audio_tracks == []
+    assert snap.subtitle_tracks == []
+    assert snap.probe_ok is False
+    assert snap.size_bytes == 0
+
+
+def test_audio_track_commentary_default():
+    track = AudioTrack(codec="aac", channels=2, language="eng")
+    assert track.is_commentary is False
+    assert track.title == ""
+
+
+def test_subtitle_track_forced_default():
+    track = SubtitleTrack(codec="hdmv_pgs", language="chi")
+    assert track.is_forced is False
+    assert track.title == ""
+
+
+def test_compression_record_default_status():
+    record = CompressionRecord(file_snapshot_id=1, strategy_name="test")
+    assert record.status == "pending"
+    assert record.original_size == 0
+    assert record.compressed_size == 0
+
+
+def test_file_snapshot_multiple_audio_tracks():
+    tracks = [
+        AudioTrack(codec="truehd", channels=8, language="eng", title="Atmos"),
+        AudioTrack(codec="aac", channels=2, language="jpn", title="Commentary", is_commentary=True),
+        AudioTrack(codec="flac", channels=2, language="chi"),
+    ]
+    snap = FileSnapshot(audio_tracks=tracks)
+    assert len(snap.audio_tracks) == 3
+    assert snap.audio_tracks[1].is_commentary is True
+    assert snap.audio_tracks[2].language == "chi"

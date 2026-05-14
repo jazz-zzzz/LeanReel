@@ -9,6 +9,7 @@ from typing import Optional
 from leanreel.data.models import FileSnapshot, HDRType
 from leanreel.core.strategy import Strategy
 from leanreel.executor.resources import bundled_resource_path
+from leanreel.executor.dovi import needs_dovi_processing, DoviTool
 
 _FFMPEG_PATH = None
 
@@ -75,18 +76,50 @@ class FFmpegBuilder:
                     cmd.append("-hdr10+")
 
         # --- 音频 ---
-        audio_mode = strategy.audio.mode
-        if audio_mode == "keep_original":
+        audio_rule = strategy.audio
+        audio_tracks = snapshot.audio_tracks
+        if audio_tracks:
+            remove_commentary = audio_rule.remove_commentary or audio_rule.mode == "strip_commentary"
+            preferred = audio_rule.preferred_languages
+            kept_audio = []
+            for i, track in enumerate(audio_tracks):
+                if remove_commentary and track.is_commentary:
+                    continue
+                if preferred and track.language not in preferred:
+                    continue
+                kept_audio.append(i)
+            for idx in kept_audio:
+                cmd.extend(["-map", f"0:a:{idx}"])
+            if kept_audio:
+                cmd.extend(["-c:a", "copy"])
+        else:
             cmd.extend(["-map", "0:a", "-c:a", "copy"])
-        elif audio_mode == "strip_commentary":
-            cmd.extend(["-map", "0:a:0", "-c:a", "copy"])
 
         # --- 字幕 ---
         sub_mode = strategy.subtitle.mode
-        if sub_mode in ("keep_chinese", "keep_chinese_english"):
-            cmd.extend(["-map", "0:s?", "-c:s", "copy"])
+        subtitle_tracks = snapshot.subtitle_tracks
+        if sub_mode == "remove_all":
+            pass
         elif sub_mode == "keep_all":
             cmd.extend(["-map", "0:s", "-c:s", "copy"])
+        elif subtitle_tracks:
+            if sub_mode == "keep_chinese":
+                lang_whitelist = {"chi", "zho", "zh"}
+            elif sub_mode == "keep_chinese_english":
+                lang_whitelist = {"chi", "zho", "zh", "eng", "en"}
+            else:
+                lang_whitelist = None
+            kept_subs = []
+            for i, track in enumerate(subtitle_tracks):
+                if lang_whitelist and track.language not in lang_whitelist:
+                    continue
+                kept_subs.append(i)
+            for idx in kept_subs:
+                cmd.extend(["-map", f"0:s:{idx}"])
+            if kept_subs:
+                cmd.extend(["-c:s", "copy"])
+        else:
+            cmd.extend(["-map", "0:s?", "-c:s", "copy"])
 
         # --- 附件（内嵌字体等）---
         cmd.extend(["-map", "0:t?", "-c:t", "copy"])
@@ -126,23 +159,42 @@ class FFmpegExecutor:
         final_output = Path(task.output_path)
         temp_dir = self._get_temp_dir()
         temp_output = temp_dir / final_output.name
+        rpu_file: Optional[Path] = None
 
         # 如果临时文件已存在，先删除（避免 -n 跳过）
         if temp_output.exists():
             temp_output.unlink()
 
+        dv_mode = needs_dovi_processing(task.snapshot, task.strategy)
+
         try:
+            if dv_mode:
+                rpu_file = temp_dir / f"{final_output.stem}.rpu"
+                if rpu_file.exists():
+                    rpu_file.unlink()
+                if not DoviTool.extract_rpu(task.input_path, str(rpu_file)):
+                    raise RuntimeError(f"Dolby Vision RPU extraction failed: {task.file_name}")
+
             cmd = FFmpegBuilder.build(
                 task.snapshot,
                 task.strategy,
                 task.input_path,
                 str(temp_output),
             )
-            exit_code = run_ffmpeg(cmd, self.progress_callback)
+            exit_code, stderr_tail = run_ffmpeg(cmd, self.progress_callback)
             if exit_code != 0:
                 if temp_output.exists():
                     temp_output.unlink()
-                raise RuntimeError(f"FFmpeg failed with exit code {exit_code}: {task.file_name}")
+                raise RuntimeError(f"FFmpeg failed ({exit_code}): {task.file_name}\n{stderr_tail.strip()}")
+
+            if dv_mode and rpu_file and rpu_file.exists():
+                dv_output = temp_dir / f"{final_output.stem}_dv{final_output.suffix}"
+                if dv_output.exists():
+                    dv_output.unlink()
+                if not DoviTool.inject_rpu(str(temp_output), str(rpu_file), str(dv_output)):
+                    raise RuntimeError(f"Dolby Vision RPU injection failed: {task.file_name}")
+                temp_output.unlink()
+                temp_output = dv_output
 
             # 如果临时输出和目标路径相同（temp_dir == 目标目录），跳过移动
             if temp_output.resolve() == final_output.resolve():
@@ -160,15 +212,23 @@ class FFmpegExecutor:
             if temp_output.exists():
                 temp_output.unlink()
             raise
+        finally:
+            if rpu_file and rpu_file.exists():
+                rpu_file.unlink()
 
 
-def run_ffmpeg(cmd: list[str], progress_callback=None) -> int:
-    """执行 FFmpeg 命令，返回 exit code"""
+def run_ffmpeg(cmd: list[str], progress_callback=None) -> tuple[int, str]:
+    """执行 FFmpeg 命令，返回 (exit_code, stderr_tail)"""
     proc = subprocess.Popen(
-        cmd, stderr=subprocess.PIPE, universal_newlines=True,
+        cmd, stderr=subprocess.PIPE, text=True,
         encoding="utf-8", errors="replace"
     )
+    stderr_lines: list[str] = []
     for line in proc.stderr:
+        stderr_lines.append(line)
+        if len(stderr_lines) > 50:
+            stderr_lines.pop(0)
         if progress_callback and "time=" in line:
             progress_callback(line)
-    return proc.wait()
+    exit_code = proc.wait()
+    return exit_code, "".join(stderr_lines[-20:])

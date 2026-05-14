@@ -74,3 +74,20 @@ def test_get_presets():
     presets = get_presets([s1, s2])
     assert len(presets) == 1
     assert presets[0].name == "均衡压缩"
+
+
+def test_load_strategies_skips_corrupted_json(tmp_path: Path):
+    d = tmp_path / "strategies"
+    d.mkdir()
+    (d / "valid.json").write_text(SAMPLE_STRATEGY_JSON, encoding="utf-8")
+    (d / "broken.json").write_text("{not valid json}", encoding="utf-8")
+    (d / "empty.json").write_text("", encoding="utf-8")
+    (d / "also_valid.json").write_text(
+        SAMPLE_STRATEGY_JSON.replace("均衡压缩", "极限压缩"), encoding="utf-8"
+    )
+
+    strategies = load_strategies(str(d))
+    names = {s.name for s in strategies}
+    assert "均衡压缩" in names
+    assert "极限压缩" in names
+    assert len(strategies) == 2  # 损坏文件被跳过

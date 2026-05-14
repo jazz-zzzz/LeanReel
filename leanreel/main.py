@@ -9,7 +9,7 @@ from PySide6.QtCore import QObject, Signal
 
 from leanreel.data.database import Database
 from leanreel.core.library import LibraryManager
-from leanreel.core.strategy import load_strategies
+from leanreel.core.strategy import Strategy, load_strategies
 from leanreel.core.matcher import Matcher, estimate_savings
 from leanreel.core.scanner import Scanner
 from leanreel.gui.main_window import MainWindow
@@ -61,8 +61,8 @@ def make_output_path(source: Path) -> Path:
 def build_encode_tasks(
     snapshots,
     folder_paths: dict[int, str],
-    strategy,
-    strategy_overrides: dict[str, object] | None = None,
+    strategy: Strategy,
+    strategy_overrides: dict[str, Strategy] | None = None,
 ) -> list[EncodeTask]:
     tasks: list[EncodeTask] = []
     strategy_overrides = strategy_overrides or {}
@@ -83,235 +83,281 @@ def build_encode_tasks(
     return tasks
 
 
-def load_library_snapshots(db: Database, scanner: Scanner, lib_id: int):
-    folders = db.get_folders_for_library(lib_id)
-    snapshots = []
-    folder_paths = {}
-    for folder in folders:
-        folder_paths[folder.id] = folder.path
-        snapshots.extend(scanner.scan_folder(folder.id, folder.path))
-    return snapshots, folder_paths
+class Application:
+    """LeanReel 应用控制器 — 管理生命周期、服务初始化和信号路由"""
 
+    def __init__(self):
+        self._init_qt()
+        self._init_services()
+        self._init_state()
+        self._init_notifier()
+        self._init_ui()
+        self._setup_ui()
+        self._wire_signals()
+        self._refresh_libraries()
 
-def main():
-    app = QApplication(sys.argv)
-    app.setApplicationName("LeanReel")
-    apply_theme(app)
+    # ── 初始化 ──
 
-    db_path = str(get_data_dir() / "leanreel.db")
-    db = Database(db_path)
+    def _init_qt(self):
+        self.app = QApplication(sys.argv)
+        self.app.setApplicationName("LeanReel")
+        apply_theme(self.app)
 
-    lib_mgr = LibraryManager(db)
-    strategies = load_strategies(str(get_strategies_dir()))
-    matcher = Matcher(strategies)
-    scanner = Scanner(db)
-    current_snapshots = []
-    current_folder_paths: dict[int, str] = {}
-    strategy_overrides: dict[str, object] = {}
-    active_custom_path: str | None = None
-    active_manager: WorkerManager | None = None
+    def _init_services(self):
+        db_path = str(get_data_dir() / "leanreel.db")
+        self.db = Database(db_path)
+        self.lib_mgr = LibraryManager(self.db)
+        self.strategies = load_strategies(str(get_strategies_dir()))
+        self.matcher = Matcher(self.strategies)
+        self.scanner = Scanner(self.db)
 
-    notifier = ProbeNotifier()
+    def _init_state(self):
+        self.current_snapshots: list = []
+        self.current_folder_paths: dict[int, str] = {}
+        self.strategy_overrides: dict[str, Strategy] = {}
+        self.active_custom_path: str | None = None
+        self.active_manager: WorkerManager | None = None
+        self.encoding_in_progress = False
 
-    win = MainWindow()
-    lib_panel = LibraryPanel()
-    file_panel = FileListPanel()
-    strategy_panel = StrategyPanel()
-    queue_panel = QueuePanel()
+    def _init_notifier(self):
+        self.notifier = ProbeNotifier()
 
-    win.set_library_panel(lib_panel)
-    win.set_file_list_panel(file_panel)
-    win.set_strategy_widget(strategy_panel)
-    win.set_queue_panel(queue_panel)
+    def _init_ui(self):
+        self.win = MainWindow()
+        self.lib_panel = LibraryPanel()
+        self.file_panel = FileListPanel()
+        self.strategy_panel = StrategyPanel()
+        self.queue_panel = QueuePanel()
 
-    strategy_panel.set_strategies(strategies)
+    def _setup_ui(self):
+        self.win.set_library_panel(self.lib_panel)
+        self.win.set_file_list_panel(self.file_panel)
+        self.win.set_strategy_widget(self.strategy_panel)
+        self.win.set_queue_panel(self.queue_panel)
+        self.strategy_panel.set_strategies(self.strategies)
 
-    def _populate_file_list(snapshots):
-        """用快照列表填充文件面板，返回匹配字典"""
+    # ── 信号连接 ──
+
+    def _wire_signals(self):
+        self.lib_panel.library_added.connect(self._on_library_added)
+        self.lib_panel.folder_added.connect(self._on_folder_added)
+        self.lib_panel.library_selected.connect(self._on_library_selected)
+        self.lib_panel.library_deleted.connect(self.lib_mgr.delete_library)
+        self.lib_panel.folder_removed.connect(self.lib_mgr.remove_folder)
+        self.file_panel.strategy_override_changed.connect(self._on_strategy_override_changed)
+        self.file_panel.custom_strategy_requested.connect(self._on_custom_strategy_requested)
+        self.strategy_panel.custom_strategy_changed.connect(self._on_custom_strategy_changed)
+        self.strategy_panel.start_requested.connect(self._on_start_requested)
+        self.win.set_toggle_queue_action(
+            lambda: self.win.show_queue() if self.win.queue_dock.isHidden() else self.win.hide_queue()
+        )
+        self.queue_panel.pause_requested.connect(self._on_pause_requested)
+        self.queue_panel.cancel_requested.connect(self._on_cancel_requested)
+
+        self.notifier.probed.connect(self.file_panel.update_snapshot_row)
+        self.notifier.progress.connect(
+            lambda done, total: self.win.set_status(f"探测中：{done}/{total} ...")
+        )
+        self.notifier.all_done.connect(
+            lambda: self.win.set_status("编码信息探测完成")
+        )
+        self.notifier.task_updated.connect(self._on_task_updated)
+        self.notifier.encoding_done.connect(self._on_encoding_done)
+
+    # ── 文件列表填充 ──
+
+    def _populate_file_list(self, snapshots) -> dict:
         matched = {}
         for s in snapshots:
-            strategy = matcher.match(s)
+            strategy = self.matcher.match(s)
             matched[s.relative_path] = {
                 "strategy": strategy,
                 "estimate": estimate_savings(s, strategy),
             }
-        file_panel.populate(snapshots, matched, strategies)
+        self.file_panel.populate(snapshots, matched, self.strategies)
         return matched
 
-    def on_library_added(name):
+    # ── 库信号处理 ──
+
+    def _on_library_added(self, name):
         try:
-            lib = lib_mgr.create_library(name)
-            refresh_libraries()
+            self.lib_mgr.create_library(name)
+            self._refresh_libraries()
         except ValueError as e:
-            win.set_status(str(e))
+            self.win.set_status(str(e))
 
-    def on_folder_added(lib_id, path):
-        nonlocal current_snapshots, current_folder_paths, strategy_overrides
-        folder = lib_mgr.add_folder(lib_id, path)
-        refresh_libraries()
-        win.set_status(f"扫描 {path}...")
+    def _on_folder_added(self, lib_id, path):
+        folder = self.lib_mgr.add_folder(lib_id, path)
+        self._refresh_libraries()
+        self.win.set_status(f"扫描 {path}...")
 
-        # 阶段1：快速扫描，立即显示文件列表
-        snapshots = scanner.scan_folder_fast(folder.id, path)
-        current_snapshots = snapshots
-        current_folder_paths = {folder.id: path}
-        strategy_overrides = {}
+        snapshots = self.scanner.scan_folder_fast(folder.id, path)
+        self.current_snapshots = snapshots
+        self.current_folder_paths[folder.id] = path
+        self.strategy_overrides = {}
 
-        _populate_file_list(snapshots)
-        pending = scanner.pending_count
+        self._populate_file_list(snapshots)
+        pending = self.scanner.pending_count
         if pending > 0:
-            win.set_status(f"扫描中：0/{pending} 个文件已探测...")
-
-            def on_probed(snap):
-                notifier.probed.emit(snap)
+            self.win.set_status(f"扫描中：0/{pending} 个文件已探测...")
 
             done_count = [0]
             lock = threading.Lock()
 
-            def on_progress(snap):
+            def on_probed(snap):
+                self.notifier.probed.emit(snap)
+
+            def on_progress():
                 with lock:
                     done_count[0] += 1
-                    notifier.progress.emit(done_count[0], pending)
+                    self.notifier.progress.emit(done_count[0], pending)
 
             def on_finished():
-                notifier.all_done.emit()
+                self.notifier.all_done.emit()
 
-            def _probe_loop():
-                import time
-                while scanner.probe_next(on_probed):
-                    on_progress(None)
-                on_finished()
-
-            t = threading.Thread(target=_probe_loop, daemon=True)
-            t.start()
+            self.scanner.start_background_probe(on_probed, on_finished, on_progress)
         else:
-            win.set_status(f"扫描完成：{len(snapshots)} 个文件")
+            self.win.set_status(f"扫描完成：{len(snapshots)} 个文件")
 
-    notifier.probed.connect(file_panel.update_snapshot_row)
-    notifier.progress.connect(
-        lambda done, total: win.set_status(f"探测中：{done}/{total} ...")
-    )
-    notifier.all_done.connect(
-        lambda: win.set_status("编码信息探测完成")
-    )
-
-    def on_library_selected(lib_id):
-        nonlocal current_snapshots, current_folder_paths, strategy_overrides
-        folders = db.get_folders_for_library(lib_id)
+    def _on_library_selected(self, lib_id):
+        folders = self.db.get_folders_for_library(lib_id)
         snapshots: list = []
         folder_paths: dict[int, str] = {}
         for folder in folders:
             folder_paths[folder.id] = folder.path
-            # 直接从数据库加载缓存，不走文件系统（毫秒级）
-            snapshots.extend(scanner.load_cached(folder.id, folder.path))
-        current_folder_paths = folder_paths
-        strategy_overrides = {}
-        current_snapshots = snapshots
-        _populate_file_list(snapshots)
-        win.set_status(f"已加载 {len(snapshots)} 个文件")
+            snapshots.extend(self.scanner.load_cached(folder.id, folder.path))
+        self.current_folder_paths = folder_paths
+        self.strategy_overrides = {}
+        self.current_snapshots = snapshots
+        self._populate_file_list(snapshots)
+        self.win.set_status(f"已加载 {len(snapshots)} 个文件")
 
-    def on_strategy_override_changed(relative_path, strategy_name):
-        nonlocal active_custom_path
+    # ── 策略信号处理 ──
+
+    def _on_strategy_override_changed(self, relative_path, strategy_name):
         if strategy_name == "自定义":
-            active_custom_path = relative_path
+            self.active_custom_path = relative_path
             return
-        strategy_panel.show_preset_strategy()
-        active_custom_path = None
-        strategy = next((s for s in strategies if s.name == strategy_name), None)
+        self.strategy_panel.show_preset_strategy()
+        self.active_custom_path = None
+        strategy = next((s for s in self.strategies if s.name == strategy_name), None)
         if strategy is None:
-            strategy_overrides.pop(relative_path, None)
+            self.strategy_overrides.pop(relative_path, None)
         else:
-            strategy_overrides[relative_path] = strategy
+            self.strategy_overrides[relative_path] = strategy
 
-    def on_custom_strategy_requested(relative_path):
-        nonlocal active_custom_path
-        active_custom_path = relative_path
-        strategy_panel.show_custom_strategy()
+    def _on_custom_strategy_requested(self, relative_path):
+        self.active_custom_path = relative_path
+        self.strategy_panel.show_custom_strategy()
 
-    def on_custom_strategy_changed(strategy):
-        if not active_custom_path:
+    def _on_custom_strategy_changed(self, strategy):
+        if not self.active_custom_path:
             return
-        strategy_overrides[active_custom_path] = strategy
-        file_panel.apply_strategy_to_row(active_custom_path, strategy)
+        self.strategy_overrides[self.active_custom_path] = strategy
+        self.file_panel.apply_strategy_to_row(self.active_custom_path, strategy)
 
-    def on_start_requested():
+    # ── 编码控制 ──
+
+    def _on_start_requested(self):
+        if self.encoding_in_progress:
+            self.win.set_status("编码正在进行中，请等待完成")
+            return
         try:
-            default_strategy = strategy_panel.current_preset_strategy or strategy_panel.current_strategy
+            default_strategy = self.strategy_panel.current_preset_strategy or self.strategy_panel.current_strategy
             if default_strategy is None:
-                win.set_status("没有可用策略")
+                self.win.set_status("没有可用策略")
                 return
             tasks = build_encode_tasks(
-                current_snapshots,
-                current_folder_paths,
+                self.current_snapshots,
+                self.current_folder_paths,
                 default_strategy,
-                strategy_overrides,
+                self.strategy_overrides,
             )
             if not tasks:
-                win.set_status("没有可压缩文件")
+                self.win.set_status("没有可压缩文件")
                 return
-            queue_panel.clear_tasks()
+            self.queue_panel.clear_tasks()
             for task in tasks:
-                queue_panel.add_task_row(task)
+                self.queue_panel.add_task_row(task)
 
-            win.show_queue()
-            nonlocal active_manager
-            active_manager = WorkerManager(
-                FFmpegExecutor(temp_dir=strategy_panel.temp_dir),
-                strategy_panel.worker_count,
-                progress_callback=lambda t: notifier.task_updated.emit(t),
+            self.win.show_queue()
+            self.encoding_in_progress = True
+            self.active_manager = WorkerManager(
+                FFmpegExecutor(temp_dir=self.strategy_panel.temp_dir),
+                self.strategy_panel.worker_count,
+                progress_callback=lambda t: self.notifier.task_updated.emit(t),
             )
 
             def _run_encode():
-                active_manager.start(tasks)
-                notifier.encoding_done.emit()
+                try:
+                    self.active_manager.start(tasks)
+                finally:
+                    self.notifier.encoding_done.emit()
 
             t = threading.Thread(target=_run_encode, daemon=True)
             t.start()
         except Exception as e:
-            win.set_status(f"错误：{e}")
+            self.encoding_in_progress = False
+            self.win.set_status(f"错误：{e}")
 
-    def refresh_libraries():
-        libs = lib_mgr.get_all_libraries()
+    def _on_pause_requested(self):
+        if self.active_manager is None:
+            return
+        if self.active_manager.is_paused:
+            self.active_manager.resume()
+            self.win.set_status("编码已恢复")
+            self.queue_panel.pause_btn.setText("暂停")
+        else:
+            self.active_manager.pause()
+            self.win.set_status("编码已暂停（等待当前任务完成）")
+            self.queue_panel.pause_btn.setText("继续")
+
+    def _on_cancel_requested(self, _idx):
+        if self.active_manager is None:
+            return
+        self.active_manager.cancel()
+        self.win.set_status("正在取消编码...")
+
+    def _on_task_updated(self, task):
+        self.queue_panel.update_task_row(task)
+        if self.active_manager is None:
+            return
+        progress = self.active_manager.get_progress()
+        self.queue_panel.update_progress(progress)
+        self.win.set_status(
+            f"编码中：{progress['completed'] + progress['failed']}/{progress['total']}"
+        )
+
+    def _on_encoding_done(self):
+        self.encoding_in_progress = False
+        if self.active_manager is None:
+            return
+        results = self.active_manager.get_results()
+        done = sum(1 for t in results if t.status == TaskStatus.COMPLETED)
+        failed = sum(1 for t in results if t.status == TaskStatus.FAILED)
+        self.win.set_status(
+            f"编码完成：成功 {done}/{len(results)}"
+            + (f"，失败 {failed}" if failed else "")
+        )
+
+    # ── 库刷新 ──
+
+    def _refresh_libraries(self):
+        libs = self.lib_mgr.get_all_libraries()
         folders_map = {}
         for lib in libs:
-            folders_map[lib.id] = lib_mgr.get_folders(lib.id)
-        lib_panel.populate(libs, folders_map)
+            folders_map[lib.id] = self.lib_mgr.get_folders(lib.id)
+        self.lib_panel.populate(libs, folders_map)
 
-    lib_panel.library_added.connect(on_library_added)
-    lib_panel.folder_added.connect(on_folder_added)
-    lib_panel.library_selected.connect(on_library_selected)
-    lib_panel.library_deleted.connect(lib_mgr.delete_library)
-    lib_panel.folder_removed.connect(lib_mgr.remove_folder)
-    file_panel.strategy_override_changed.connect(on_strategy_override_changed)
-    file_panel.custom_strategy_requested.connect(on_custom_strategy_requested)
-    strategy_panel.custom_strategy_changed.connect(on_custom_strategy_changed)
-    strategy_panel.start_requested.connect(on_start_requested)
-    win.set_toggle_queue_action(lambda: win.show_queue() if win.queue_dock.isHidden() else win.hide_queue())
-    queue_panel.pause_requested.connect(lambda: win.set_status("暂停功能开发中"))
-    queue_panel.cancel_requested.connect(lambda idx: win.set_status(f"任务 {idx} 已取消"))
+    # ── 入口 ──
 
-    def _on_task_updated(task):
-        queue_panel.update_task_row(task)
-        if active_manager is None:
-            return
-        done = sum(1 for t in active_manager._tasks if t.status.value in ("completed", "failed", "skipped"))
-        total = len(active_manager._tasks)
-        queue_panel.update_progress({"completed": done, "failed": 0, "skipped": 0, "total": total, "percentage": done / total * 100 if total else 0})
-        win.set_status(f"编码中：{done}/{total}")
+    def run(self):
+        self.win.show()
+        sys.exit(self.app.exec())
 
-    def _on_encoding_done():
-        if active_manager is None:
-            return
-        done = sum(1 for t in active_manager._tasks if t.status == TaskStatus.COMPLETED)
-        failed = sum(1 for t in active_manager._tasks if t.status == TaskStatus.FAILED)
-        win.set_status(f"编码完成：成功 {done}/{len(active_manager._tasks)}" + (f"，失败 {failed}" if failed else ""))
 
-    notifier.task_updated.connect(_on_task_updated)
-    notifier.encoding_done.connect(_on_encoding_done)
-
-    refresh_libraries()
-    win.show()
-    sys.exit(app.exec())
+def main():
+    Application().run()
 
 
 if __name__ == "__main__":

@@ -37,3 +37,30 @@ def test_rename_library(mgr: LibraryManager):
     lib = mgr.create_library("Film")
     updated = mgr.rename_library(lib.id, "Movies")
     assert updated.name == "Movies"
+    assert updated.id == lib.id
+    # 验证持久化
+    libs = mgr.get_all_libraries()
+    assert libs[0].name == "Movies"
+
+
+def test_rename_library_persists(mgr: LibraryManager):
+    lib = mgr.create_library("Film")
+    mgr.rename_library(lib.id, "Movies")
+    libs = mgr.get_all_libraries()
+    assert len(libs) == 1
+    assert libs[0].name == "Movies"
+    assert libs[0].id == lib.id
+
+
+def test_rename_nonexistent_library_does_not_crash(mgr: LibraryManager):
+    """重命名不存在的库不应抛异常（SQL UPDATE 匹配 0 行）"""
+    updated = mgr.rename_library(999, "Ghost")
+    assert updated.id == 999
+    assert updated.name == "Ghost"
+
+
+def test_rename_to_duplicate_name_raises(mgr: LibraryManager):
+    mgr.create_library("Film")
+    mgr.create_library("Movies")
+    with pytest.raises(Exception):
+        mgr.rename_library(2, "Film")  # UNIQUE 约束冲突

@@ -58,3 +58,73 @@ def test_dovi_tool_build_inject_cmd():
     assert "inject-rpu" in cmd
     assert "encoded.hevc" in cmd
     assert "output.hevc" in cmd
+
+
+def test_extract_rpu_calls_subprocess_with_correct_args(monkeypatch):
+    import subprocess
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    result = DoviTool.extract_rpu("source.mkv", "/tmp/rpu.bin")
+    assert result is True
+    assert len(calls) == 1
+    assert "extract-rpu" in calls[0]
+    assert "source.mkv" in calls[0]
+    assert "/tmp/rpu.bin" in calls[0]
+    assert calls[0][calls[0].index("-o") + 1] == "/tmp/rpu.bin"
+
+
+def test_inject_rpu_calls_subprocess_with_correct_args(monkeypatch):
+    import subprocess
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    result = DoviTool.inject_rpu("encoded.hevc", "/tmp/rpu.bin", "output.mkv")
+    assert result is True
+    assert len(calls) == 1
+    assert "inject-rpu" in calls[0]
+    assert "encoded.hevc" in calls[0]
+    assert "--rpu-in" in calls[0]
+    assert "/tmp/rpu.bin" in calls[0]
+    assert calls[0][-1] == "output.mkv"
+
+
+def test_extract_rpu_returns_false_on_nonzero_exit(monkeypatch):
+    import subprocess
+
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 1, stderr="extraction error")
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    result = DoviTool.extract_rpu("source.mkv", "/tmp/rpu.bin")
+    assert result is False
+
+
+def test_inject_rpu_returns_false_on_nonzero_exit(monkeypatch):
+    import subprocess
+
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 1, stderr="injection error")
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    result = DoviTool.inject_rpu("bad.hevc", "/tmp/rpu.bin", "out.mkv")
+    assert result is False
+
+
+def test_extract_rpu_propagates_timeout(monkeypatch):
+    import subprocess
+
+    def fake_run(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, 120)
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    with pytest.raises(subprocess.TimeoutExpired):
+        DoviTool.extract_rpu("source.mkv", "/tmp/rpu.bin")

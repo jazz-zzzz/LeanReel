@@ -2,10 +2,8 @@
 from pathlib import Path
 
 from leanreel.core.strategy import Strategy
-from leanreel.data.database import Database
-from leanreel.data.models import Library, LibraryFolder
 from leanreel.data.models import FileSnapshot
-from leanreel.main import build_encode_tasks, load_library_snapshots, make_output_path
+from leanreel.main import build_encode_tasks, make_output_path
 
 
 def test_make_output_path_adds_suffix_without_overwriting_original():
@@ -66,30 +64,3 @@ def test_build_encode_tasks_supports_per_file_strategy_overrides():
     assert tasks[1].strategy is custom_strategy
 
 
-class RefreshingScanner:
-    def __init__(self):
-        self.calls = []
-
-    def scan_folder(self, folder_id, path):
-        self.calls.append((folder_id, path))
-        return [
-            FileSnapshot(
-                library_folder_id=folder_id,
-                relative_path="movie.mkv",
-                file_name="movie.mkv",
-                video_codec="hevc",
-            )
-        ]
-
-
-def test_load_library_snapshots_refreshes_folders_through_scanner(tmp_path):
-    db = Database(str(tmp_path / "test.db"))
-    lib_id = db.insert_library(Library(name="Film"))
-    folder_id = db.insert_folder(LibraryFolder(library_id=lib_id, path=str(tmp_path / "Film")))
-    scanner = RefreshingScanner()
-
-    snapshots, folder_paths = load_library_snapshots(db, scanner, lib_id)
-
-    assert scanner.calls == [(folder_id, str(tmp_path / "Film"))]
-    assert folder_paths == {folder_id: str(tmp_path / "Film")}
-    assert snapshots[0].video_codec == "hevc"

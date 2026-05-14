@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from threading import Lock
+from threading import Lock, Event
 from typing import Optional, Callable
 import time
 
@@ -46,6 +46,8 @@ class WorkerManager:
         self._tasks: list[EncodeTask] = []
         self._lock = Lock()
         self._cancelled = False
+        self._paused = Event()
+        self._paused.set()  # 初始为非暂停状态
 
     @property
     def total_tasks(self) -> int:
@@ -65,6 +67,8 @@ class WorkerManager:
 
     def start(self, tasks: list[EncodeTask]):
         self._tasks = tasks
+        self._cancelled = False
+        self._paused.set()
         active = [t for t in tasks if not t.pass_through]
         skipped = [t for t in tasks if t.pass_through]
         for t in skipped:
@@ -87,6 +91,7 @@ class WorkerManager:
                     pass
 
     def _run_one(self, task: EncodeTask):
+        self._paused.wait()  # 等待恢复（初始时不阻塞）
         with self._lock:
             if self._cancelled:
                 return
@@ -110,6 +115,25 @@ class WorkerManager:
 
     def cancel(self):
         self._cancelled = True
+        self._paused.set()  # 解除暂停，让线程可以退出
+        with self._lock:
+            for t in self._tasks:
+                if t.status == TaskStatus.PENDING:
+                    t.status = TaskStatus.CANCELLED
+
+    def pause(self):
+        self._paused.clear()
+
+    def resume(self):
+        self._paused.set()
+
+    @property
+    def is_paused(self) -> bool:
+        return not self._paused.is_set()
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self._cancelled
 
     def get_results(self) -> list[EncodeTask]:
         return list(self._tasks)

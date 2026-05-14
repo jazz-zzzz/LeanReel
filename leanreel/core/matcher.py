@@ -35,12 +35,6 @@ class Matcher:
         return True
 
 
-def match_strategy(snapshot: FileSnapshot, strategies: list[Strategy]) -> Strategy:
-    """便捷函数 — 返回匹配的策略"""
-    m = Matcher(strategies)
-    return m.match(snapshot)
-
-
 def estimate_savings(snapshot: FileSnapshot, strategy: Strategy) -> dict:
     """估算压缩节省空间"""
     savings_str = strategy.estimated_savings

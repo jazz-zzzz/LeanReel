@@ -141,15 +141,35 @@ class QueuePanel(QWidget):
         self.total_label.setText("就绪")
 
     def update_task_row(self, task):
-        """更新已存在的任务行（根据 file_name 匹配）"""
+        """增量更新已存在的任务行（根据 file_name 匹配）"""
         for i in range(self.task_layout.count()):
             item = self.task_layout.itemAt(i)
             if item and item.widget():
                 row = item.widget()
-                # 找到匹配的行，用新的替换
                 labels = row.findChildren(QLabel)
-                if labels and labels[1].text() == task.file_name:
-                    self.task_layout.removeWidget(row)
-                    row.deleteLater()
-                    break
-        self.add_task_row(task)
+                if len(labels) < 2:
+                    continue
+                if labels[1].text() != task.file_name:
+                    continue
+
+                # 更新状态图标
+                icon_label = labels[0]
+                icon_color = _STATUS_COLORS.get(task.status, QColor("#5c5851"))
+                icon_label.setText(_STATUS_ICONS.get(task.status, "?"))
+                icon_label.setStyleSheet(f"color: {icon_color.name()}; font-weight: bold; font-size: 14px;")
+
+                # 更新进度/大小信息
+                info_label = labels[2]
+                if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+                    orig = _format_bytes(task.original_size)
+                    comp = _format_bytes(task.compressed_size) if task.compressed_size else "—"
+                    ratio = ""
+                    if task.compressed_size and task.original_size:
+                        pct = (1 - task.compressed_size / task.original_size) * 100
+                        ratio = f" ({pct:.0f}%)"
+                    info_label.setText(f"{orig} → {comp}{ratio}")
+                elif task.status == TaskStatus.RUNNING:
+                    info_label.setText(f"压缩中... {task.progress:.0f}%")
+                else:
+                    info_label.setText(_format_bytes(task.original_size))
+                return

@@ -66,3 +66,52 @@ def test_pass_through_filter_no_encoding():
     mgr.start(tasks)
     assert mgr.completed_count == 1
     assert mgr.skipped_count == 1
+
+
+def test_pause_resume_toggles_state():
+    mgr = WorkerManager(FakeExecutor())
+    assert not mgr.is_paused
+    mgr.pause()
+    assert mgr.is_paused
+    mgr.resume()
+    assert not mgr.is_paused
+
+
+def test_cancel_sets_flag_and_marks_pending_cancelled():
+    tasks = [
+        EncodeTask(file_name="a.mkv", input_path="/t/a.mkv", output_path="/o/a.mkv"),
+        EncodeTask(file_name="b.mkv", input_path="/t/b.mkv", output_path="/o/b.mkv"),
+    ]
+    mgr = WorkerManager(FakeExecutor())
+    mgr._tasks = tasks  # 直接注入，不走 start()
+    mgr.cancel()
+    assert mgr.is_cancelled
+    assert all(t.status == TaskStatus.CANCELLED for t in tasks)
+
+
+def test_cancel_also_resumes_paused_state():
+    mgr = WorkerManager(FakeExecutor())
+    mgr.pause()
+    assert mgr.is_paused
+    mgr.cancel()
+    assert not mgr.is_paused  # 取消时必须解除暂停，否则线程死锁
+
+
+def test_get_progress_returns_correct_counts():
+    tasks = [
+        EncodeTask(file_name="a.mkv", input_path="/t/a.mkv", output_path="/o/a.mkv"),
+        EncodeTask(file_name="b.mkv", input_path="/t/b.mkv", output_path="/o/b.mkv"),
+        EncodeTask(file_name="c.mkv", input_path="/t/c.mkv", output_path="/o/c.mkv"),
+    ]
+    tasks[0].status = TaskStatus.COMPLETED
+    tasks[1].status = TaskStatus.RUNNING
+    tasks[2].status = TaskStatus.PENDING
+
+    mgr = WorkerManager(FakeExecutor())
+    mgr._tasks = tasks
+    progress = mgr.get_progress()
+    assert progress["total"] == 3
+    assert progress["completed"] == 1  # COMPLETED + SKIPPED
+    assert progress["failed"] == 0
+    assert progress["pending"] == 2  # total - (completed_count + failed_count)
+    assert progress["percentage"] == pytest.approx(100 / 3)

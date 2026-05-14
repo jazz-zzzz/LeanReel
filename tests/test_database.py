@@ -25,12 +25,13 @@ def test_create_tables(db: Database):
 def test_insert_and_get_library(db: Database):
     lib = Library(name="Film")
     lib_id = db.insert_library(lib)
-    assert lib_id == 1
+    assert isinstance(lib_id, int)
+    assert lib_id > 0
 
     libs = db.get_all_libraries()
     assert len(libs) == 1
     assert libs[0].name == "Film"
-    assert libs[0].id == 1
+    assert libs[0].id == lib_id
 
 
 def test_write_persists_across_connections(tmp_path: Path):
@@ -58,11 +59,13 @@ def test_folder_crud(db: Database):
     lib_id = db.insert_library(Library(name="Film"))
     folder = LibraryFolder(library_id=lib_id, path="/mnt/nas/Film")
     fid = db.insert_folder(folder)
-    assert fid == 1
+    assert isinstance(fid, int)
+    assert fid > 0
 
     folders = db.get_folders_for_library(lib_id)
     assert len(folders) == 1
     assert folders[0].path == "/mnt/nas/Film"
+    assert folders[0].id == fid
 
 
 def test_compression_history(db: Database):

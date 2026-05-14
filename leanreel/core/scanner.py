@@ -95,17 +95,6 @@ class Scanner:
 
         return results
 
-    def _load_all_snapshots(self, library_folder_id: int, folder_path: str) -> list[FileSnapshot]:
-        """从数据库加载指定文件夹的全部快照"""
-        folder_path = os.path.normpath(folder_path)
-        found = self._find_video_files(folder_path)
-        results = []
-        for rel_path, _abs_path in found:
-            snap = self._get_cached_snapshot(library_folder_id, rel_path)
-            if snap:
-                results.append(snap)
-        return results
-
     def scan_folder_fast(self, library_folder_id: int, folder_path: str) -> list[FileSnapshot]:
         """快速扫描：立即返回文件列表（优先缓存，无缓存则返回仅含文件名+体积的占位快照）。
 
@@ -246,13 +235,48 @@ class Scanner:
              snap.file_mtime, 1 if snap.probe_ok else 0]
         )
 
-    def start_background_probe(self, on_done: Callable[[FileSnapshot], None], on_finished: Callable[[], None] | None = None):
-        """在后台线程依次探测所有待处理文件，每个完成后回调 on_done（在探测线程调用）"""
+    def start_background_probe(self, on_done: Callable[[FileSnapshot], None], on_finished: Callable[[], None] | None = None, on_progress: Callable[[], None] | None = None):
+        """在后台线程池并行探测所有待处理文件，每个完成后回调 on_done（在探测线程调用）"""
+        import concurrent.futures
 
         def _run():
-            import time
-            while self.probe_next(on_done):
-                pass
+            jobs: list[tuple[int, str, str, int]] = []
+            with self._probe_lock:
+                jobs = list(self._pending_jobs)
+                self._pending_jobs = []
+
+            def _probe_one(job):
+                folder_id, rel_path, abs_path, file_size = job
+                try:
+                    fmtime = os.path.getmtime(abs_path)
+                except OSError:
+                    fmtime = 0.0
+                probe = self._get_probe()
+                try:
+                    snap = probe.probe(abs_path, folder_id)
+                    snap.relative_path = rel_path
+                    snap.file_mtime = fmtime
+                    snap.probe_ok = True
+                except Exception:
+                    snap = FileSnapshot(
+                        library_folder_id=folder_id,
+                        relative_path=rel_path,
+                        file_name=os.path.basename(abs_path),
+                        size_bytes=file_size,
+                        file_mtime=fmtime,
+                        probe_ok=False,
+                    )
+                self._upsert_snapshot(snap)
+                if on_done:
+                    on_done(snap)
+                if on_progress:
+                    on_progress()
+
+            if jobs:
+                workers = min(self.max_workers, len(jobs))
+                with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+                    pool.map(_probe_one, jobs)
+
             if on_finished:
                 on_finished()
 
