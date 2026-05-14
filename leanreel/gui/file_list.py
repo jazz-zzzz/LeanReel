@@ -6,7 +6,8 @@ from typing import Any
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem,
-    QHeaderView, QLabel, QHBoxLayout, QComboBox
+    QHeaderView, QLabel, QHBoxLayout, QComboBox, QStackedWidget,
+    QTreeWidget, QTreeWidgetItem
 )
 from PySide6.QtCore import Signal, Qt
 
@@ -81,6 +82,10 @@ class FileListPanel(QWidget):
         super().__init__()
         self._snapshots_by_path: dict[str, Any] = {}
         self._strategy_lookup: dict[str, Any] = {}
+        self._last_snapshots: list[Any] = []
+        self._last_matches: dict[str, Any] = {}
+        self._last_strategies: list[Any] | None = None
+        self.current_view_mode = "flat"
         self.setup_ui()
 
     def setup_ui(self):
@@ -90,10 +95,17 @@ class FileListPanel(QWidget):
         # 顶部信息栏
         info_layout = QHBoxLayout()
         self.summary_label = QLabel("未扫描")
+        self.view_combo = QComboBox()
+        self.view_combo.addItem("平铺", "flat")
+        self.view_combo.addItem("目录树", "tree")
+        self.view_combo.currentIndexChanged.connect(
+            lambda _i: self.set_view_mode(self.view_combo.currentData())
+        )
         self.filter_combo = QComboBox()
         self.filter_combo.addItems(["全部", "待处理", "已跳过", "已完成"])
         info_layout.addWidget(self.summary_label)
         info_layout.addStretch()
+        info_layout.addWidget(self.view_combo)
         info_layout.addWidget(self.filter_combo)
         layout.addLayout(info_layout)
 
@@ -107,10 +119,26 @@ class FileListPanel(QWidget):
         self.table.horizontalHeader().setStretchLastSection(True)
         header = self.table.horizontalHeader()
         header.setSortIndicatorShown(True)
-        header.setSectionResizeMode(0, QHeaderView.Stretch)
-        for i in range(1, len(_HEADERS)):
-            header.setSectionResizeMode(i, QHeaderView.ResizeToContents)
-        layout.addWidget(self.table)
+        header.setSectionsMovable(False)
+        for i in range(len(_HEADERS)):
+            header.setSectionResizeMode(i, QHeaderView.Interactive)
+        self.table.setColumnWidth(0, 300)
+        self.table.setColumnWidth(1, 100)
+        self.table.setColumnWidth(2, 110)
+        self.table.setColumnWidth(3, 90)
+        self.table.setColumnWidth(4, 170)
+        self.table.setColumnWidth(5, 180)
+
+        self.tree = QTreeWidget()
+        self.tree.setColumnCount(len(_HEADERS))
+        self.tree.setHeaderLabels(_HEADERS)
+        self.tree.setSortingEnabled(True)
+        self.tree.hide()
+
+        self.stack = QStackedWidget()
+        self.stack.addWidget(self.table)
+        self.stack.addWidget(self.tree)
+        layout.addWidget(self.stack)
 
     def populate(self, snapshots: list, matched_strategies: dict, strategies: list | None = None):
         """Populate rows from snapshots and compatible strategy/estimate mappings.
@@ -119,6 +147,9 @@ class FileListPanel(QWidget):
         shape as well as Strategy objects or dictionaries containing strategy
         and estimate fields.
         """
+        self._last_snapshots = list(snapshots)
+        self._last_matches = dict(matched_strategies)
+        self._last_strategies = strategies
         self._snapshots_by_path = {snap.relative_path: snap for snap in snapshots}
         self._strategy_lookup = self._build_strategy_lookup(strategies)
         self.table.setSortingEnabled(False)
@@ -133,7 +164,7 @@ class FileListPanel(QWidget):
                 row, 1,
                 SortableTableWidgetItem(_format_bytes(snap.size_bytes), snap.size_bytes),
             )
-            self.table.setItem(row, 2, QTableWidgetItem(snap.video_codec))
+            self.table.setItem(row, 2, QTableWidgetItem(self._format_codec(snap.video_codec)))
             self.table.setItem(row, 3, QTableWidgetItem(self._format_hdr(snap.hdr_type)))
             strategy_name, savings_text, savings_sort = self._resolve_match_display(
                 snap, matched_strategies.get(snap.relative_path)
@@ -152,9 +183,13 @@ class FileListPanel(QWidget):
             f"已扫描 {len(snapshots)} 个文件 · 总计 {total_tb:.2f} TB"
         )
         self.table.setSortingEnabled(True)
+        self._populate_tree(snapshots, matched_strategies)
 
     def _format_hdr(self, hdr_type: Any) -> str:
         return getattr(hdr_type, "value", str(hdr_type))
+
+    def _format_codec(self, codec: str) -> str:
+        return codec or "未识别"
 
     def _build_strategy_lookup(self, strategies: list | None) -> dict[str, Any]:
         lookup: dict[str, Any] = {}
@@ -166,6 +201,7 @@ class FileListPanel(QWidget):
 
     def _create_strategy_combo(self, relative_path: str, selected_name: str) -> QComboBox:
         combo = QComboBox()
+        combo.setMinimumWidth(140)
         names = list(self._strategy_lookup)
         if selected_name and selected_name != "未匹配" and selected_name not in names:
             names.insert(0, selected_name)
@@ -178,6 +214,46 @@ class FileListPanel(QWidget):
             lambda strategy_name, path=relative_path: self._on_strategy_combo_changed(path, strategy_name)
         )
         return combo
+
+    def set_view_mode(self, mode: str):
+        if mode not in {"flat", "tree"}:
+            return
+        self.current_view_mode = mode
+        if mode == "tree":
+            self.stack.setCurrentWidget(self.tree)
+            self.table.hide()
+            self.tree.show()
+        else:
+            self.stack.setCurrentWidget(self.table)
+            self.tree.hide()
+            self.table.show()
+
+    def _populate_tree(self, snapshots: list, matched_strategies: dict):
+        self.tree.clear()
+        folders: dict[str, QTreeWidgetItem] = {}
+        for snap in snapshots:
+            folder_name = str(snap.relative_path).replace("\\", "/").rsplit("/", 1)[0]
+            folder_name = folder_name or "."
+            folder_item = folders.get(folder_name)
+            if folder_item is None:
+                folder_item = QTreeWidgetItem([folder_name])
+                folder_item.setFirstColumnSpanned(True)
+                folders[folder_name] = folder_item
+                self.tree.addTopLevelItem(folder_item)
+            strategy_name, savings_text, _savings_sort = self._resolve_match_display(
+                snap, matched_strategies.get(snap.relative_path)
+            )
+            child = QTreeWidgetItem([
+                snap.file_name,
+                _format_bytes(snap.size_bytes),
+                self._format_codec(snap.video_codec),
+                self._format_hdr(snap.hdr_type),
+                strategy_name,
+                savings_text,
+            ])
+            child.setData(0, Qt.UserRole, snap.relative_path)
+            folder_item.addChild(child)
+        self.tree.expandAll()
 
     def _on_strategy_combo_changed(self, relative_path: str, strategy_name: str):
         row = self._find_row_by_relative_path(relative_path)

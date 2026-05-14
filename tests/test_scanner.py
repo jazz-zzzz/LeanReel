@@ -1,5 +1,6 @@
 """扫描器测试"""
 import json
+import time
 import pytest
 from pathlib import Path
 from leanreel.data.database import Database
@@ -71,6 +72,24 @@ class FailingFFprobe:
         raise AssertionError("cached scan should not call ffprobe")
 
 
+class CountingFFprobe(MockFFprobe):
+    def __init__(self):
+        self.calls = 0
+
+    def probe(self, file_path, library_folder_id=0):
+        self.calls += 1
+        return super().probe(file_path, library_folder_id)
+
+
+class SlowFFprobe(MockFFprobe):
+    def __init__(self, delay: float = 0.05):
+        self.delay = delay
+
+    def probe(self, file_path, library_folder_id=0):
+        time.sleep(self.delay)
+        return super().probe(file_path, library_folder_id)
+
+
 def test_scanner_finds_video_files(tmp_path: Path):
     (tmp_path / "movie.mkv").write_text("fake")
     (tmp_path / "poster.jpg").write_text("not video")
@@ -101,6 +120,46 @@ def test_scanner_caches_results(tmp_path: Path):
     first = scanner.scan_folder(folder_id, str(tmp_path))
     second = scanner.scan_folder(folder_id, str(tmp_path))
     assert len(first) == len(second)
+
+
+def test_scanner_reprobes_cached_snapshot_without_codec(tmp_path: Path):
+    (tmp_path / "movie.mkv").write_text("fake")
+
+    from leanreel.core.scanner import Scanner
+    db = Database(str(tmp_path / "test.db"))
+    lib_id = db.insert_library(Library(name="Test"))
+    folder_id = db.insert_folder(LibraryFolder(library_id=lib_id, path=str(tmp_path)))
+    db.execute(
+        """INSERT INTO file_snapshot
+           (library_folder_id, relative_path, file_name, size_bytes, video_codec)
+           VALUES (?,?,?,?,?)""",
+        [folder_id, "movie.mkv", "movie.mkv", (tmp_path / "movie.mkv").stat().st_size, ""],
+    )
+    probe = CountingFFprobe()
+    scanner = Scanner(db, probe_runner=probe)
+
+    result = scanner.scan_folder(folder_id, str(tmp_path))
+
+    assert probe.calls == 1
+    assert result[0].video_codec == "hevc"
+
+
+def test_scanner_probes_changed_files_concurrently(tmp_path: Path):
+    for i in range(4):
+        (tmp_path / f"movie-{i}.mkv").write_text("fake")
+
+    from leanreel.core.scanner import Scanner
+    db = Database(str(tmp_path / "test.db"))
+    lib_id = db.insert_library(Library(name="Test"))
+    folder_id = db.insert_folder(LibraryFolder(library_id=lib_id, path=str(tmp_path)))
+    scanner = Scanner(db, probe_runner=SlowFFprobe(), max_workers=4)
+
+    started = time.perf_counter()
+    result = scanner.scan_folder(folder_id, str(tmp_path))
+    elapsed = time.perf_counter() - started
+
+    assert len(result) == 4
+    assert elapsed < 0.16
 
 
 def test_scanner_persists_tracks_as_json_and_restores_typed_snapshot(tmp_path: Path):

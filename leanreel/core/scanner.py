@@ -1,6 +1,7 @@
 """文件扫描器 — 递归扫描视频文件，FFprobe 提取元数据并缓存"""
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from pathlib import Path
 from typing import Optional
@@ -14,9 +15,10 @@ VIDEO_EXTENSIONS = {".mkv", ".mp4", ".avi", ".ts", ".mov", ".wmv", ".m2ts", ".mt
 class Scanner:
     """文件夹扫描器：递归发现视频文件，调用 FFprobe 提取元数据，结果缓存至 SQLite"""
 
-    def __init__(self, db: Database, probe_runner=None):
+    def __init__(self, db: Database, probe_runner=None, max_workers: int = 4):
         self.db = db
         self._probe = probe_runner
+        self.max_workers = max(1, max_workers)
 
     def _get_probe(self):
         if self._probe is None:
@@ -29,31 +31,49 @@ class Scanner:
         folder_path = os.path.normpath(folder_path)
         found_files = self._find_video_files(folder_path)
         results = []
+        probe_jobs = []
         for rel_path, abs_path in found_files:
             # 检查是否已有缓存
             existing = self._get_cached_snapshot(library_folder_id, rel_path)
             file_size = os.path.getsize(abs_path)
-            if existing and existing.size_bytes == file_size:
+            if existing and existing.size_bytes == file_size and self._has_probe_metadata(existing):
                 results.append(existing)
                 continue
 
-            # 运行 FFprobe
+            probe_jobs.append((rel_path, abs_path, file_size))
+
+        for snap in self._probe_files(library_folder_id, probe_jobs):
+            self._upsert_snapshot(snap)
+            results.append(snap)
+        return results
+
+    def _probe_files(self, library_folder_id: int, jobs: list[tuple[str, str, int]]) -> list[FileSnapshot]:
+        if not jobs:
+            return []
+        probe = self._get_probe()
+
+        def run(job: tuple[str, str, int]) -> FileSnapshot:
+            rel_path, abs_path, file_size = job
             try:
-                snap = self._get_probe().probe(abs_path, library_folder_id)
+                snap = probe.probe(abs_path, library_folder_id)
                 snap.relative_path = rel_path
-                self._upsert_snapshot(snap)
-                results.append(snap)
+                return snap
             except Exception:
-                # 如果 FFprobe 失败，使用最小信息创建快照
-                snap = FileSnapshot(
+                return FileSnapshot(
                     library_folder_id=library_folder_id,
                     relative_path=rel_path,
                     file_name=os.path.basename(abs_path),
                     size_bytes=file_size,
                 )
-                self._upsert_snapshot(snap)
-                results.append(snap)
-        return results
+
+        if len(jobs) == 1 or self.max_workers == 1:
+            return [run(job) for job in jobs]
+        with ThreadPoolExecutor(max_workers=min(self.max_workers, len(jobs))) as pool:
+            return list(pool.map(run, jobs))
+
+    def _has_probe_metadata(self, snap: FileSnapshot) -> bool:
+        """A cache entry without codec data came from a failed/old probe and should be refreshed."""
+        return bool(snap.video_codec) and snap.video_width > 0 and snap.video_height > 0
 
     def _find_video_files(self, folder_path: str) -> list[tuple[str, str]]:
         """递归查找所有视频文件，返回 (相对路径, 绝对路径) 列表"""
