@@ -112,6 +112,8 @@ class FileListPanel(QWidget):
         self._row_by_path: dict[str, int] = {}
         self._row_status_keys: dict[int, str] = {}
         self._row_processable: dict[int, bool] = {}
+        self._populate_gen = 0
+        self._path_gen: dict[str, int] = {}
         self.current_view_mode = "flat"
         self.setup_ui()
 
@@ -212,6 +214,7 @@ class FileListPanel(QWidget):
         ``matched_strategies`` 将 ``relative_path`` 映射到 ``MatchResult``，
         或 ``None``（表示未匹配）。
         """
+        self._populate_gen += 1
         self._last_snapshots = list(snapshots)
         self._last_matches = dict(matched_strategies)
         self._last_strategies = strategies
@@ -219,6 +222,7 @@ class FileListPanel(QWidget):
         self._row_by_path = {}
         self._row_status_keys = {}
         self._row_processable = {}
+        self._path_gen = {snap.relative_path: self._populate_gen for snap in snapshots}
         self._strategy_lookup = self._build_strategy_lookup(strategies)
 
         if not snapshots:
@@ -468,13 +472,15 @@ class FileListPanel(QWidget):
                 item.setToolTip(decision.tooltip)
         self._apply_filter()
 
-    def update_snapshot_row(self, snap: Any):
+    def update_snapshot_row(self, snap: Any, match: Any = None):
         """后台探测完成后增量更新单行编码信息。"""
         relative_path = str(getattr(snap, "relative_path", ""))
         if not relative_path:
             return
 
         self._snapshots_by_path[relative_path] = snap
+        if match is not None:
+            self._last_matches[relative_path] = match
         row = self._row_by_path.get(relative_path)
         if row is not None:
             # 验证缓存行号未因排序而失效
@@ -507,6 +513,33 @@ class FileListPanel(QWidget):
             hdr_item = QTableWidgetItem(self._format_hdr(snap.hdr_type))
             hdr_item.setForeground(self._hdr_color(getattr(snap, "hdr_type", None)))
             self.table.setItem(row, 4, hdr_item)
+            # 更新列 5（处理状态）和列 6（预计结果）
+            match = self._last_matches.get(relative_path)
+            decision = self._decision_display(snap, match)
+            self._row_status_keys[row] = decision.status_key
+            self._row_processable[row] = decision.processable
+            self.table.setItem(
+                row, 6,
+                SortableTableWidgetItem(decision.result_text, decision.result_sort),
+            )
+            combo = self.table.cellWidget(row, 5)
+            if isinstance(combo, QComboBox):
+                if decision.processable and self._last_strategies:
+                    if combo.findText(decision.strategy_text) < 0:
+                        combo.addItem(decision.strategy_text)
+                    combo.blockSignals(True)
+                    combo.setCurrentText(decision.strategy_text)
+                    combo.blockSignals(False)
+                else:
+                    combo.setEnabled(False)
+            else:
+                strategy_item = QTableWidgetItem(decision.strategy_text)
+                strategy_item.setToolTip(decision.tooltip)
+                if decision.status_key == "protected":
+                    strategy_item.setForeground(_COLOR_HDR_DV)
+                elif decision.status_key == "probe_failed":
+                    strategy_item.setForeground(_COLOR_PROBE_FAILED)
+                self.table.setItem(row, 5, strategy_item)
 
     def _find_row_by_relative_path(self, relative_path: str) -> int | None:
         for row in range(self.table.rowCount()):

@@ -26,7 +26,7 @@ from leanreel.data.models import TaskStatus
 
 class ProbeNotifier(QObject):
     """线程安全的通知器"""
-    probed = Signal(object)
+    probed = Signal(object, object)  # snapshot, MatchResult|None
     all_done = Signal()
     progress = Signal(int, int)  # done, total
     scan_finished = Signal(object, int, str, object)  # snapshots, folder_id, folder_path, pending_jobs
@@ -318,6 +318,8 @@ class Application:
         self.current_folder_paths: dict[int, str] = {}
         self.strategy_overrides: dict[str, Strategy] = {}
         self.active_custom_path: str | None = None
+        self._refresh_running = False
+        self._scan_token = 0
 
     def _init_notifier(self):
         self.notifier = ProbeNotifier()
@@ -415,6 +417,9 @@ class Application:
 
     def _on_scan_finished(self, snapshots, folder_id, folder_path, pending_jobs):
         """扫描后台线程完成后的回调（在主线程执行）"""
+        self._scan_token += 1
+        my_token = self._scan_token
+
         if folder_id is not None:
             self.current_folder_paths[folder_id] = folder_path
             self.current_snapshots = [
@@ -444,14 +449,25 @@ class Application:
             lock = threading.Lock()
 
             def on_probed(snap):
-                self.notifier.probed.emit(snap)
+                if self._scan_token != my_token:
+                    return  # 旧扫描的回调，丢弃
+                if snap.probe_ok:
+                    strategy = self.services.matcher.match(snap)
+                    match = MatchResult(strategy=strategy, estimate=estimate_savings(snap, strategy) if strategy else None) if strategy else None
+                else:
+                    match = None
+                self.notifier.probed.emit(snap, match)
 
             def on_progress():
+                if self._scan_token != my_token:
+                    return
                 with lock:
                     done_count[0] += 1
                     self.notifier.progress.emit(done_count[0], pending)
 
             def on_finished():
+                if self._scan_token != my_token:
+                    return
                 self.notifier.all_done.emit()
 
             self.services.scanner.start_background_probe_jobs(
@@ -498,17 +514,25 @@ class Application:
             self.win.set_status("没有已添加的文件夹，请先添加文件夹")
             return
 
+        if self._refresh_running:
+            self.win.set_status("扫描已在进行中，请等待完成")
+            return
+
+        self._refresh_running = True
         self.win.set_status("扫描中...")
         folders_at_call = list(self.current_folder_paths.items())
 
         def _scan_in_background():
-            all_snapshots: list = []
-            all_jobs: list = []
-            for folder_id, path in folders_at_call:
-                batch = self.services.scanner.scan_folder_fast_batch(folder_id, path)
-                all_snapshots.extend(batch.snapshots)
-                all_jobs.extend(batch.pending_jobs)
-            self.notifier.scan_finished.emit(all_snapshots, None, None, all_jobs)
+            try:
+                all_snapshots: list = []
+                all_jobs: list = []
+                for folder_id, path in folders_at_call:
+                    batch = self.services.scanner.scan_folder_fast_batch(folder_id, path)
+                    all_snapshots.extend(batch.snapshots)
+                    all_jobs.extend(batch.pending_jobs)
+                self.notifier.scan_finished.emit(all_snapshots, None, None, all_jobs)
+            finally:
+                self._refresh_running = False
 
         threading.Thread(target=_scan_in_background, daemon=True).start()
 
