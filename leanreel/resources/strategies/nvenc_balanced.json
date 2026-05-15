@@ -4,8 +4,8 @@
   "is_preset": true,
   "video": {"encoder": "hevc_nvenc", "crf": 0, "preset": "", "pix_fmt": "yuv420p10le", "gpu": true, "nv_preset": "p7", "rc": "vbr", "cq": 18},
   "hdr": {"mode": "preserve_hdr10", "dv_handling": "reinject_rpu"},
-  "audio": {"mode": "keep_original", "remove_commentary": true, "preferred_languages": ["chi", "zho", "eng"]},
-  "subtitle": {"mode": "keep_chinese"},
+  "audio": {"mode": "keep_original", "remove_commentary": false},
+  "subtitle": {"mode": "keep_all"},
   "filters": {"skip_x265": true, "min_size_gb": null, "only_remux": false},
   "estimated_savings": "35-50%",
   "quality_impact": "GPU 加速视觉无损，SDR 安全，完整保留所有流和元数据"
