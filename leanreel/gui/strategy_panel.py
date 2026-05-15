@@ -245,12 +245,12 @@ class StrategyPanel(QWidget):
 
         self.custom_cq_spin = QSpinBox()
         self.custom_cq_spin.setRange(0, 51)
-        self.custom_cq_spin.setValue(23)
+        self.custom_cq_spin.setValue(18)
         self.cq_label = QLabel("CQ")
 
         self.custom_nvpreset_combo = QComboBox()
         self.custom_nvpreset_combo.addItems([p.upper() for p in _NV_PRESETS])
-        self.custom_nvpreset_combo.setCurrentText("P1")
+        self.custom_nvpreset_combo.setCurrentText("P7")
         self.nvpreset_label = QLabel("NV 预设")
 
         self.custom_audio_combo = QComboBox()
@@ -382,12 +382,14 @@ class StrategyPanel(QWidget):
             savings = "5-15%"
         else:
             cq_val = self.custom_cq_spin.value()
-            if cq_val <= 20:
-                savings = "20-35%"
-            elif cq_val <= 23:
-                savings = "35-50%"
+            if cq_val <= 16:
+                savings = "15-30%"
+            elif cq_val <= 18:
+                savings = "20-40%"
+            elif cq_val <= 22:
+                savings = "30-50%"
             else:
-                savings = "50-70%"
+                savings = "40-60%"
 
         nv_preset = self.custom_nvpreset_combo.currentText().lower()
 

@@ -314,7 +314,7 @@ def test_strategy_panel_custom_controls_emit_recomputed_strategy():
     assert changes
     assert changes[-1].name == "自定义"
     assert changes[-1].video.cq == 25
-    assert changes[-1].estimated_savings == "50-70%"
+    assert changes[-1].estimated_savings == "40-60%"
     assert panel.current_strategy.name == "自定义"
     panel.close()
 
