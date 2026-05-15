@@ -72,6 +72,7 @@ def test_file_list_shows_unknown_when_codec_missing():
         file_name="clip.mkv",
         size_bytes=1024,
         video_codec="",
+        probe_ok=True,  # probe 成功但无视频流（如纯音频文件），应显示"未识别"
     )
 
     panel.populate([snap], {"clip.mkv": None})
@@ -307,12 +308,12 @@ def test_strategy_panel_custom_controls_emit_recomputed_strategy():
     panel.custom_strategy_changed.connect(changes.append)
 
     panel.show_custom_strategy()
-    panel.custom_crf_spin.setValue(22)
+    panel.custom_cq_spin.setValue(25)
 
     assert panel.custom_group.isVisibleTo(panel)
     assert changes
     assert changes[-1].name == "自定义"
-    assert changes[-1].video.crf == 22
+    assert changes[-1].video.cq == 25
     assert changes[-1].estimated_savings == "50-70%"
     assert panel.current_strategy.name == "自定义"
     panel.close()

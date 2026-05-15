@@ -83,12 +83,13 @@ def _has_nvenc() -> bool:
 
 
 def _prioritize_strategies(strategies: list) -> list:
-    """GPU 可用时将 GPU 策略排到前面，CPU 策略排后面。"""
+    """仅保留 GPU 策略；如果 NVENC 不可用则保留全部（回退到 CPU）。"""
     if not _has_nvenc():
         return strategies
     gpu = [s for s in strategies if getattr(getattr(s, "video", None), "is_gpu", False)]
-    cpu = [s for s in strategies if not getattr(getattr(s, "video", None), "is_gpu", False)]
-    return gpu + cpu
+    # 始终保留 copy 模式（仅去冗余，不需要编码器）
+    copy = [s for s in strategies if getattr(getattr(s, "video", None), "encoder", "") == "copy"]
+    return gpu + copy
 
 
 def clear_current_state():
