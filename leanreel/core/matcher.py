@@ -36,17 +36,47 @@ class Matcher:
 
 
 def estimate_savings(snapshot: FileSnapshot, strategy: Strategy) -> dict:
-    """估算压缩节省空间"""
-    savings_str = strategy.estimated_savings
-    try:
-        parts = savings_str.replace("%", "").split("-")
-        lo = float(parts[0]) / 100
-        hi = float(parts[1]) / 100 if len(parts) > 1 else lo
-    except (ValueError, IndexError):
-        lo, hi = 0.1, 0.3
+    """基于 NVENC CQ 值、分辨率和位深科学估算压缩后体积。
+
+    模型：
+      base = 0.65 * exp(-0.08 * (CQ - 14))           ← CQ 指数衰减
+      adj_res = 0.85 (4K) / 1.0 (1080p) / 1.15 (<1080p)
+      adj_hdr = 1.08 (10-bit) / 1.0 (8-bit)
+      ratio = clamp(base * adj_res * adj_hdr, 0.08, 0.70)
+    """
+    import math
+    cq = getattr(getattr(strategy, "video", None), "cq", 23) or 23
+    encoder = getattr(getattr(strategy, "video", None), "encoder", "") or ""
+
+    # copy 模式几乎无节省
+    if encoder == "copy":
+        base = 0.95
+    else:
+        base = 0.65 * math.exp(-0.08 * (cq - 14))
+
+    # 分辨率调整
+    h = snapshot.video_height or 1080
+    if h >= 2160:
+        adj_res = 0.85
+    elif h >= 1080:
+        adj_res = 1.0
+    else:
+        adj_res = 1.15
+
+    # HDR/10-bit 调整
+    pix_fmt = getattr(strategy, "video", None)
+    pix_fmt_str = getattr(pix_fmt, "pix_fmt", "") if pix_fmt else ""
+    is_10bit = "10" in pix_fmt_str
+    adj_hdr = 1.08 if is_10bit else 1.0
+
+    ratio = max(0.08, min(0.70, base * adj_res * adj_hdr))
+    savings_lo = ratio * 0.85
+    savings_hi = ratio * 1.20
+    lo_pct = int((1 - savings_hi) * 100)
+    hi_pct = int((1 - savings_lo) * 100)
 
     return {
-        "percentage": savings_str,
-        "estimated_min_bytes": int(snapshot.size_bytes * lo),
-        "estimated_max_bytes": int(snapshot.size_bytes * hi),
+        "percentage": f"{lo_pct}-{hi_pct}%",
+        "estimated_min_bytes": int(snapshot.size_bytes * savings_lo),
+        "estimated_max_bytes": int(snapshot.size_bytes * savings_hi),
     }

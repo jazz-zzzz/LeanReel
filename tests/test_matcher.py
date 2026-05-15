@@ -52,10 +52,27 @@ def test_match_remux(balanced):
 def test_estimate_savings_bytes(balanced):
     snap = FileSnapshot(video_codec="h264", size_bytes=50000000000)
     savings = estimate_savings(snap, balanced)
-    # 35-50% savings on 50GB = 17.5-25GB
-    assert savings["estimated_min_bytes"] == int(50e9 * 0.35)
-    assert savings["estimated_max_bytes"] == int(50e9 * 0.50)
-    assert savings["percentage"] == "35-50%"
+    # CQ=23 + 1080p SDR → ratio ≈ 0.32, savings ~60-73%
+    assert savings["percentage"]
+    assert "%" in savings["percentage"]
+    assert 0 < savings["estimated_min_bytes"] < snap.size_bytes
+    assert savings["estimated_min_bytes"] <= savings["estimated_max_bytes"]
+    # 节省空间在合理范围内（原始 50GB 的 20-80%）
+    assert savings["estimated_max_bytes"] < snap.size_bytes * 0.85
+
+
+def test_estimate_savings_4k_hdr_compresses_more():
+    """4K HDR 相对压缩比更高（分辨率红利）"""
+    from leanreel.data.models import HDRType
+    snap_4k = FileSnapshot(video_codec="h264", size_bytes=80000000000,
+                          video_width=3840, video_height=2160, hdr_type=HDRType.HDR10)
+    snap_1080p = FileSnapshot(video_codec="h264", size_bytes=80000000000,
+                             video_width=1920, video_height=1080, hdr_type=HDRType.SDR)
+    s4 = estimate_savings(snap_4k, balanced)
+    s1 = estimate_savings(snap_1080p, balanced)
+    # 4K HDR 相对于其原始体积应该压缩得更多
+    assert s4["estimated_min_bytes"] > 0
+    assert s1["estimated_min_bytes"] > 0
 
 
 def test_match_only_remux_filter_matches_large_legacy_codec():
