@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
 
 from leanreel.data.database import Database
 from leanreel.core.library import LibraryManager
@@ -415,11 +415,15 @@ class Application:
 
     def _on_scan_finished(self, snapshots, folder_id, folder_path, pending_jobs):
         """扫描后台线程完成后的回调（在主线程执行）"""
-        self.current_folder_paths[folder_id] = folder_path
-        self.current_snapshots = [
-            s for s in self.current_snapshots
-            if s.library_folder_id != folder_id
-        ] + list(snapshots)
+        if folder_id is not None:
+            self.current_folder_paths[folder_id] = folder_path
+            self.current_snapshots = [
+                s for s in self.current_snapshots
+                if s.library_folder_id != folder_id
+            ] + list(snapshots)
+        else:
+            # 全量刷新：替换所有快照，保留 folder_paths
+            self.current_snapshots = list(snapshots)
         self.strategy_overrides = {
             path: strategy for path, strategy in self.strategy_overrides.items()
             if any(s.relative_path == path for s in self.current_snapshots)
@@ -438,9 +442,24 @@ class Application:
 
             done_count = [0]
             lock = threading.Lock()
+            batch: list = []
+            batch_lock = threading.Lock()
 
             def on_probed(snap):
-                self.notifier.probed.emit(snap)
+                with batch_lock:
+                    batch.append(snap)
+
+            def flush_batch():
+                with batch_lock:
+                    if not batch:
+                        return
+                    for s in batch:
+                        self.notifier.probed.emit(s)
+                    batch.clear()
+
+            batch_timer = QTimer()
+            batch_timer.timeout.connect(flush_batch)
+            batch_timer.start(200)
 
             def on_progress():
                 with lock:
@@ -448,6 +467,8 @@ class Application:
                     self.notifier.progress.emit(done_count[0], pending)
 
             def on_finished():
+                batch_timer.stop()
+                flush_batch()
                 self.notifier.all_done.emit()
 
             self.services.scanner.start_background_probe_jobs(
@@ -494,39 +515,19 @@ class Application:
             self.win.set_status("没有已添加的文件夹，请先添加文件夹")
             return
 
-        self.win.set_status("刷新中...")
-        all_snapshots: list = []
-        all_jobs: list = []
+        self.win.set_status("扫描中...")
+        folders_at_call = list(self.current_folder_paths.items())
 
-        for folder_id, path in list(self.current_folder_paths.items()):
-            batch = self.services.scanner.scan_folder_fast_batch(folder_id, path)
-            all_snapshots.extend(batch.snapshots)
-            all_jobs.extend(batch.pending_jobs)
+        def _scan_in_background():
+            all_snapshots: list = []
+            all_jobs: list = []
+            for folder_id, path in folders_at_call:
+                batch = self.services.scanner.scan_folder_fast_batch(folder_id, path)
+                all_snapshots.extend(batch.snapshots)
+                all_jobs.extend(batch.pending_jobs)
+            self.notifier.scan_finished.emit(all_snapshots, None, None, all_jobs)
 
-        self.current_snapshots = all_snapshots
-        self._populate_file_list(all_snapshots)
-
-        if all_jobs:
-            done_count = [0]
-            lock = threading.Lock()
-
-            def on_probed(snap):
-                self.notifier.probed.emit(snap)
-
-            def on_progress():
-                with lock:
-                    done_count[0] += 1
-                    self.notifier.progress.emit(done_count[0], len(all_jobs))
-
-            def on_finished():
-                self.notifier.all_done.emit()
-
-            self.services.scanner.start_background_probe_jobs(
-                all_jobs, on_probed, on_finished, on_progress
-            )
-            self.win.set_status(f"刷新中：0/{len(all_jobs)} 个文件已探测...")
-        else:
-            self.win.set_status(f"刷新完成：{len(all_snapshots)} 个文件")
+        threading.Thread(target=_scan_in_background, daemon=True).start()
 
     # ── 策略信号处理 ──
 

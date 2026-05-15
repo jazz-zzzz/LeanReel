@@ -53,6 +53,7 @@ class SortableTableWidgetItem(QTableWidgetItem):
 
 
 from leanreel.gui.utils import _format_bytes
+from leanreel.core.matcher import is_protected_source
 
 
 def _scale_bytes(size_bytes: int | float) -> tuple[float, str, int]:
@@ -97,6 +98,7 @@ class FileListPanel(QWidget):
         self._last_snapshots: list[Any] = []
         self._last_matches: dict[str, Any] = {}
         self._last_strategies: list[Any] | None = None
+        self._row_by_path: dict[str, int] = {}
         self.current_view_mode = "flat"
         self.setup_ui()
 
@@ -202,6 +204,7 @@ class FileListPanel(QWidget):
         self._last_matches = dict(matched_strategies)
         self._last_strategies = strategies
         self._snapshots_by_path = {snap.relative_path: snap for snap in snapshots}
+        self._row_by_path = {}
         self._strategy_lookup = self._build_strategy_lookup(strategies)
 
         if not snapshots:
@@ -216,8 +219,13 @@ class FileListPanel(QWidget):
         total_size = 0
         for row, snap in enumerate(snapshots):
             # 列0：勾选框
+            self._row_by_path[snap.relative_path] = row
             check_item = QTableWidgetItem()
-            check_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            if is_protected_source(snap):
+                check_item.setFlags(Qt.ItemIsUserCheckable)
+                check_item.setToolTip("优质片源默认不处理")
+            else:
+                check_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
             check_item.setCheckState(Qt.Unchecked)
             self.table.setItem(row, 0, check_item)
             # 列1：文件名
@@ -428,7 +436,17 @@ class FileListPanel(QWidget):
             return
 
         self._snapshots_by_path[relative_path] = snap
-        row = self._find_row_by_relative_path(relative_path)
+        row = self._row_by_path.get(relative_path)
+        if row is not None:
+            # 验证缓存行号未因排序而失效
+            item = self.table.item(row, 1)
+            if item is None or item.data(Qt.UserRole) != relative_path:
+                row = None
+        if row is None:
+            # 缓存失效（例如排序后），回退到线性扫描并重建缓存
+            row = self._find_row_by_relative_path(relative_path)
+            if row is not None:
+                self._row_by_path[relative_path] = row
         if row is not None:
             probe_failed = getattr(snap, "probe_ok", None) is False and not getattr(
                 snap, "video_codec", ""
@@ -463,7 +481,7 @@ class FileListPanel(QWidget):
         checked: list[str] = []
         for row in range(self.table.rowCount()):
             check_item = self.table.item(row, 0)
-            if check_item and check_item.checkState() == Qt.Checked:
+            if check_item and check_item.checkState() == Qt.Checked and check_item.flags() & Qt.ItemIsEnabled:
                 name_item = self.table.item(row, 1)
                 if name_item:
                     path = name_item.data(Qt.UserRole)
@@ -475,7 +493,7 @@ class FileListPanel(QWidget):
         self.table.blockSignals(True)
         for row in range(self.table.rowCount()):
             item = self.table.item(row, 0)
-            if item:
+            if item and item.flags() & Qt.ItemIsEnabled:
                 item.setCheckState(Qt.Checked)
         self.table.blockSignals(False)
         self._update_selection_count()
