@@ -369,12 +369,12 @@ def test_ffmpeg_executor_dovi_flow(monkeypatch, tmp_path):
     def fake_extract(input_file, rpu_output):
         dovi_extract_calls.append((input_file, rpu_output))
         Path(rpu_output).write_text("rpu_data")
-        return True
+        return True, ""
 
     def fake_inject(encoded, rpu, output):
         dovi_inject_calls.append((encoded, rpu, output))
         Path(output).write_text("dv_data")
-        return True
+        return True, ""
 
     monkeypatch.setattr(ffmpeg_mod, "run_ffmpeg", fake_run_ffmpeg)
     monkeypatch.setattr(dovi_mod.DoviTool, "extract_rpu", staticmethod(fake_extract))
@@ -419,7 +419,7 @@ def test_ffmpeg_executor_dovi_cleanup_rpu_on_failure(monkeypatch, tmp_path):
 
     def fake_extract(input_file, rpu_output):
         Path(rpu_output).write_text("rpu_data")
-        return True
+        return True, ""
 
     monkeypatch.setattr(ffmpeg_mod, "run_ffmpeg", fake_run_ffmpeg)
     monkeypatch.setattr(dovi_mod.DoviTool, "extract_rpu", staticmethod(fake_extract))
@@ -959,19 +959,24 @@ def test_cancel_terminates_running_process():
 
 
 def test_ffmpeg_executor_cancel_sets_event():
-    """验证 FFmpegExecutor.cancel() 设置当前活跃的 cancel_event"""
+    """验证 FFmpegExecutor.cancel() 设置所有活跃的 cancel_event"""
     executor = FFmpegExecutor()
     # 无活跃 encode 时 cancel 不报错
     executor.cancel()
-    assert executor._active_cancel_event is None
+    assert len(executor._cancel_events) == 0
 
-    # 模拟 encode 中：手动设置活跃事件，验证 cancel 能触发
+    # 模拟 encode 中：手动注册事件，验证 cancel 能触发所有 worker
     import threading
-    event = threading.Event()
-    executor._active_cancel_event = event
-    assert not event.is_set()
+    event1 = threading.Event()
+    event2 = threading.Event()
+    with executor._cancel_lock:
+        executor._cancel_events["/path/to/file1.mkv"] = event1
+        executor._cancel_events["/path/to/file2.mkv"] = event2
+    assert not event1.is_set()
+    assert not event2.is_set()
     executor.cancel()
-    assert event.is_set()
+    assert event1.is_set()
+    assert event2.is_set()
 
 
 # ============================================================
@@ -991,12 +996,12 @@ def test_encode_cleans_up_dv_output_on_inject_failure(monkeypatch, tmp_path):
 
     def fake_extract(input_file, rpu_output):
         Path(rpu_output).write_text("rpu_data")
-        return True
+        return True, ""
 
     def fake_inject(encoded, rpu, output):
         # 模拟 dovi_tool 部分写入输出文件后失败
         Path(output).write_text("partial_dv_data")
-        return False
+        return False, "injection failed"
 
     monkeypatch.setattr(ffmpeg_mod, "run_ffmpeg", fake_run_ffmpeg)
     monkeypatch.setattr(dovi_mod.DoviTool, "extract_rpu", staticmethod(fake_extract))
