@@ -202,6 +202,7 @@ class Scanner:
         self._probe = probe_runner
         self.max_workers = max(1, max_workers)
         self._probe_lock = threading.Lock()
+        self._save_lock = threading.Lock()
         self._pending_jobs: list[tuple[int, str, str, int]] = []
 
     def _get_probe(self):
@@ -274,7 +275,8 @@ class Scanner:
 
             for snap in probed:
                 try:
-                    self._repo.save(snap)
+                    with self._save_lock:
+                        self._repo.save(snap)
                 except Exception:
                     pass
             results.extend(probed)
@@ -283,14 +285,19 @@ class Scanner:
 
     def scan_folder_fast_batch(self, library_folder_id: int, folder_path: str) -> ScanBatch:
         """快速扫描批次：返回 ScanBatch（快照 + 待探测任务），不触碰 Scanner 内部 _pending_jobs。"""
+        import sys as _sys3
         folder_path = os.path.normpath(folder_path)
+        t0 = time.time()
         found_files = find_video_files(folder_path)
+        print(f"[LeanReel] 遍历完成: {len(found_files)}个文件, {time.time()-t0:.1f}s", file=_sys3.stderr, flush=True)
         results: list[FileSnapshot] = []
         pending: list[tuple[int, str, str, int]] = []
 
         cached_dict = {s.relative_path: s for s in self._repo.load_all(library_folder_id)}
 
-        for rel_path, abs_path in found_files:
+        for i, (rel_path, abs_path) in enumerate(found_files):
+            if (i + 1) % 200 == 0:
+                print(f"[LeanReel] stat进度: {i+1}/{len(found_files)}", file=_sys3.stderr, flush=True)
             try:
                 st = os.stat(abs_path)
                 file_size, file_mtime = st.st_size, st.st_mtime
@@ -365,7 +372,8 @@ class Scanner:
             )
 
         try:
-            self._repo.save(snap)
+            with self._save_lock:
+                self._repo.save(snap)
         except Exception as save_err:
             import sys
             print(
@@ -434,7 +442,8 @@ class Scanner:
                     probe_error=str(last_error)[:200],
                 )
             try:
-                self._repo.save(snap)
+                with self._save_lock:
+                    self._repo.save(snap)
             except Exception as save_err:
                 import sys
                 print(
