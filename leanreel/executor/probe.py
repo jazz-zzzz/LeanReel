@@ -1,5 +1,6 @@
 """FFprobe 封装 — 提取视频文件元数据"""
 import json
+import math
 import subprocess
 import os
 from pathlib import Path
@@ -86,7 +87,11 @@ def parse_ffprobe_output(data: dict, library_folder_id: int) -> FileSnapshot:
     filename = os.path.basename(fmt.get("filename", ""))
     size = max(0, int(fmt.get("size", 0)))
     duration = float(fmt.get("duration", 0))
+    if math.isnan(duration) or math.isinf(duration):
+        duration = 0.0
     bitrate = int(fmt.get("bit_rate", 0))
+    if bitrate < 0:
+        bitrate = 0
 
     hdr_type = detect_hdr_type_from_ffprobe(video)
 
