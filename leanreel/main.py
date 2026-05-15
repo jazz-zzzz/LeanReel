@@ -11,7 +11,7 @@ from PySide6.QtCore import QObject, Signal
 from leanreel.data.database import Database
 from leanreel.core.library import LibraryManager
 from leanreel.core.strategy import Strategy, load_strategies
-from leanreel.core.matcher import Matcher, estimate_savings
+from leanreel.core.matcher import Matcher, estimate_savings, get_skip_reason, is_protected_source
 from leanreel.core.scanner import Scanner
 from leanreel.gui.main_window import MainWindow
 from leanreel.gui.library_panel import LibraryPanel
@@ -52,8 +52,7 @@ def get_strategies_dir() -> Path:
         import shutil
         for f in builtin.glob("*.json"):
             dest = user_dir / f.name
-            if not dest.exists():
-                shutil.copy2(f, dest)
+            shutil.copy2(f, dest)
     return user_dir
 
 
@@ -76,7 +75,7 @@ def _has_nvenc() -> bool:
     try:
         result = subprocess.run(
             [get_ffmpeg_path(), "-hide_banner", "-encoders"],
-            capture_output=True, text=True, timeout=10
+            capture_output=True, text=True, encoding="utf-8", timeout=10
         )
         return "hevc_nvenc" in (result.stdout or "")
     except Exception:
@@ -120,6 +119,8 @@ def build_encode_tasks(
     tasks: list[EncodeTask] = []
     strategy_overrides = strategy_overrides or {}
     for snap in snapshots:
+        if is_protected_source(snap):
+            continue
         folder_path = folder_paths.get(snap.library_folder_id)
         if not folder_path:
             continue
@@ -379,6 +380,12 @@ class Application:
         matched: dict[str, MatchResult] = {}
         for s in snapshots:
             strategy = self.services.matcher.match(s)
+            if strategy is None:
+                matched[s.relative_path] = MatchResult(
+                    strategy=get_skip_reason(s) or "跳过",
+                    estimate={},
+                )
+                continue
             matched[s.relative_path] = MatchResult(
                 strategy=strategy,
                 estimate=estimate_savings(s, strategy),
