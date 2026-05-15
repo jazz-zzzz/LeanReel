@@ -108,8 +108,11 @@ class WorkerManager:
                 task.status = TaskStatus.COMPLETED
         except Exception as e:
             with self._lock:
-                task.status = TaskStatus.FAILED
-                task.error_message = str(e)
+                if type(e).__name__ == "CancelledError":
+                    task.status = TaskStatus.CANCELLED
+                else:
+                    task.status = TaskStatus.FAILED
+                    task.error_message = str(e)
         finally:
             task.completed_at = time.time()
             if self.progress_callback:

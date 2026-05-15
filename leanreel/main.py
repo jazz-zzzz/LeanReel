@@ -61,11 +61,12 @@ def make_output_path(source: Path) -> Path:
     return source.with_name(f"{source.stem}_SS{source.suffix}")
 
 
-def compute_encode_summary(results: list[EncodeTask]) -> tuple[int, int]:
-    """从编码结果中统计完成数和失败数。返回 (done, failed)。"""
+def compute_encode_summary(results: list[EncodeTask]) -> tuple[int, int, int]:
+    """从编码结果中统计完成数、失败数、取消数。返回 (done, failed, cancelled)。"""
     done = sum(1 for t in results if t.status == TaskStatus.COMPLETED)
     failed = sum(1 for t in results if t.status == TaskStatus.FAILED)
-    return done, failed
+    cancelled = sum(1 for t in results if t.status == TaskStatus.CANCELLED)
+    return done, failed, cancelled
 
 
 def _has_nvenc() -> bool:
@@ -266,11 +267,13 @@ class EncodingController:
         if self.active_manager is None:
             return
         results = self.active_manager.get_results()
-        done, failed = compute_encode_summary(results)
-        self._win.set_status(
-            f"编码完成：成功 {done}/{len(results)}"
-            + (f"，失败 {failed}" if failed else "")
-        )
+        done, failed, cancelled = compute_encode_summary(results)
+        parts = [f"编码完成：成功 {done}"]
+        if failed:
+            parts.append(f"失败 {failed}")
+        if cancelled:
+            parts.append(f"取消 {cancelled}")
+        self._win.set_status(" ｜ ".join(parts))
 
 
 class Application:

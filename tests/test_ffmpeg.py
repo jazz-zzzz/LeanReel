@@ -959,11 +959,19 @@ def test_cancel_terminates_running_process():
 
 
 def test_ffmpeg_executor_cancel_sets_event():
-    """验证 FFmpegExecutor.cancel() 设置内部 cancel_event"""
+    """验证 FFmpegExecutor.cancel() 设置当前活跃的 cancel_event"""
     executor = FFmpegExecutor()
-    assert not executor._cancel_event.is_set()
+    # 无活跃 encode 时 cancel 不报错
     executor.cancel()
-    assert executor._cancel_event.is_set()
+    assert executor._active_cancel_event is None
+
+    # 模拟 encode 中：手动设置活跃事件，验证 cancel 能触发
+    import threading
+    event = threading.Event()
+    executor._active_cancel_event = event
+    assert not event.is_set()
+    executor.cancel()
+    assert event.is_set()
 
 
 # ============================================================

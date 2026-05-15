@@ -578,7 +578,7 @@ class TestEncodingControllerOnEncodingDone:
 
         assert controller.encoding_in_progress is False
         mock_mgr.get_results.assert_called_once()
-        mock_win.set_status.assert_called_once_with("编码完成：成功 3/3")
+        mock_win.set_status.assert_called_once_with("编码完成：成功 3")
 
     def test_on_encoding_done_reports_mixed_results(
         self, controller, mock_win,
@@ -610,7 +610,7 @@ class TestEncodingControllerOnEncodingDone:
         controller.on_encoding_done()
 
         assert controller.encoding_in_progress is False
-        mock_win.set_status.assert_called_once_with("编码完成：成功 2/4，失败 2")
+        mock_win.set_status.assert_called_once_with("编码完成：成功 2 ｜ 失败 2")
 
     def test_on_encoding_done_skips_skipped_tasks_in_done_count(
         self, controller, mock_win,
@@ -634,7 +634,7 @@ class TestEncodingControllerOnEncodingDone:
         controller.on_encoding_done()
 
         assert controller.encoding_in_progress is False
-        mock_win.set_status.assert_called_once_with("编码完成：成功 1/2")
+        mock_win.set_status.assert_called_once_with("编码完成：成功 1")
 
     def test_on_encoding_done_resets_flag_when_no_active_manager(
         self, controller, mock_win,
@@ -670,7 +670,7 @@ class TestEncodingControllerOnEncodingDone:
         controller.on_encoding_done()
 
         assert controller.encoding_in_progress is False
-        mock_win.set_status.assert_called_once_with("编码完成：成功 0/2，失败 2")
+        mock_win.set_status.assert_called_once_with("编码完成：成功 0 ｜ 失败 2")
 
 
 # ──────────────────────────────────────────

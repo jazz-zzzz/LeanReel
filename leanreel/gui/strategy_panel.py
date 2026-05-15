@@ -245,7 +245,7 @@ class StrategyPanel(QWidget):
 
         self.custom_cq_spin = QSpinBox()
         self.custom_cq_spin.setRange(0, 51)
-        self.custom_cq_spin.setValue(18)
+        self.custom_cq_spin.setValue(26)
         self.cq_label = QLabel("CQ")
 
         self.custom_nvpreset_combo = QComboBox()
@@ -382,14 +382,14 @@ class StrategyPanel(QWidget):
             savings = "5-15%"
         else:
             cq_val = self.custom_cq_spin.value()
-            if cq_val <= 16:
+            if cq_val <= 20:
                 savings = "15-30%"
-            elif cq_val <= 18:
-                savings = "20-40%"
-            elif cq_val <= 22:
-                savings = "30-50%"
+            elif cq_val <= 24:
+                savings = "25-45%"
+            elif cq_val <= 28:
+                savings = "35-55%"
             else:
-                savings = "40-60%"
+                savings = "45-65%"
 
         nv_preset = self.custom_nvpreset_combo.currentText().lower()
 

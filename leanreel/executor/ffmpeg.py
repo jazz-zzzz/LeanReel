@@ -26,13 +26,17 @@ __all__ = [
 ]
 
 
+class CancelledError(Exception):
+    """编码被用户取消。"""
+
+
 class FFmpegExecutor:
     """Executor adapter used by WorkerManager. 支持 Slotted Pipeline 阶段化编码。"""
 
     def __init__(self, progress_callback=None, temp_dir: Optional[str] = None):
         self.progress_callback = progress_callback
         self.temp_dir = temp_dir
-        self._cancel_event = threading.Event()
+        self._active_cancel_event: Optional[threading.Event] = None
 
     def _get_temp_dir(self) -> Path:
         if self.temp_dir:
@@ -43,8 +47,9 @@ class FFmpegExecutor:
         return d
 
     def cancel(self):
-        """终止正在运行的 ffmpeg 子进程。"""
-        self._cancel_event.set()
+        """终止正在运行的编码。只影响当前活跃的 encode() 调用。"""
+        if self._active_cancel_event:
+            self._active_cancel_event.set()
 
     def _emit_progress(self, task):
         """触发外部进度回调（如果已设置）。"""
@@ -71,18 +76,18 @@ class FFmpegExecutor:
         snap = task.snapshot
         strategy = task.strategy
 
-        # 每次 encode 前重置取消事件
-        self._cancel_event.clear()
+        # 每次 encode 创建独立的取消事件（防止多 worker 相互干扰）
+        cancel_event = threading.Event()
+        self._active_cancel_event = cancel_event
 
-        # 如果临时文件已存在，先删除（避免 -n 跳过）
+        # 如果临时文件已存在，先删除
         if temp_output.exists():
             temp_output.unlink()
 
         try:
             for i, stage in enumerate(plan.stages):
-                if self._cancel_event.is_set():
-                    plan.skip_remaining(i)
-                    break
+                if cancel_event.is_set():
+                    raise CancelledError()
 
                 plan.mark_stage_running(i)
                 task.current_stage_index = i
@@ -95,7 +100,6 @@ class FFmpegExecutor:
                     plan.mark_stage_completed(i)
 
                 elif slot_id == "copy_in":
-                    # 将源文件复制到本地临时目录（I/O 分离核心）
                     source_path = Path(task.input_path)
                     if source_path.exists():
                         total_bytes = source_path.stat().st_size
@@ -103,11 +107,8 @@ class FFmpegExecutor:
                         bytes_copied = 0
 
                         with open(source_path, "rb") as src, open(local_input, "wb") as dst:
-                            while True:
-                                if self._cancel_event.is_set():
-                                    break
-                                chunk = src.read(8 * 1024 * 1024)  # 8 MB chunks
-                                if not chunk:
+                            while chunk := src.read(8 * 1024 * 1024):
+                                if cancel_event.is_set():
                                     break
                                 dst.write(chunk)
                                 bytes_copied += len(chunk)
@@ -116,6 +117,8 @@ class FFmpegExecutor:
                                     task.progress = plan.compute_overall_progress()
                                     self._emit_progress(task)
 
+                    if cancel_event.is_set():
+                        raise CancelledError()
                     plan.mark_stage_completed(i)
 
                 elif slot_id == "extract_rpu":
@@ -173,7 +176,7 @@ class FFmpegExecutor:
                     exit_code, stderr_tail = run_ffmpeg(
                         cmd,
                         progress_callback=_transcode_progress,
-                        cancel_event=self._cancel_event,
+                        cancel_event=cancel_event,
                     )
                     if exit_code != 0:
                         if temp_output.exists():
@@ -204,11 +207,25 @@ class FFmpegExecutor:
                         shutil.move(str(temp_output), str(final_output))
                         if final_output.exists():
                             task.compressed_size = final_output.stat().st_size
+                    # 压缩后体积变大 → 丢弃结果，保留原文件
+                    if task.compressed_size > 0 and task.original_size > 0 and task.compressed_size >= task.original_size:
+                        if final_output.exists():
+                            final_output.unlink()
+                        task.compressed_size = task.original_size
+                        stage.detail = f"跳过（输出 ≥ 原体积）"
                     plan.mark_stage_completed(i)
 
                 task.progress = plan.compute_overall_progress()
                 self._emit_progress(task)
 
+        except CancelledError:
+            current_idx = task.current_stage_index
+            if current_idx >= 0:
+                plan.skip_remaining(current_idx)
+            task.status = TaskStatus.CANCELLED
+            task.progress = plan.compute_overall_progress()
+            self._emit_progress(task)
+            raise
         except Exception as e:
             current_idx = task.current_stage_index
             if current_idx >= 0:
@@ -218,7 +235,6 @@ class FFmpegExecutor:
             task.error_message = str(e)
             task.progress = plan.compute_overall_progress()
             self._emit_progress(task)
-            # 清理临时输出文件
             if temp_output.exists():
                 temp_output.unlink()
             if dv_output and dv_output.exists() and dv_output != temp_output:
@@ -228,6 +244,7 @@ class FFmpegExecutor:
                     pass
             raise
         finally:
+            self._active_cancel_event = None
             if rpu_file and rpu_file.exists():
                 rpu_file.unlink()
             if local_input and local_input.exists():

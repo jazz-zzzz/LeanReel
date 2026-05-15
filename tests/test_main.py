@@ -107,10 +107,11 @@ def test_compute_encode_summary_counts_completed_and_failed():
     tasks[2].status = TaskStatus.FAILED
     tasks[3].status = TaskStatus.SKIPPED
 
-    done, failed = compute_encode_summary(tasks)
+    done, failed, cancelled = compute_encode_summary(tasks)
 
     assert done == 2
     assert failed == 1
+    assert cancelled == 0
 
 
 def test_build_encode_tasks_sets_original_size_from_snapshot():
@@ -138,7 +139,7 @@ def test_compute_encode_summary_returns_zero_for_all_pending():
         EncodeTask(file_name="b.mkv", input_path="/in/b.mkv", output_path="/out/b.mkv"),
     ]
 
-    done, failed = compute_encode_summary(tasks)
+    done, failed, cancelled = compute_encode_summary(tasks)
 
     assert done == 0
     assert failed == 0
@@ -175,8 +176,9 @@ def test_clear_current_state_returns_empty_collections():
 
 
 def test_compute_encode_summary_returns_zero_for_empty_list():
-    done, failed = compute_encode_summary([])
+    done, failed, cancelled = compute_encode_summary([])
 
     assert done == 0
     assert failed == 0
+    assert cancelled == 0
 
