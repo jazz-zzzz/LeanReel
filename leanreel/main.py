@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Qt, Signal
 
 from leanreel.data.database import Database
 from leanreel.core.library import LibraryManager
@@ -357,6 +357,8 @@ class Application:
         self.file_panel.strategy_override_changed.connect(self._on_strategy_override_changed)
         self.file_panel.custom_strategy_requested.connect(self._on_custom_strategy_requested)
         self.file_panel.refresh_requested.connect(self._on_refresh_requested)
+        self.file_panel.row_selected.connect(self._on_file_row_selected)
+        self.strategy_panel.strategy_changed.connect(self._on_preset_strategy_changed)
         self.strategy_panel.custom_strategy_changed.connect(self._on_custom_strategy_changed)
         self.strategy_panel.start_requested.connect(self._on_start_requested)
         self.win.set_toggle_queue_action(
@@ -549,6 +551,45 @@ class Application:
             self.strategy_overrides.pop(relative_path, None)
         else:
             self.strategy_overrides[relative_path] = strategy
+
+    def _on_file_row_selected(self, relative_path):
+        """单个文件行被选中时，右侧策略面板同步显示该文件的策略。"""
+        if not relative_path:
+            return
+        # 优先用用户手动选择的覆盖策略，其次用自动匹配的策略
+        override = self.strategy_overrides.get(relative_path)
+        if override:
+            self.strategy_panel.show_preset_strategy()
+            self.strategy_panel.preset_panel.select_by_strategy(override.name)
+            return
+        match = self.file_panel._last_matches.get(relative_path)
+        strategy = getattr(match, "strategy", None) if match else None
+        if strategy:
+            name = strategy if isinstance(strategy, str) else getattr(strategy, "name", "")
+            if name:
+                self.strategy_panel.show_preset_strategy()
+                self.strategy_panel.preset_panel.select_by_strategy(name)
+
+    def _on_preset_strategy_changed(self, index):
+        """策略面板预设策略变更时，应用到所有选中/勾选的文件。"""
+        strategy = self.strategy_panel.current_preset_strategy
+        if strategy is None:
+            return
+        # 收集需要覆盖的 relative_path
+        targets = set(self.file_panel.get_checked_relative_paths())
+        for idx in self.file_panel.table.selectedIndexes():
+            if idx.column() == 0:
+                continue
+            item = self.file_panel.table.item(idx.row(), 1)
+            if item:
+                rel = item.data(Qt.UserRole)
+                if rel:
+                    targets.add(rel)
+        if not targets:
+            return
+        for rel in targets:
+            self.strategy_overrides[rel] = strategy
+            self.file_panel.apply_strategy_to_row(rel, strategy)
 
     def _on_custom_strategy_requested(self, relative_path):
         self.active_custom_path = relative_path

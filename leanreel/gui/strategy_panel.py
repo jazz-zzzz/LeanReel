@@ -163,6 +163,15 @@ class PresetCardPanel(QWidget):
         else:
             self.description_label.hide()
 
+    def select_by_strategy(self, name: str):
+        """根据策略名选中对应按钮，不触发 strategy_changed 信号。"""
+        for i, s in enumerate(self._strategies):
+            if s.name == name:
+                self._active_preset_index = i
+                self._update_indicators()
+                self._update_description()
+                return
+
     @property
     def current_preset_strategy(self):
         idx = self._active_preset_index

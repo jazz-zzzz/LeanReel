@@ -13,8 +13,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QColor
 
-_HEADERS = ["", "文件名", "体积", "编码信息", "HDR", "处理状态", "预计结果"]
-_TREE_HEADERS = ["文件名", "体积", "编码信息", "HDR", "处理状态", "预计结果"]
+_HEADERS = ["", "文件名", "体积", "编码信息", "HDR", "处理策略", "预计结果"]
+_TREE_HEADERS = ["文件名", "体积", "编码信息", "HDR", "处理策略", "预计结果"]
 
 # ── 列配色 ──
 _COLOR_CODEC_OK = QColor("#8db87c")
@@ -101,6 +101,7 @@ class FileListPanel(QWidget):
     strategy_override_changed = Signal(str, str)
     custom_strategy_requested = Signal(str)
     refresh_requested = Signal()
+    row_selected = Signal(str)  # 某行被选中时发出 relative_path 或空串
 
     def __init__(self):
         super().__init__()
@@ -207,6 +208,7 @@ class FileListPanel(QWidget):
         layout.addLayout(select_layout)
 
         self.table.itemChanged.connect(self._on_item_changed)
+        self.table.itemSelectionChanged.connect(self._on_selection_changed)
 
     def populate(self, snapshots: list, matched_strategies: dict[str, MatchResult | None], strategies: list | None = None):
         """填充文件表格行。
@@ -582,6 +584,16 @@ class FileListPanel(QWidget):
     def _on_item_changed(self, item: QTableWidgetItem):
         if item.column() == 0:
             self._apply_filter()
+
+    def _on_selection_changed(self):
+        rows = {idx.row() for idx in self.table.selectedIndexes()}
+        if len(rows) == 1:
+            row = next(iter(rows))
+            item = self.table.item(row, 1)
+            rel = item.data(Qt.UserRole) if item else ""
+            self.row_selected.emit(rel or "")
+        else:
+            self.row_selected.emit("")  # 多选或取消选中 → 清空右面板绑定
 
     def _apply_filter(self):
         filter_key = self.filter_combo.currentData() if hasattr(self, "filter_combo") else "all"
