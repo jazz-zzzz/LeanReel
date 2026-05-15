@@ -310,7 +310,7 @@ class Application:
             lib_mgr=lib_mgr,
             strategies=strategies,
             matcher=Matcher(strategies),
-            scanner=Scanner(db),
+            scanner=Scanner(db, max_workers=8),
         )
 
     def _init_state(self):
@@ -417,6 +417,8 @@ class Application:
 
     def _on_scan_finished(self, snapshots, folder_id, folder_path, pending_jobs):
         """扫描后台线程完成后的回调（在主线程执行）"""
+        import sys
+        print(f"[DIAG] _on_scan_finished: {len(snapshots)}快照, {len(pending_jobs)}待探测", file=sys.stderr, flush=True)
         self._scan_token += 1
         my_token = self._scan_token
 
