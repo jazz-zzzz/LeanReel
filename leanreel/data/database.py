@@ -1,5 +1,6 @@
 """SQLite 数据库操作 — 无 ORM，原生 SQL"""
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -9,17 +10,42 @@ from leanreel.data.models import (
 )
 
 
+class ConnectionPool:
+    """为每个线程提供独立 SQLite 连接，消除并发写入冲突。"""
+
+    def __init__(self, db_path: str):
+        self._db_path = db_path
+        self._local = threading.local()
+
+    def get(self) -> sqlite3.Connection:
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(self._db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA foreign_keys=ON")
+            self._local.conn = conn
+        return conn
+
+    def close_all(self):
+        conn = getattr(self._local, "conn", None)
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            self._local.conn = None
+
+
 class Database:
     def __init__(self, db_path: str = ":memory:"):
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
-        self._explicit_transaction = False
-        self.conn.execute("PRAGMA journal_mode=WAL")
-        self.conn.execute("PRAGMA foreign_keys=ON")
-        self._create_tables()
+        self._pool = ConnectionPool(db_path)
+        self._explicit_conn = None
+        conn = self._pool.get()  # 只在初始化线程用一次
+        self._create_tables(conn)
 
-    def _create_tables(self):
-        self.conn.executescript("""
+    def _create_tables(self, conn: sqlite3.Connection):
+        conn.executescript("""
         CREATE TABLE IF NOT EXISTS library (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
@@ -62,31 +88,26 @@ class Database:
             created_at TEXT DEFAULT (datetime('now'))
         );
         """)
-        self._migrate()
+        self._migrate(conn)
 
-    def _migrate(self):
-        """增量迁移：为旧数据库添加缺失列"""
-        existing = {row[1] for row in self.conn.execute("PRAGMA table_info(file_snapshot)")}
+    def _migrate(self, conn: sqlite3.Connection):
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(file_snapshot)")}
         if "file_mtime" not in existing:
-            self.conn.execute("ALTER TABLE file_snapshot ADD COLUMN file_mtime REAL DEFAULT 0")
+            conn.execute("ALTER TABLE file_snapshot ADD COLUMN file_mtime REAL DEFAULT 0")
         if "probe_ok" not in existing:
-            self.conn.execute("ALTER TABLE file_snapshot ADD COLUMN probe_ok INTEGER DEFAULT 0")
+            conn.execute("ALTER TABLE file_snapshot ADD COLUMN probe_ok INTEGER DEFAULT 0")
 
     def execute(self, sql: str, params=None):
-        """执行 SQL 语句，每条语句自动提交（设计意图：简化调用方，无需手动管理事务）。
-
-        对于需要批量事务的场景，使用 begin() 开启事务后，
-        execute() 将进入事务模式（不自动提交），由调用方显式 commit() 结束。
-        """
+        conn = self._pool.get()
         try:
-            cur = self.conn.execute(sql, params or [])
+            cur = conn.execute(sql, params or [])
             rows = [dict(row) for row in cur.fetchall()] if cur.description else []
-            if self.conn.in_transaction and not self._explicit_transaction:
-                self.conn.commit()
+            if conn.in_transaction and self._explicit_conn is None:
+                conn.commit()
             return rows
         except Exception:
-            if self.conn.in_transaction:
-                self.conn.rollback()
+            if conn.in_transaction:
+                conn.rollback()
             raise
 
     def begin(self):
@@ -102,22 +123,26 @@ class Database:
                 db.rollback()
                 raise
         """
-        self.conn.execute("BEGIN IMMEDIATE")
-        self._explicit_transaction = True
+        conn = self._pool.get()
+        conn.execute("BEGIN IMMEDIATE")
+        self._explicit_conn = conn
 
     def commit(self):
         """提交当前事务。"""
-        self.conn.commit()
-        self._explicit_transaction = False
+        if self._explicit_conn is not None:
+            self._explicit_conn.commit()
+            self._explicit_conn = None
 
     def rollback(self):
         """回滚当前事务。"""
-        self.conn.rollback()
-        self._explicit_transaction = False
+        if self._explicit_conn is not None:
+            self._explicit_conn.rollback()
+            self._explicit_conn = None
 
     @property
     def last_insert_id(self) -> int:
-        return self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn = self._pool.get()
+        return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
     def insert_library(self, lib: Library) -> int:
         self.execute("INSERT INTO library (name) VALUES (?)", [lib.name])
@@ -174,4 +199,4 @@ class Database:
         ) for r in rows]
 
     def close(self):
-        self.conn.close()
+        self._pool.close_all()
