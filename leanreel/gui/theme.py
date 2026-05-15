@@ -161,20 +161,25 @@ QPushButton:disabled {{
     color: {C_TEXT_MUTED};
 }}
 
-/* ── 开始按钮 ── */
-QPushButton.accent {{
+/* ── 主要动作按钮 ── */
+QPushButton#primary_action {{
     background-color: {C_ACCENT};
     color: {C_BASE};
     border: none;
+    border-radius: 6px;
     font-weight: bold;
-    font-size: 14px;
-    padding: 10px 24px;
+    font-size: 15px;
+    padding: 12px 24px;
 }}
-QPushButton.accent:hover {{
+QPushButton#primary_action:hover {{
     background-color: {C_ACCENT_HOVER};
 }}
-QPushButton.accent:pressed {{
+QPushButton#primary_action:pressed {{
     background-color: #b88730;
+}}
+QPushButton#primary_action:disabled {{
+    background-color: {C_BORDER};
+    color: {C_TEXT_MUTED};
 }}
 
 /* ── 输入框 ── */

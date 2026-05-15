@@ -55,8 +55,8 @@ class MainWindow(QMainWindow):
         from PySide6.QtWidgets import QMessageBox
         QMessageBox.about(self, "关于 LeanReel",
             "LeanReel — 视频压缩管理工具\n\n"
-            "GPU 加速 HEVC 编码，完整无损流保留。\n"
-            "I/O 分离加速，支持 SMB/NAS 片库。"
+            "默认保护 HEVC/HDR/Dolby Vision 片源。\n"
+            "为 SDR 旧编码片源提供可解释的本地转码策略。"
         )
 
     def set_toggle_queue_action(self, callback):

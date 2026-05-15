@@ -47,6 +47,26 @@ def test_main_window_default_splitter_gives_strategy_panel_room():
     window.close()
 
 
+def test_about_text_avoids_absolute_lossless_claim(monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    from leanreel.gui.main_window import MainWindow
+
+    app = get_app()
+    captured = {}
+    monkeypatch.setattr(
+        QMessageBox,
+        "about",
+        lambda parent, title, text: captured.update({"title": title, "text": text}),
+    )
+    window = MainWindow()
+
+    window._show_about()
+
+    assert "完整无损" not in captured["text"]
+    assert "默认保护 HEVC/HDR/Dolby Vision 片源" in captured["text"]
+    window.close()
+
+
 def test_file_list_displays_codec_strategy_and_estimated_savings():
     from leanreel.core.strategy import Strategy
     from leanreel.data.models import FileSnapshot, HDRType
@@ -540,6 +560,17 @@ def test_strategy_panel_custom_copy_hides_quality_controls_and_uses_copy_metadat
     assert strategy.quality_impact == "不重编码视频"
     assert not panel.custom_cq_spin.isVisibleTo(panel)
     assert not panel.custom_crf_spin.isVisibleTo(panel)
+    panel.close()
+
+
+def test_start_button_uses_primary_action_object_name():
+    from leanreel.gui.strategy_panel import StrategyPanel
+
+    app = get_app()
+    panel = StrategyPanel()
+
+    assert panel.start_btn.objectName() == "primary_action"
+    assert panel.start_btn.styleSheet() == ""
     panel.close()
 
 

@@ -343,15 +343,7 @@ class StrategyPanel(QWidget):
 
         # ── 开始按钮 ──
         self.start_btn = QPushButton("开始压缩")
-        self.start_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #c8963e; color: #12100e;
-                border: none; border-radius: 6px;
-                padding: 12px 24px; font-weight: bold; font-size: 15px;
-            }
-            QPushButton:hover { background-color: #d9a84c; }
-            QPushButton:pressed { background-color: #b88730; }
-        """)
+        self.start_btn.setObjectName("primary_action")
         self.start_btn.clicked.connect(self.start_requested.emit)
         layout.addWidget(self.start_btn)
         self._on_encoder_changed()
