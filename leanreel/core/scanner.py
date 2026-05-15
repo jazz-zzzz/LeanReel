@@ -29,7 +29,6 @@ class Scanner:
         self._probe = probe_runner
         self.max_workers = max(1, max_workers)
         self._probe_lock = threading.Lock()
-        self._save_lock = threading.Lock()
         self._pending_jobs: list[tuple[int, str, str, int]] = []
 
     def _get_probe(self):
@@ -102,8 +101,7 @@ class Scanner:
 
             for snap in probed:
                 try:
-                    with self._save_lock:
-                        self._repo.save(snap)
+                    self._repo.save(snap)
                 except Exception:
                     pass
             results.extend(probed)
@@ -199,8 +197,7 @@ class Scanner:
             )
 
         try:
-            with self._save_lock:
-                self._repo.save(snap)
+            self._repo.save(snap)
         except Exception as save_err:
             import sys
             print(
@@ -269,8 +266,7 @@ class Scanner:
                     probe_error=str(last_error)[:200],
                 )
             try:
-                with self._save_lock:
-                    self._repo.save(snap)
+                self._repo.save(snap)
             except Exception as save_err:
                 import sys
                 print(
