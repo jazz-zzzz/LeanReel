@@ -138,6 +138,7 @@ class FFprobeRunner:
 
         先尝试带 ``-show_side_data``（检测 Dolby Vision profile 需要），
         如果失败则回退到不带 ``-show_side_data`` 的基本探测。
+        限制 probesize/analyzeduration 避免 NAS 上过度读取。
         """
         file_path = os.path.normpath(file_path)
         base_cmd = [
@@ -146,13 +147,14 @@ class FFprobeRunner:
             "-print_format", "json",
             "-show_format",
             "-show_streams",
+            "-probesize", "2M",
+            "-analyzeduration", "500000",
         ]
 
-        # 第一次尝试：带 -show_side_data（部分 ffprobe build 不支持）
         data = None
         for extra_flags in (["-show_side_data"], []):
             result = subprocess.run(base_cmd + extra_flags + [file_path],
-                                   capture_output=True, text=True, timeout=60)
+                                   capture_output=True, text=True, timeout=30)
             if result.returncode == 0:
                 try:
                     data = json.loads(result.stdout)
