@@ -8,12 +8,12 @@ from typing import Any
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem,
     QHeaderView, QLabel, QHBoxLayout, QComboBox, QStackedWidget,
-    QTreeWidget, QTreeWidgetItem
+    QTreeWidget, QTreeWidgetItem, QPushButton
 )
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QColor
 
-_HEADERS = ["文件名", "体积", "编码信息", "HDR", "匹配策略", "预计节省"]
+_HEADERS = ["", "文件名", "体积", "编码信息", "HDR", "匹配策略", "预计节省"]
 
 # ── 列配色 ──
 _COLOR_CODEC_OK = QColor("#8db87c")
@@ -131,16 +131,19 @@ class FileListPanel(QWidget):
         header = self.table.horizontalHeader()
         header.setSortIndicatorShown(True)
         header.setSectionsMovable(False)
-        for i in range(len(_HEADERS)):
+        header.setSectionResizeMode(0, QHeaderView.Fixed)
+        header.setSectionResizeMode(1, QHeaderView.Interactive)
+        for i in range(2, len(_HEADERS)):
             header.setSectionResizeMode(i, QHeaderView.Interactive)
         self.table.verticalHeader().setDefaultSectionSize(28)
         self.table.verticalHeader().setVisible(False)
-        self.table.setColumnWidth(0, 260)
-        self.table.setColumnWidth(1, 70)
-        self.table.setColumnWidth(2, 175)
-        self.table.setColumnWidth(3, 60)
-        self.table.setColumnWidth(4, 160)
-        self.table.setColumnWidth(5, 190)
+        self.table.setColumnWidth(0, 30)
+        self.table.setColumnWidth(1, 260)
+        self.table.setColumnWidth(2, 70)
+        self.table.setColumnWidth(3, 175)
+        self.table.setColumnWidth(4, 60)
+        self.table.setColumnWidth(5, 160)
+        self.table.setColumnWidth(6, 190)
 
         self.tree = QTreeWidget()
         self.tree.setColumnCount(len(_HEADERS))
@@ -160,6 +163,24 @@ class FileListPanel(QWidget):
         self.stack.setCurrentWidget(self.empty_label)
         layout.addWidget(self.stack)
 
+        # 底部勾选控制栏
+        select_layout = QHBoxLayout()
+        select_layout.setContentsMargins(0, 0, 0, 0)
+        select_layout.setSpacing(6)
+        self.select_all_btn = QPushButton("全选")
+        self.select_all_btn.clicked.connect(self.select_all)
+        self.deselect_all_btn = QPushButton("取消全选")
+        self.deselect_all_btn.clicked.connect(self.deselect_all)
+        self.selection_label = QLabel("已选中 0/0 个文件")
+        self.selection_label.setStyleSheet("color: #8a857c; font-size: 11px;")
+        select_layout.addWidget(self.select_all_btn)
+        select_layout.addWidget(self.deselect_all_btn)
+        select_layout.addWidget(self.selection_label)
+        select_layout.addStretch()
+        layout.addLayout(select_layout)
+
+        self.table.itemChanged.connect(self._on_item_changed)
+
     def populate(self, snapshots: list, matched_strategies: dict[str, MatchResult | None], strategies: list | None = None):
         """填充文件表格行。
 
@@ -178,44 +199,57 @@ class FileListPanel(QWidget):
 
         self.stack.setCurrentWidget(self.table)
         self.table.setSortingEnabled(False)
+        self.table.blockSignals(True)
         self.table.clearContents()
         self.table.setRowCount(len(snapshots))
         self._row_index.clear()
         total_size = 0
         for row, snap in enumerate(snapshots):
             self._row_index[snap.relative_path] = row
+            # 列0：勾选框
+            check_item = QTableWidgetItem()
+            check_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            check_item.setCheckState(Qt.Checked)
+            self.table.setItem(row, 0, check_item)
+            # 列1：文件名
             file_item = QTableWidgetItem(snap.file_name)
             file_item.setData(Qt.UserRole, snap.relative_path)
-            self.table.setItem(row, 0, file_item)
+            self.table.setItem(row, 1, file_item)
+            # 列2：体积
             self.table.setItem(
-                row, 1,
+                row, 2,
                 SortableTableWidgetItem(_format_bytes(snap.size_bytes), snap.size_bytes),
             )
+            # 列3：编码信息
             codec_item = QTableWidgetItem(self._format_codec(snap))
             codec_item.setForeground(
                 _COLOR_CODEC_OK if getattr(snap, "video_codec", "") else _COLOR_CODEC_MISSING
             )
-            self.table.setItem(row, 2, codec_item)
+            self.table.setItem(row, 3, codec_item)
+            # 列4：HDR
             hdr_item = QTableWidgetItem(self._format_hdr(snap.hdr_type))
             hdr_item.setForeground(self._hdr_color(getattr(snap, "hdr_type", None)))
-            self.table.setItem(row, 3, hdr_item)
+            self.table.setItem(row, 4, hdr_item)
             strategy_name, savings_text, savings_sort = self._resolve_match_display(
                 snap, matched_strategies.get(snap.relative_path)
             )
-            self.table.setItem(row, 5, SortableTableWidgetItem(savings_text, savings_sort))
+            # 列6：预计节省
+            self.table.setItem(row, 6, SortableTableWidgetItem(savings_text, savings_sort))
             if strategies:
                 self.table.setCellWidget(
-                    row, 4,
+                    row, 5,
                     self._create_strategy_combo(snap.relative_path, strategy_name),
                 )
             else:
-                self.table.setItem(row, 4, QTableWidgetItem(strategy_name))
+                self.table.setItem(row, 5, QTableWidgetItem(strategy_name))
             total_size += snap.size_bytes
 
+        self.table.blockSignals(False)
         total_tb = total_size / (1024**4)
         self.summary_label.setText(
             f"已扫描 {len(snapshots)} 个文件 · 总计 {total_tb:.2f} TB"
         )
+        self._update_selection_count()
         self.table.setSortingEnabled(True)
         self._populate_tree(snapshots, matched_strategies)
 
@@ -333,9 +367,9 @@ class FileListPanel(QWidget):
             lookup = self._strategy_lookup.get(strategy_name, strategy_name)
             match = MatchResult(strategy=lookup) if not isinstance(lookup, MatchResult) else lookup
             _, savings_text, savings_sort = self._resolve_match_display(snap, match)
-            self.table.setItem(row, 5, SortableTableWidgetItem(savings_text, savings_sort))
+            self.table.setItem(row, 6, SortableTableWidgetItem(savings_text, savings_sort))
         elif snap is not None:
-            self.table.setItem(row, 5, SortableTableWidgetItem("—", -1))
+            self.table.setItem(row, 6, SortableTableWidgetItem("—", -1))
 
         self.strategy_override_changed.emit(relative_path, strategy_name)
         if strategy_name == "自定义":
@@ -350,8 +384,8 @@ class FileListPanel(QWidget):
 
         match = MatchResult(strategy=strategy) if not isinstance(strategy, MatchResult) else strategy
         strategy_name, savings_text, savings_sort = self._resolve_match_display(snap, match)
-        self.table.setItem(row, 5, SortableTableWidgetItem(savings_text, savings_sort))
-        combo = self.table.cellWidget(row, 4)
+        self.table.setItem(row, 6, SortableTableWidgetItem(savings_text, savings_sort))
+        combo = self.table.cellWidget(row, 5)
         if isinstance(combo, QComboBox):
             if combo.findText(strategy_name) < 0:
                 combo.addItem(strategy_name)
@@ -360,7 +394,7 @@ class FileListPanel(QWidget):
                 combo.setCurrentText(strategy_name)
                 combo.blockSignals(False)
         else:
-            item = self.table.item(row, 4)
+            item = self.table.item(row, 5)
             if item:
                 item.setText(strategy_name)
 
@@ -377,17 +411,61 @@ class FileListPanel(QWidget):
             codec_item.setForeground(
                 _COLOR_CODEC_OK if getattr(snap, "video_codec", "") else _COLOR_CODEC_MISSING
             )
-            self.table.setItem(row, 2, codec_item)
+            self.table.setItem(row, 3, codec_item)
             hdr_item = QTableWidgetItem(self._format_hdr(snap.hdr_type))
             hdr_item.setForeground(self._hdr_color(getattr(snap, "hdr_type", None)))
-            self.table.setItem(row, 3, hdr_item)
+            self.table.setItem(row, 4, hdr_item)
 
     def _find_row_by_relative_path(self, relative_path: str) -> int | None:
         for row in range(self.table.rowCount()):
-            item = self.table.item(row, 0)
+            item = self.table.item(row, 1)
             if item is not None and item.data(Qt.UserRole) == relative_path:
                 return row
         return None
+
+    def get_checked_relative_paths(self) -> list[str]:
+        """返回所有勾中文件的 relative_path 列表。"""
+        checked: list[str] = []
+        for row in range(self.table.rowCount()):
+            check_item = self.table.item(row, 0)
+            if check_item and check_item.checkState() == Qt.Checked:
+                name_item = self.table.item(row, 1)
+                if name_item:
+                    path = name_item.data(Qt.UserRole)
+                    if path:
+                        checked.append(path)
+        return checked
+
+    def select_all(self):
+        self.table.blockSignals(True)
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item:
+                item.setCheckState(Qt.Checked)
+        self.table.blockSignals(False)
+        self._update_selection_count()
+
+    def deselect_all(self):
+        self.table.blockSignals(True)
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item:
+                item.setCheckState(Qt.Unchecked)
+        self.table.blockSignals(False)
+        self._update_selection_count()
+
+    def _on_item_changed(self, item: QTableWidgetItem):
+        if item.column() == 0:
+            self._update_selection_count()
+
+    def _update_selection_count(self):
+        checked = 0
+        total = self.table.rowCount()
+        for row in range(total):
+            item = self.table.item(row, 0)
+            if item and item.checkState() == Qt.Checked:
+                checked += 1
+        self.selection_label.setText(f"已选中 {checked}/{total} 个文件")
 
     def _resolve_match_display(self, snap: Any, match: MatchResult | None) -> tuple[str, str, int | float]:
         """将 MatchResult 解析为（策略名, 节省文本, 排序列数值）三元组。"""

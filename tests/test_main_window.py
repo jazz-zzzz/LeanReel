@@ -53,11 +53,11 @@ def test_file_list_displays_codec_strategy_and_estimated_savings():
 
     panel.populate([snap], {"movie.mkv": MatchResult(strategy=strategy)})
 
-    assert panel.table.item(0, 2).text() == "h264"
-    assert panel.table.item(0, 3).text() == "HDR10+"
-    assert panel.table.item(0, 4).text() == "均衡压缩"
-    assert "3.5-5.0 GB" in panel.table.item(0, 5).text()
-    assert "35-50%" in panel.table.item(0, 5).text()
+    assert panel.table.item(0, 3).text() == "h264"
+    assert panel.table.item(0, 4).text() == "HDR10+"
+    assert panel.table.item(0, 5).text() == "均衡压缩"
+    assert "3.5-5.0 GB" in panel.table.item(0, 6).text()
+    assert "35-50%" in panel.table.item(0, 6).text()
     panel.close()
 
 
@@ -76,7 +76,7 @@ def test_file_list_shows_unknown_when_codec_missing():
 
     panel.populate([snap], {"clip.mkv": None})
 
-    assert panel.table.item(0, 2).text() == "未识别"
+    assert panel.table.item(0, 3).text() == "未识别"
     panel.close()
 
 
@@ -89,8 +89,8 @@ def test_file_list_columns_are_user_resizable():
 
     header = panel.table.horizontalHeader()
 
-    assert header.sectionResizeMode(0) == QHeaderView.Interactive
-    assert header.sectionResizeMode(4) == QHeaderView.Interactive
+    assert header.sectionResizeMode(1) == QHeaderView.Interactive
+    assert header.sectionResizeMode(5) == QHeaderView.Interactive
     panel.close()
 
 
@@ -105,10 +105,10 @@ def test_strategy_combo_has_enough_width_to_avoid_text_overlap():
     snap = FileSnapshot(relative_path="movie.mkv", file_name="movie.mkv", size_bytes=10 * 1024**3)
 
     panel.populate([snap], {"movie.mkv": MatchResult(strategy=strategy)}, strategies=[strategy])
-    combo = panel.table.cellWidget(0, 4)
+    combo = panel.table.cellWidget(0, 5)
 
     assert combo.minimumWidth() >= 140
-    assert panel.table.columnWidth(4) >= 160
+    assert panel.table.columnWidth(5) >= 160
     panel.close()
 
 
@@ -160,15 +160,15 @@ def test_file_list_sorts_size_and_estimated_savings_numerically():
 
     panel.populate(snapshots, matches)
 
-    panel.table.sortItems(1, Qt.AscendingOrder)
-    assert [panel.table.item(row, 0).text() for row in range(3)] == [
+    panel.table.sortItems(2, Qt.AscendingOrder)
+    assert [panel.table.item(row, 1).text() for row in range(3)] == [
         "small.mkv",
         "medium.mkv",
         "large.mkv",
     ]
 
-    panel.table.sortItems(5, Qt.DescendingOrder)
-    assert [panel.table.item(row, 0).text() for row in range(3)] == [
+    panel.table.sortItems(6, Qt.DescendingOrder)
+    assert [panel.table.item(row, 1).text() for row in range(3)] == [
         "large.mkv",
         "medium.mkv",
         "small.mkv",
@@ -192,13 +192,13 @@ def test_file_list_updates_correct_row_after_sorting():
             "small.mkv": MatchResult(strategy="B", estimate={"estimated_min_bytes": 1, "estimated_max_bytes": 2}),
         },
     )
-    panel.table.sortItems(1, Qt.AscendingOrder)
+    panel.table.sortItems(2, Qt.AscendingOrder)
 
     large.video_codec = "hevc"
     panel.update_snapshot_row(large)
 
     visible = {
-        panel.table.item(row, 0).data(Qt.UserRole): panel.table.item(row, 2).text()
+        panel.table.item(row, 1).data(Qt.UserRole): panel.table.item(row, 3).text()
         for row in range(panel.table.rowCount())
     }
     assert visible["large.mkv"].startswith("hevc")
@@ -243,7 +243,7 @@ def test_file_list_allows_per_row_strategy_override_and_updates_savings():
     changes = []
     panel.strategy_override_changed.connect(lambda rel_path, strategy: changes.append((rel_path, strategy)))
 
-    combo = panel.table.cellWidget(0, 4)
+    combo = panel.table.cellWidget(0, 5)
     assert combo is not None
     assert combo.currentText() == "均衡压缩"
 
@@ -251,8 +251,8 @@ def test_file_list_allows_per_row_strategy_override_and_updates_savings():
 
     assert changes == [("movie.mkv", "轻量压缩")]
     assert combo.currentText() == "轻量压缩"
-    assert "1.0-1.0 GB" in panel.table.item(0, 5).text()
-    assert "10%" in panel.table.item(0, 5).text()
+    assert "1.0-1.0 GB" in panel.table.item(0, 6).text()
+    assert "10%" in panel.table.item(0, 6).text()
     panel.close()
 
 
@@ -270,7 +270,7 @@ def test_file_list_custom_strategy_option_emits_request_signal():
     requests = []
     panel.custom_strategy_requested.connect(requests.append)
 
-    combo = panel.table.cellWidget(0, 4)
+    combo = panel.table.cellWidget(0, 5)
     assert "自定义" in [combo.itemText(i) for i in range(combo.count())]
 
     combo.setCurrentText("自定义")
@@ -293,8 +293,8 @@ def test_file_list_can_update_row_with_custom_strategy():
     custom = Strategy(name="自定义", estimated_savings="50-70%")
     panel.apply_strategy_to_row("movie.mkv", custom)
 
-    assert panel.table.item(0, 4).text() == "自定义"
-    assert "5.0-7.0 GB" in panel.table.item(0, 5).text()
+    assert panel.table.item(0, 5).text() == "自定义"
+    assert "5.0-7.0 GB" in panel.table.item(0, 6).text()
     panel.close()
 
 

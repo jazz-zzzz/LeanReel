@@ -465,8 +465,16 @@ class Application:
     # ── 编码控制 ──
 
     def _on_start_requested(self):
+        checked_paths = set(self.file_panel.get_checked_relative_paths())
+        if not checked_paths:
+            self.win.set_status("没有勾选任何文件，请先在文件列表中勾选要处理的文件")
+            return
+        snapshots = [s for s in self.current_snapshots if s.relative_path in checked_paths]
+        if not snapshots:
+            self.win.set_status("勾选的文件未找到")
+            return
         self.encoding_ctrl.start(
-            self.current_snapshots,
+            snapshots,
             self.current_folder_paths,
             self.strategy_overrides,
         )
