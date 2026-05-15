@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QComboBox, QLabel, QSpinBox,
     QPushButton, QGroupBox, QFormLayout,
     QLineEdit, QFileDialog, QHBoxLayout, QToolButton,
-    QButtonGroup, QSizePolicy
+    QButtonGroup, QSizePolicy, QCheckBox
 )
 from PySide6.QtCore import Signal
 
@@ -319,6 +319,15 @@ class StrategyPanel(QWidget):
         temp_row.addWidget(self.temp_dir_edit)
         temp_row.addWidget(self.browse_btn)
         encode_layout.addRow("临时目录", temp_row)
+
+        self.sync_output_cb = QCheckBox("同步回源目录（输出移到源文件所在位置）")
+        self.sync_output_cb.setChecked(False)
+        encode_layout.addRow(self.sync_output_cb)
+
+        self.keep_temp_cb = QCheckBox("保留临时文件（调试用）")
+        self.keep_temp_cb.setChecked(False)
+        encode_layout.addRow(self.keep_temp_cb)
+
         layout.addWidget(encode_group)
 
         # ── 开始按钮 ──
@@ -421,6 +430,14 @@ class StrategyPanel(QWidget):
     @property
     def temp_dir(self) -> str:
         return self.temp_dir_edit.text().strip() or self._temp_dir
+
+    @property
+    def sync_output(self) -> bool:
+        return self.sync_output_cb.isChecked()
+
+    @property
+    def keep_temp(self) -> bool:
+        return self.keep_temp_cb.isChecked()
 
     @property
     def current_strategy(self):

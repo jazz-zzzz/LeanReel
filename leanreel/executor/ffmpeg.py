@@ -33,9 +33,12 @@ class CancelledError(Exception):
 class FFmpegExecutor:
     """Executor adapter used by WorkerManager. 支持 Slotted Pipeline 阶段化编码。"""
 
-    def __init__(self, progress_callback=None, temp_dir: Optional[str] = None):
+    def __init__(self, progress_callback=None, temp_dir: Optional[str] = None,
+                 sync_output: bool = False, keep_temp: bool = False):
         self.progress_callback = progress_callback
         self.temp_dir = temp_dir
+        self.sync_output = sync_output
+        self.keep_temp = keep_temp
         self._active_cancel_event: Optional[threading.Event] = None
 
     def _get_temp_dir(self) -> Path:
@@ -214,23 +217,27 @@ class FFmpegExecutor:
                     plan.mark_stage_completed(i)
 
                 elif slot_id == "move_out":
-                    # 如果临时输出和目标路径相同（temp_dir == 目标目录），跳过移动
-                    if temp_output.resolve() == final_output.resolve():
-                        if final_output.exists():
-                            task.compressed_size = final_output.stat().st_size
+                    if self.sync_output:
+                        if temp_output.resolve() == final_output.resolve():
+                            if final_output.exists():
+                                task.compressed_size = final_output.stat().st_size
+                        else:
+                            final_output.parent.mkdir(parents=True, exist_ok=True)
+                            if final_output.exists():
+                                final_output.unlink()
+                            shutil.move(str(temp_output), str(final_output))
+                            if final_output.exists():
+                                task.compressed_size = final_output.stat().st_size
+                        # 压缩后体积变大 → 丢弃结果，保留原文件
+                        if task.compressed_size > 0 and task.original_size > 0 and task.compressed_size >= task.original_size:
+                            if final_output.exists():
+                                final_output.unlink()
+                            task.compressed_size = task.original_size
+                            stage.detail = "跳过（输出 ≥ 原体积）"
                     else:
-                        final_output.parent.mkdir(parents=True, exist_ok=True)
-                        if final_output.exists():
-                            final_output.unlink()
-                        shutil.move(str(temp_output), str(final_output))
-                        if final_output.exists():
-                            task.compressed_size = final_output.stat().st_size
-                    # 压缩后体积变大 → 丢弃结果，保留原文件
-                    if task.compressed_size > 0 and task.original_size > 0 and task.compressed_size >= task.original_size:
-                        if final_output.exists():
-                            final_output.unlink()
-                        task.compressed_size = task.original_size
-                        stage.detail = f"跳过（输出 ≥ 原体积）"
+                        # 不同步：体积记录临时输出文件大小
+                        if temp_output.exists():
+                            task.compressed_size = temp_output.stat().st_size
                     plan.mark_stage_completed(i)
 
                 task.progress = plan.compute_overall_progress()
@@ -263,14 +270,15 @@ class FFmpegExecutor:
             raise
         finally:
             self._active_cancel_event = None
-            if rpu_file and rpu_file.exists():
-                rpu_file.unlink()
-            if local_input and local_input.exists():
+            if not self.keep_temp:
+                if rpu_file and rpu_file.exists():
+                    rpu_file.unlink()
+                if local_input and local_input.exists():
+                    try:
+                        local_input.unlink()
+                    except OSError:
+                        pass
                 try:
-                    local_input.unlink()
+                    task_temp_dir.rmdir()
                 except OSError:
                     pass
-            try:
-                task_temp_dir.rmdir()
-            except OSError:
-                pass

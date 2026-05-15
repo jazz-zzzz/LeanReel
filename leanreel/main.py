@@ -196,6 +196,8 @@ class EncodingController:
                 FFmpegExecutor(
                     temp_dir=self._strategy_panel.temp_dir,
                     progress_callback=lambda t: self._notifier.task_updated.emit(t),
+                    sync_output=self._strategy_panel.sync_output,
+                    keep_temp=self._strategy_panel.keep_temp,
                 ),
                 self._strategy_panel.worker_count,
                 progress_callback=lambda t: self._notifier.task_updated.emit(t),
@@ -351,6 +353,7 @@ class Application:
         self.lib_panel.folder_removed.connect(self._on_folder_removed)
         self.file_panel.strategy_override_changed.connect(self._on_strategy_override_changed)
         self.file_panel.custom_strategy_requested.connect(self._on_custom_strategy_requested)
+        self.file_panel.refresh_requested.connect(self._on_refresh_requested)
         self.strategy_panel.custom_strategy_changed.connect(self._on_custom_strategy_changed)
         self.strategy_panel.start_requested.connect(self._on_start_requested)
         self.win.set_toggle_queue_action(
@@ -477,6 +480,46 @@ class Application:
         self._populate_file_list(self.current_snapshots)
         self._refresh_libraries()
         self.win.set_status("文件夹已移除")
+
+    def _on_refresh_requested(self):
+        """重新扫描当前所有文件夹，刷新文件列表和编码信息缓存。"""
+        if not self.current_folder_paths:
+            self.win.set_status("没有已添加的文件夹，请先添加文件夹")
+            return
+
+        self.win.set_status("刷新中...")
+        all_snapshots: list = []
+        all_jobs: list = []
+
+        for folder_id, path in list(self.current_folder_paths.items()):
+            batch = self.services.scanner.scan_folder_fast_batch(folder_id, path)
+            all_snapshots.extend(batch.snapshots)
+            all_jobs.extend(batch.pending_jobs)
+
+        self.current_snapshots = all_snapshots
+        self._populate_file_list(all_snapshots)
+
+        if all_jobs:
+            done_count = [0]
+            lock = threading.Lock()
+
+            def on_probed(snap):
+                self.notifier.probed.emit(snap)
+
+            def on_progress():
+                with lock:
+                    done_count[0] += 1
+                    self.notifier.progress.emit(done_count[0], len(all_jobs))
+
+            def on_finished():
+                self.notifier.all_done.emit()
+
+            self.services.scanner.start_background_probe_jobs(
+                all_jobs, on_probed, on_finished, on_progress
+            )
+            self.win.set_status(f"刷新中：0/{len(all_jobs)} 个文件已探测...")
+        else:
+            self.win.set_status(f"刷新完成：{len(all_snapshots)} 个文件")
 
     # ── 策略信号处理 ──
 

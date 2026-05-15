@@ -88,6 +88,7 @@ class FileListPanel(QWidget):
     file_selection_changed = Signal(list)  # 预留：选中文件变化时通知外部（当前无人连接）
     strategy_override_changed = Signal(str, str)
     custom_strategy_requested = Signal(str)
+    refresh_requested = Signal()
 
     def __init__(self):
         super().__init__()
@@ -107,6 +108,16 @@ class FileListPanel(QWidget):
         # 顶部信息栏
         info_layout = QHBoxLayout()
         self.summary_label = QLabel("未扫描")
+        self.view_combo = QComboBox()
+        self.view_combo.addItem("平铺", "flat")
+        self.view_combo.addItem("目录树", "tree")
+        self.view_combo.currentIndexChanged.connect(
+            lambda _i: self.set_view_mode(self.view_combo.currentData())
+        )
+        self.refresh_btn = QPushButton("刷新")
+        self.refresh_btn.setToolTip("重新扫描当前文件夹，重建缓存")
+        self.refresh_btn.clicked.connect(self.refresh_requested.emit)
+        info_layout.addWidget(self.refresh_btn)
         self.view_combo = QComboBox()
         self.view_combo.addItem("平铺", "flat")
         self.view_combo.addItem("目录树", "tree")
@@ -210,7 +221,7 @@ class FileListPanel(QWidget):
             # 列0：勾选框
             check_item = QTableWidgetItem()
             check_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-            check_item.setCheckState(Qt.Checked)
+            check_item.setCheckState(Qt.Unchecked)
             self.table.setItem(row, 0, check_item)
             # 列1：文件名
             file_item = QTableWidgetItem(snap.file_name)
