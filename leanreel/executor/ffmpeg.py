@@ -133,23 +133,42 @@ class FFmpegExecutor:
                     encode_input = str(local_input) if local_input else task.input_path
                     cmd = FFmpegBuilder.build(snap, strategy, encode_input, str(temp_output))
                     duration = snap.duration_seconds if snap else 0.0
+                    input_size = snap.size_bytes if snap else 0
 
+                    # 估算输出大小（取预计节省范围的中间值）
+                    savings_str = getattr(strategy, "estimated_savings", "") if strategy else ""
+                    savings_mid = 0.35  # 默认估算 35%
+                    if savings_str:
+                        import re
+                        nums = re.findall(r"\d+", savings_str)
+                        if len(nums) >= 2:
+                            savings_mid = (int(nums[0]) + int(nums[1])) / 200.0
+                    estimated_output = int(input_size * (1 - savings_mid)) if input_size > 0 else 0
+
+                    # 混合进度源：优先 time= 解析，回退到输出文件大小
                     def _transcode_progress(line: str):
-                        if "time=" not in line or duration <= 0:
-                            return
-                        try:
-                            time_str = line.split("time=")[1].split()[0]
-                            parts = time_str.split(":")
-                            hours = int(parts[0])
-                            minutes = int(parts[1])
-                            seconds = float(parts[2])
-                            elapsed = hours * 3600 + minutes * 60 + seconds
-                            pct = min(elapsed / duration, 1.0)
-                            stage.internal_progress = pct
-                            task.progress = plan.compute_overall_progress()
-                            self._emit_progress(task)
-                        except (ValueError, IndexError):
-                            pass
+                        nonlocal duration
+                        if "time=" in line and duration > 0:
+                            try:
+                                time_str = line.split("time=")[1].split()[0]
+                                parts = time_str.split(":")
+                                hours = int(parts[0])
+                                minutes = int(parts[1])
+                                seconds = float(parts[2])
+                                elapsed = hours * 3600 + minutes * 60 + seconds
+                                pct = min(elapsed / duration, 0.98)
+                                stage.internal_progress = max(stage.internal_progress, pct)
+                            except (ValueError, IndexError):
+                                pass
+                        elif temp_output.exists() and estimated_output > 0:
+                            # 回退：输出文件大小 / 估算输出大小
+                            try:
+                                pct = min(temp_output.stat().st_size / estimated_output, 0.98)
+                                stage.internal_progress = max(stage.internal_progress, pct)
+                            except OSError:
+                                pass
+                        task.progress = plan.compute_overall_progress()
+                        self._emit_progress(task)
 
                     exit_code, stderr_tail = run_ffmpeg(
                         cmd,

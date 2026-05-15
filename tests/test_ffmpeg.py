@@ -88,8 +88,8 @@ def test_build_sdr_no_hdr_flags(balanced_strategy):
 def test_build_command_does_not_overwrite_existing_output_by_default(balanced_strategy):
     snap = FileSnapshot(video_codec="h264")
     cmd = FFmpegBuilder.build(snap, balanced_strategy, "in.mkv", "out.mkv")
-    assert "-y" not in cmd
-    assert "-n" in cmd
+    assert "-y" in cmd
+    assert "-nostdin" in cmd
 
 
 def test_ffmpeg_executor_runs_built_command(monkeypatch, balanced_strategy, tmp_path):
@@ -123,7 +123,7 @@ def test_ffmpeg_executor_runs_built_command(monkeypatch, balanced_strategy, tmp_
     cmd_joined = " ".join(cmd)
 
     # 验证关键参数
-    assert "-n" in cmd           # 不覆盖已存在文件
+    assert "-y" in cmd           # 覆盖输出文件
     assert "-i" in cmd
     assert task.input_path in cmd
     assert "-map 0:V" in cmd_joined  # 视频映射

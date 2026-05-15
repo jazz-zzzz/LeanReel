@@ -30,7 +30,7 @@ class FFmpegBuilder:
     @staticmethod
     def build(snapshot: FileSnapshot, strategy: Strategy,
               input_path: str, output_path: str) -> list[str]:
-        cmd = [get_ffmpeg_path(), "-n", "-i", input_path]
+        cmd = [get_ffmpeg_path(), "-nostdin", "-y", "-i", input_path]
 
         v = strategy.video
 
