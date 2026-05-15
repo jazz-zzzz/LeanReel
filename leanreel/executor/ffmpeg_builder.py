@@ -45,6 +45,9 @@ class FFmpegBuilder:
                 "-preset", v.nv_preset,
                 "-rc", v.rc,
                 "-cq", str(v.cq),
+                "-spatial_aq", "1",
+                "-temporal_aq", "1",
+                "-aq-strength", "8",
             ])
             if snapshot.hdr_type in (HDRType.HDR10, HDRType.HDR10P, HDRType.DV_P5, HDRType.DV_P7, HDRType.DV_P8):
                 cmd.extend([
