@@ -75,18 +75,21 @@ class FFmpegBuilder:
         audio_tracks = snapshot.audio_tracks
         if audio_tracks:
             remove_commentary = audio_rule.remove_commentary or audio_rule.mode == "strip_commentary"
+            filter_languages = audio_rule.mode == "strip_non_preferred"
             preferred = audio_rule.preferred_languages
             kept_audio = []
             for i, track in enumerate(audio_tracks):
                 if remove_commentary and track.is_commentary:
                     continue
-                if preferred and track.language not in preferred:
+                if filter_languages and preferred and track.language not in preferred:
                     continue
                 kept_audio.append(i)
             for idx in kept_audio:
                 cmd.extend(["-map", f"0:a:{idx}"])
             if kept_audio:
                 cmd.extend(["-c:a", "copy"])
+            elif audio_rule.mode == "keep_original":
+                cmd.extend(["-map", "0:a", "-c:a", "copy"])
         else:
             cmd.extend(["-map", "0:a", "-c:a", "copy"])
 

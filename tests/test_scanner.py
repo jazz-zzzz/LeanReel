@@ -332,6 +332,28 @@ def test_save_exhausts_retries_and_raises(tmp_path: Path):
     assert busy_db.call_count == 3
 
 
+def test_fast_scan_batches_keep_independent_pending_jobs(tmp_path: Path):
+    from leanreel.core.scanner import Scanner
+
+    db = Database(str(tmp_path / "scan_batch.db"))
+    try:
+        first = tmp_path / "first"
+        second = tmp_path / "second"
+        first.mkdir()
+        second.mkdir()
+        (first / "a.mkv").write_bytes(b"first")
+        (second / "b.mkv").write_bytes(b"second")
+
+        scanner = Scanner(db, probe_runner=MockFFprobe(), max_workers=1)
+        first_batch = scanner.scan_folder_fast_batch(1, str(first))
+        second_batch = scanner.scan_folder_fast_batch(2, str(second))
+
+        assert [job[1] for job in first_batch.pending_jobs] == ["a.mkv"]
+        assert [job[1] for job in second_batch.pending_jobs] == ["b.mkv"]
+    finally:
+        db.close()
+
+
 def test_save_does_not_retry_non_busy_errors(tmp_path: Path):
     """save() 不应重试非 SQLITE_BUSY 错误。"""
     from leanreel.core.scanner import SnapshotRepository

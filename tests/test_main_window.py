@@ -176,6 +176,36 @@ def test_file_list_sorts_size_and_estimated_savings_numerically():
     panel.close()
 
 
+def test_file_list_updates_correct_row_after_sorting():
+    from leanreel.data.models import FileSnapshot
+    from leanreel.gui.file_list import FileListPanel, MatchResult
+
+    app = get_app()
+    panel = FileListPanel()
+    large = FileSnapshot(relative_path="large.mkv", file_name="large.mkv", size_bytes=10 * 1024**3, video_codec="h264")
+    small = FileSnapshot(relative_path="small.mkv", file_name="small.mkv", size_bytes=1 * 1024**3, video_codec="h264")
+
+    panel.populate(
+        [large, small],
+        {
+            "large.mkv": MatchResult(strategy="A", estimate={"estimated_min_bytes": 1, "estimated_max_bytes": 2}),
+            "small.mkv": MatchResult(strategy="B", estimate={"estimated_min_bytes": 1, "estimated_max_bytes": 2}),
+        },
+    )
+    panel.table.sortItems(1, Qt.AscendingOrder)
+
+    large.video_codec = "hevc"
+    panel.update_snapshot_row(large)
+
+    visible = {
+        panel.table.item(row, 0).data(Qt.UserRole): panel.table.item(row, 2).text()
+        for row in range(panel.table.rowCount())
+    }
+    assert visible["large.mkv"].startswith("hevc")
+    assert visible["small.mkv"].startswith("h264")
+    panel.close()
+
+
 def test_library_panel_delete_and_remove_actions_emit_signals():
     from leanreel.gui.library_panel import LibraryPanel
 

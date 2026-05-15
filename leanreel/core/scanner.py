@@ -3,7 +3,7 @@ import json
 import os
 import time
 import threading
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional, Callable
 
@@ -11,6 +11,12 @@ from leanreel.data.database import Database
 from leanreel.data.models import AudioTrack, FileSnapshot, HDRType, SubtitleTrack
 
 VIDEO_EXTENSIONS = {".mkv", ".mp4", ".avi", ".ts", ".mov", ".wmv", ".m2ts", ".mts"}
+
+
+@dataclass
+class ScanBatch:
+    snapshots: list[FileSnapshot]
+    pending_jobs: list[tuple[int, str, str, int]]
 
 
 def find_video_files(folder_path: str) -> list[tuple[str, str]]:
@@ -271,17 +277,13 @@ class Scanner:
 
         return results
 
-    def scan_folder_fast(self, library_folder_id: int, folder_path: str) -> list[FileSnapshot]:
-        """快速扫描：立即返回文件列表（优先缓存，无缓存则返回仅含文件名+体积的占位快照）。
-
-        需要 ffprobe 的文件排队到后台，调用 probe_next() 逐个补全。
-        """
+    def scan_folder_fast_batch(self, library_folder_id: int, folder_path: str) -> ScanBatch:
+        """快速扫描批次：返回 ScanBatch（快照 + 待探测任务），不触碰 Scanner 内部 _pending_jobs。"""
         folder_path = os.path.normpath(folder_path)
         found_files = find_video_files(folder_path)
         results: list[FileSnapshot] = []
         pending: list[tuple[int, str, str, int]] = []
 
-        # 批量加载缓存到内存 dict，避免逐文件 DB 查询
         cached_dict = {s.relative_path: s for s in self._repo.load_all(library_folder_id)}
 
         for rel_path, abs_path in found_files:
@@ -296,12 +298,10 @@ class Scanner:
                 results.append(existing)
                 continue
 
-            # probe_ok=False 的缓存：上次探测失败，如果 mtime 未变则跳过重新探测
             if existing and not existing.probe_ok and existing.file_mtime == file_mtime:
                 results.append(existing)
                 continue
 
-            # 需要探测：先返回占位快照
             placeholder = FileSnapshot(
                 library_folder_id=library_folder_id,
                 relative_path=rel_path,
@@ -312,9 +312,17 @@ class Scanner:
             results.append(placeholder)
             pending.append((library_folder_id, rel_path, abs_path, file_size))
 
+        return ScanBatch(snapshots=results, pending_jobs=pending)
+
+    def scan_folder_fast(self, library_folder_id: int, folder_path: str) -> list[FileSnapshot]:
+        """快速扫描：立即返回文件列表（优先缓存，无缓存则返回仅含文件名+体积的占位快照）。
+
+        需要 ffprobe 的文件排队到后台，调用 probe_next() 逐个补全。
+        """
+        batch = self.scan_folder_fast_batch(library_folder_id, folder_path)
         with self._probe_lock:
-            self._pending_jobs = pending
-        return results
+            self._pending_jobs = list(batch.pending_jobs)
+        return batch.snapshots
 
     @property
     def pending_count(self) -> int:
@@ -358,6 +366,57 @@ class Scanner:
             on_done(snap)
         return self.pending_count > 0
 
+    def start_background_probe_jobs(
+        self,
+        jobs: list[tuple[int, str, str, int]],
+        on_done: Callable[[FileSnapshot], None],
+        on_finished: Callable[[], None] | None = None,
+        on_progress: Callable[[], None] | None = None,
+    ):
+        """在后台线程池并行探测指定的文件列表，每个完成后回调 on_done（在探测线程调用）"""
+        import concurrent.futures
+
+        jobs = list(jobs)
+
+        def _probe_one(job):
+            folder_id, rel_path, abs_path, file_size = job
+            try:
+                fmtime = os.path.getmtime(abs_path)
+            except OSError:
+                fmtime = 0.0
+            probe = self._get_probe()
+            try:
+                snap = probe.probe(abs_path, folder_id)
+                snap.relative_path = rel_path
+                snap.file_mtime = fmtime
+                snap.probe_ok = True
+            except Exception:
+                snap = FileSnapshot(
+                    library_folder_id=folder_id,
+                    relative_path=rel_path,
+                    file_name=os.path.basename(abs_path),
+                    size_bytes=file_size,
+                    file_mtime=fmtime,
+                    probe_ok=False,
+                )
+            self._repo.save(snap)
+            if on_done:
+                on_done(snap)
+            if on_progress:
+                on_progress()
+
+        def _run():
+            if jobs:
+                workers = min(self.max_workers, len(jobs))
+                with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+                    list(pool.map(_probe_one, jobs))
+            if on_finished:
+                on_finished()
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        return t
+
     def start_background_probe(
         self,
         on_done: Callable[[FileSnapshot], None],
@@ -365,49 +424,7 @@ class Scanner:
         on_progress: Callable[[], None] | None = None,
     ):
         """在后台线程池并行探测所有待处理文件，每个完成后回调 on_done（在探测线程调用）"""
-        import concurrent.futures
-
-        def _run():
-            jobs: list[tuple[int, str, str, int]] = []
-            with self._probe_lock:
-                jobs = list(self._pending_jobs)
-                self._pending_jobs = []
-
-            def _probe_one(job):
-                folder_id, rel_path, abs_path, file_size = job
-                try:
-                    fmtime = os.path.getmtime(abs_path)
-                except OSError:
-                    fmtime = 0.0
-                probe = self._get_probe()
-                try:
-                    snap = probe.probe(abs_path, folder_id)
-                    snap.relative_path = rel_path
-                    snap.file_mtime = fmtime
-                    snap.probe_ok = True
-                except Exception:
-                    snap = FileSnapshot(
-                        library_folder_id=folder_id,
-                        relative_path=rel_path,
-                        file_name=os.path.basename(abs_path),
-                        size_bytes=file_size,
-                        file_mtime=fmtime,
-                        probe_ok=False,
-                    )
-                self._repo.save(snap)
-                if on_done:
-                    on_done(snap)
-                if on_progress:
-                    on_progress()
-
-            if jobs:
-                workers = min(self.max_workers, len(jobs))
-                with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-                    pool.map(_probe_one, jobs)
-
-            if on_finished:
-                on_finished()
-
-        t = threading.Thread(target=_run, daemon=True)
-        t.start()
-        return t
+        with self._probe_lock:
+            jobs = list(self._pending_jobs)
+            self._pending_jobs = []
+        return self.start_background_probe_jobs(jobs, on_done, on_finished, on_progress)

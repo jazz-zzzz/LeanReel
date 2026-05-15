@@ -1,4 +1,5 @@
 """FFmpeg 执行器 — 编码编排，I/O 分离、临时文件管理、Dolby Vision 流程"""
+import hashlib
 import shutil
 import tempfile
 import threading
@@ -72,7 +73,10 @@ class FFmpegExecutor:
 
         final_output = Path(task.output_path)
         temp_dir = self._get_temp_dir()
-        temp_output = temp_dir / final_output.name
+        output_key = hashlib.sha1(str(final_output.resolve()).encode("utf-8")).hexdigest()[:12]
+        task_temp_dir = temp_dir / output_key
+        task_temp_dir.mkdir(parents=True, exist_ok=True)
+        temp_output = task_temp_dir / final_output.name
         rpu_file: Optional[Path] = None
         dv_output: Optional[Path] = None
 
@@ -87,7 +91,7 @@ class FFmpegExecutor:
 
         try:
             if dv_mode:
-                rpu_file = temp_dir / f"{final_output.stem}.rpu"
+                rpu_file = task_temp_dir / f"{final_output.stem}.rpu"
                 if rpu_file.exists():
                     rpu_file.unlink()
                 if not DoviTool.extract_rpu(task.input_path, str(rpu_file)):
@@ -110,7 +114,7 @@ class FFmpegExecutor:
                 raise RuntimeError(f"FFmpeg failed ({exit_code}): {task.file_name}\n{stderr_tail.strip()}")
 
             if dv_mode and rpu_file and rpu_file.exists():
-                dv_output = temp_dir / f"{final_output.stem}_dv{final_output.suffix}"
+                dv_output = task_temp_dir / f"{final_output.stem}_dv{final_output.suffix}"
                 if dv_output.exists():
                     dv_output.unlink()
                 if not DoviTool.inject_rpu(str(temp_output), str(rpu_file), str(dv_output)):
@@ -120,6 +124,8 @@ class FFmpegExecutor:
 
             # 如果临时输出和目标路径相同（temp_dir == 目标目录），跳过移动
             if temp_output.resolve() == final_output.resolve():
+                if final_output.exists():
+                    task.compressed_size = final_output.stat().st_size
                 return
 
             # 确保目标目录存在
@@ -130,6 +136,8 @@ class FFmpegExecutor:
                 final_output.unlink()
 
             shutil.move(str(temp_output), str(final_output))
+            if final_output.exists():
+                task.compressed_size = final_output.stat().st_size
         except Exception:
             if temp_output.exists():
                 temp_output.unlink()
@@ -140,3 +148,7 @@ class FFmpegExecutor:
         finally:
             if rpu_file and rpu_file.exists():
                 rpu_file.unlink()
+            try:
+                task_temp_dir.rmdir()
+            except OSError:
+                pass

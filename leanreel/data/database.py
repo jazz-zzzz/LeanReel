@@ -13,6 +13,7 @@ class Database:
     def __init__(self, db_path: str = ":memory:"):
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        self._explicit_transaction = False
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
         self._create_tables()
@@ -80,7 +81,7 @@ class Database:
         try:
             cur = self.conn.execute(sql, params or [])
             rows = [dict(row) for row in cur.fetchall()] if cur.description else []
-            if self.conn.in_transaction:
+            if self.conn.in_transaction and not self._explicit_transaction:
                 self.conn.commit()
             return rows
         except Exception:
@@ -102,14 +103,17 @@ class Database:
                 raise
         """
         self.conn.execute("BEGIN IMMEDIATE")
+        self._explicit_transaction = True
 
     def commit(self):
         """提交当前事务。"""
         self.conn.commit()
+        self._explicit_transaction = False
 
     def rollback(self):
         """回滚当前事务。"""
         self.conn.rollback()
+        self._explicit_transaction = False
 
     @property
     def last_insert_id(self) -> int:

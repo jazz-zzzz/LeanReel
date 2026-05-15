@@ -209,10 +209,37 @@ def test_build_strip_commentary_mode():
     assert "-map 0:a:1" not in joined
 
 
+def test_build_keep_original_keeps_unknown_language_audio():
+    from leanreel.data.models import AudioTrack
+
+    strategy = Strategy.from_dict({
+        "name": "keep-original",
+        "audio": {
+            "mode": "keep_original",
+            "remove_commentary": True,
+            "preferred_languages": ["chi", "zho", "eng"],
+        },
+        "subtitle": {"mode": "keep_all"},
+        "video": {},
+        "filters": {},
+    })
+    snap = FileSnapshot(video_codec="h264", audio_tracks=[
+        AudioTrack(codec="truehd", channels=8, language="und", title="Main Atmos"),
+        AudioTrack(codec="aac", channels=2, language="eng", title="Commentary", is_commentary=True),
+    ])
+
+    cmd = FFmpegBuilder.build(snap, strategy, "in.mkv", "out.mkv")
+    joined = " ".join(cmd)
+
+    assert "-map 0:a:0" in joined
+    assert "-map 0:a:1" not in joined
+    assert "-c:a copy" in joined
+
+
 def test_build_filters_by_preferred_languages():
     from leanreel.data.models import AudioTrack
     strategy = Strategy.from_dict({
-        "name": "test", "audio": {"mode": "keep_original", "preferred_languages": ["chi", "zho", "eng"]},
+        "name": "test", "audio": {"mode": "strip_non_preferred", "preferred_languages": ["chi", "zho", "eng"]},
         "subtitle": {"mode": "keep_all"},
         "video": {}, "filters": {},
     })
@@ -287,6 +314,41 @@ def test_build_audio_fallback_when_no_probe_data(balanced_strategy):
     joined = " ".join(cmd)
     assert "-map 0:a" in joined
     assert "-c:a copy" in joined
+
+
+def test_ffmpeg_executor_uses_unique_temp_paths_for_same_output_names(monkeypatch, balanced_strategy, tmp_path):
+    from leanreel.executor import ffmpeg
+    from leanreel.executor.worker import EncodeTask
+
+    commands = []
+
+    def fake_run(cmd, progress_callback=None, cancel_event=None):
+        commands.append(cmd)
+        Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
+        Path(cmd[-1]).write_text("encoded")
+        return 0, ""
+
+    monkeypatch.setattr(ffmpeg, "run_ffmpeg", fake_run)
+    temp_dir = tmp_path / "temp"
+
+    first_output = tmp_path / "Film A" / "movie_SS.mkv"
+    second_output = tmp_path / "Film B" / "movie_SS.mkv"
+
+    for output in (first_output, second_output):
+        task = EncodeTask(
+            file_name="movie.mkv",
+            input_path=str(tmp_path / "source.mkv"),
+            output_path=str(output),
+            strategy=balanced_strategy,
+            snapshot=FileSnapshot(video_codec="h264", size_bytes=1000),
+        )
+        FFmpegExecutor(temp_dir=str(temp_dir)).encode(task)
+        assert task.compressed_size == len("encoded")
+
+    assert len(commands) == 2
+    assert commands[0][-1] != commands[1][-1]
+    assert first_output.exists()
+    assert second_output.exists()
 
 
 def test_ffmpeg_executor_dovi_flow(monkeypatch, tmp_path):

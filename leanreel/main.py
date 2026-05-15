@@ -29,7 +29,7 @@ class ProbeNotifier(QObject):
     probed = Signal(object)
     all_done = Signal()
     progress = Signal(int, int)  # done, total
-    scan_finished = Signal(object, int, str)  # snapshots, folder_id, folder_path
+    scan_finished = Signal(object, int, str, object)  # snapshots, folder_id, folder_path, pending_jobs
     task_updated = Signal(object)  # EncodeTask
     encoding_done = Signal()
 
@@ -68,6 +68,24 @@ def compute_encode_summary(results: list[EncodeTask]) -> tuple[int, int]:
     return done, failed
 
 
+def clear_current_state():
+    """返回空状态三元组，用于库删除后完全重置。"""
+    return [], {}, {}
+
+
+def remove_folder_from_current_state(snapshots, folder_paths, strategy_overrides, folder_id: int):
+    """从当前状态中移除指定文件夹的所有数据，返回新的三元组。"""
+    remaining_snapshots = [s for s in snapshots if s.library_folder_id != folder_id]
+    remaining_paths = {fid: path for fid, path in folder_paths.items() if fid != folder_id}
+    remaining_relative_paths = {s.relative_path for s in remaining_snapshots}
+    remaining_overrides = {
+        path: strategy
+        for path, strategy in strategy_overrides.items()
+        if path in remaining_relative_paths
+    }
+    return remaining_snapshots, remaining_paths, remaining_overrides
+
+
 def build_encode_tasks(
     snapshots,
     folder_paths: dict[int, str],
@@ -89,6 +107,7 @@ def build_encode_tasks(
             strategy_name=selected_strategy.name,
             strategy=selected_strategy,
             snapshot=snap,
+            original_size=snap.size_bytes,
         ))
     return tasks
 
@@ -288,8 +307,8 @@ class Application:
         self.lib_panel.library_added.connect(self._on_library_added)
         self.lib_panel.folder_added.connect(self._on_folder_added)
         self.lib_panel.library_selected.connect(self._on_library_selected)
-        self.lib_panel.library_deleted.connect(self.services.lib_mgr.delete_library)
-        self.lib_panel.folder_removed.connect(self.services.lib_mgr.remove_folder)
+        self.lib_panel.library_deleted.connect(self._on_library_deleted)
+        self.lib_panel.folder_removed.connect(self._on_folder_removed)
         self.file_panel.strategy_override_changed.connect(self._on_strategy_override_changed)
         self.file_panel.custom_strategy_requested.connect(self._on_custom_strategy_requested)
         self.strategy_panel.custom_strategy_changed.connect(self._on_custom_strategy_changed)
@@ -339,25 +358,31 @@ class Application:
         self.win.set_status(f"扫描 {path}...")
 
         def _scan_in_background():
-            snapshots = self.services.scanner.scan_folder_fast(folder.id, path)
-            self.notifier.scan_finished.emit(snapshots, folder.id, path)
+            batch = self.services.scanner.scan_folder_fast_batch(folder.id, path)
+            self.notifier.scan_finished.emit(batch.snapshots, folder.id, path, batch.pending_jobs)
 
         threading.Thread(target=_scan_in_background, daemon=True).start()
 
-    def _on_scan_finished(self, snapshots, folder_id, folder_path):
+    def _on_scan_finished(self, snapshots, folder_id, folder_path, pending_jobs):
         """扫描后台线程完成后的回调（在主线程执行）"""
-        self.current_snapshots = snapshots
         self.current_folder_paths[folder_id] = folder_path
-        self.strategy_overrides = {}
+        self.current_snapshots = [
+            s for s in self.current_snapshots
+            if s.library_folder_id != folder_id
+        ] + list(snapshots)
+        self.strategy_overrides = {
+            path: strategy for path, strategy in self.strategy_overrides.items()
+            if any(s.relative_path == path for s in self.current_snapshots)
+        }
 
-        self._populate_file_list(snapshots)
+        self._populate_file_list(self.current_snapshots)
 
         # 区分"无视频文件"和"有待探测文件"
         if len(snapshots) == 0:
             self.win.set_status(f"未找到视频文件：{folder_path}")
             return
 
-        pending = self.services.scanner.pending_count
+        pending = len(pending_jobs)
         if pending > 0:
             self.win.set_status(f"扫描中：0/{pending} 个文件已探测...")
 
@@ -375,7 +400,9 @@ class Application:
             def on_finished():
                 self.notifier.all_done.emit()
 
-            self.services.scanner.start_background_probe(on_probed, on_finished, on_progress)
+            self.services.scanner.start_background_probe_jobs(
+                list(pending_jobs), on_probed, on_finished, on_progress
+            )
         else:
             self.win.set_status(f"扫描完成：{len(snapshots)} 个文件")
 
@@ -391,6 +418,25 @@ class Application:
         self.current_snapshots = snapshots
         self._populate_file_list(snapshots)
         self.win.set_status(f"已加载 {len(snapshots)} 个文件")
+
+    def _on_library_deleted(self, lib_id):
+        self.services.lib_mgr.delete_library(lib_id)
+        self.current_snapshots, self.current_folder_paths, self.strategy_overrides = clear_current_state()
+        self.file_panel.populate([], {}, self.services.strategies)
+        self._refresh_libraries()
+        self.win.set_status("库已删除")
+
+    def _on_folder_removed(self, folder_id):
+        self.services.lib_mgr.remove_folder(folder_id)
+        self.current_snapshots, self.current_folder_paths, self.strategy_overrides = remove_folder_from_current_state(
+            self.current_snapshots,
+            self.current_folder_paths,
+            self.strategy_overrides,
+            folder_id,
+        )
+        self._populate_file_list(self.current_snapshots)
+        self._refresh_libraries()
+        self.win.set_status("文件夹已移除")
 
     # ── 策略信号处理 ──
 

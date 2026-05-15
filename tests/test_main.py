@@ -113,6 +113,25 @@ def test_compute_encode_summary_counts_completed_and_failed():
     assert failed == 1
 
 
+def test_build_encode_tasks_sets_original_size_from_snapshot():
+    from leanreel.main import build_encode_tasks
+    from leanreel.core.strategy import Strategy
+    from leanreel.data.models import FileSnapshot
+
+    snap = FileSnapshot(
+        library_folder_id=1,
+        relative_path="movie.mkv",
+        file_name="movie.mkv",
+        size_bytes=987654321,
+    )
+    strategy = Strategy(name="Balanced")
+
+    tasks = build_encode_tasks([snap], {1: "C:/media"}, strategy)
+
+    assert len(tasks) == 1
+    assert tasks[0].original_size == 987654321
+
+
 def test_compute_encode_summary_returns_zero_for_all_pending():
     tasks = [
         EncodeTask(file_name="a.mkv", input_path="/in/a.mkv", output_path="/out/a.mkv"),
@@ -123,6 +142,36 @@ def test_compute_encode_summary_returns_zero_for_all_pending():
 
     assert done == 0
     assert failed == 0
+
+
+def test_remove_folder_state_filters_snapshots_and_paths():
+    from leanreel.main import remove_folder_from_current_state
+    from leanreel.data.models import FileSnapshot
+
+    snapshots = [
+        FileSnapshot(library_folder_id=1, relative_path="a.mkv"),
+        FileSnapshot(library_folder_id=2, relative_path="b.mkv"),
+    ]
+    folder_paths = {1: "C:/one", 2: "C:/two"}
+    overrides = {"a.mkv": object(), "b.mkv": object()}
+
+    new_snapshots, new_paths, new_overrides = remove_folder_from_current_state(
+        snapshots, folder_paths, overrides, folder_id=1
+    )
+
+    assert [s.relative_path for s in new_snapshots] == ["b.mkv"]
+    assert new_paths == {2: "C:/two"}
+    assert list(new_overrides) == ["b.mkv"]
+
+
+def test_clear_current_state_returns_empty_collections():
+    from leanreel.main import clear_current_state
+
+    snapshots, folder_paths, overrides = clear_current_state()
+
+    assert snapshots == []
+    assert folder_paths == {}
+    assert overrides == {}
 
 
 def test_compute_encode_summary_returns_zero_for_empty_list():

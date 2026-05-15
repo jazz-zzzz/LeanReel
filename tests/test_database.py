@@ -49,6 +49,22 @@ def test_write_persists_across_connections(tmp_path: Path):
     assert [lib.name for lib in libs] == ["Film"]
 
 
+def test_explicit_transaction_rolls_back_all_writes(tmp_path: Path):
+    db_path = tmp_path / "rollback.db"
+    db = Database(str(db_path))
+    try:
+        db.begin()
+        db.execute("INSERT INTO library (name) VALUES (?)", ["Rollback Film"])
+        db.execute("INSERT INTO library (name) VALUES (?)", ["Rollback TV"])
+        db.rollback()
+
+        rows = db.execute("SELECT name FROM library ORDER BY id")
+    finally:
+        db.close()
+
+    assert rows == []
+
+
 def test_insert_duplicate_library_name(db: Database):
     db.insert_library(Library(name="Film"))
     with pytest.raises(Exception):

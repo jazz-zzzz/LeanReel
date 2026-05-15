@@ -116,3 +116,22 @@ def test_get_progress_returns_correct_counts():
     assert progress["failed"] == 0
     assert progress["pending"] == 2  # total - (completed_count + failed_count)
     assert progress["percentage"] == pytest.approx(100 / 3)
+
+
+def test_get_progress_counts_cancelled_as_terminal():
+    from leanreel.executor.worker import WorkerManager, EncodeTask
+    from leanreel.data.models import TaskStatus
+
+    manager = WorkerManager(FakeExecutor())
+    manager._tasks = [
+        EncodeTask(file_name="done.mkv", input_path="", output_path="", status=TaskStatus.COMPLETED),
+        EncodeTask(file_name="cancelled.mkv", input_path="", output_path="", status=TaskStatus.CANCELLED),
+        EncodeTask(file_name="pending.mkv", input_path="", output_path="", status=TaskStatus.PENDING),
+    ]
+
+    progress = manager.get_progress()
+
+    assert progress["completed"] == 1
+    assert progress["cancelled"] == 1
+    assert progress["pending"] == 1
+    assert progress["percentage"] == pytest.approx((2 / 3) * 100)

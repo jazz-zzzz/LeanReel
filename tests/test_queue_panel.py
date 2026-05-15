@@ -493,8 +493,8 @@ class TestQueuePanelButtons:
 
         assert len(received) == 1
 
-    def test_cancel_button_not_present_in_current_design(self, qtbot):
-        """验证当前设计的按钮布局：有暂停和清空，无取消按钮"""
+    def test_button_layout_includes_pause_cancel_clear(self, qtbot):
+        """验证当前设计的按钮布局：暂停 | 取消全部 | 清空已完成"""
         panel = QueuePanel()
         qtbot.addWidget(panel)
 
@@ -502,8 +502,8 @@ class TestQueuePanelButtons:
         button_texts = [btn.text() for btn in buttons]
 
         assert "暂停" in button_texts
-        assert "清空所有" in button_texts
-        assert "取消" not in button_texts
+        assert "取消全部" in button_texts
+        assert "清空已完成" in button_texts
 
     def test_clear_button_removes_rows(self, qtbot):
         """点击清空所有按钮移除所有任务行"""
@@ -532,3 +532,16 @@ class TestQueuePanelButtons:
         qtbot.addWidget(panel)
 
         assert panel.pause_btn.text() == "暂停"
+
+
+def test_queue_panel_cancel_all_button_emits_cancel_signal(qtbot):
+    from leanreel.gui.queue_panel import QueuePanel
+
+    panel = QueuePanel()
+    qtbot.addWidget(panel)
+    emitted = []
+    panel.cancel_requested.connect(emitted.append)
+
+    panel.cancel_btn.click()
+
+    assert emitted == [-1]

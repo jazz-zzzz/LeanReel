@@ -70,9 +70,12 @@ class QueuePanel(QWidget):
         btn_layout = QHBoxLayout()
         self.pause_btn = QPushButton("暂停")
         self.pause_btn.clicked.connect(self.pause_requested.emit)
-        self.clear_btn = QPushButton("清空所有")
+        self.cancel_btn = QPushButton("取消全部")
+        self.cancel_btn.clicked.connect(lambda: self.cancel_requested.emit(-1))
+        self.clear_btn = QPushButton("清空已完成")
         self.clear_btn.clicked.connect(self.clear_all)
         btn_layout.addWidget(self.pause_btn)
+        btn_layout.addWidget(self.cancel_btn)
         btn_layout.addWidget(self.clear_btn)
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
@@ -82,7 +85,8 @@ class QueuePanel(QWidget):
         self.total_label.setText(
             f"完成 {progress['completed']}/{progress['total']}  "
             f"跳过 {progress['skipped']}  "
-            f"失败 {progress['failed']}"
+            f"失败 {progress['failed']}  "
+            f"取消 {progress.get('cancelled', 0)}"
         )
 
     def add_task_row(self, task):

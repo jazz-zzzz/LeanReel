@@ -133,13 +133,18 @@ class WorkerManager:
     def get_results(self) -> list[EncodeTask]:
         return list(self._tasks)
 
+    @property
+    def cancelled_count(self) -> int:
+        return sum(1 for t in self._tasks if t.status == TaskStatus.CANCELLED)
+
     def get_progress(self) -> dict:
-        completed = self.completed_count + self.failed_count
+        terminal = self.completed_count + self.failed_count + self.cancelled_count
         return {
             "total": self.total_tasks,
             "completed": self.completed_count,
             "failed": self.failed_count,
             "skipped": self.skipped_count,
-            "pending": self.total_tasks - completed,
-            "percentage": (completed / max(self.total_tasks, 1)) * 100,
+            "cancelled": self.cancelled_count,
+            "pending": self.total_tasks - terminal,
+            "percentage": (terminal / max(self.total_tasks, 1)) * 100,
         }

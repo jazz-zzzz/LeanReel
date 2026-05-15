@@ -383,7 +383,11 @@ class FileListPanel(QWidget):
             self.table.setItem(row, 3, hdr_item)
 
     def _find_row_by_relative_path(self, relative_path: str) -> int | None:
-        return self._row_index.get(relative_path)
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item is not None and item.data(Qt.UserRole) == relative_path:
+                return row
+        return None
 
     def _resolve_match_display(self, snap: Any, match: MatchResult | None) -> tuple[str, str, int | float]:
         """将 MatchResult 解析为（策略名, 节省文本, 排序列数值）三元组。"""
