@@ -399,15 +399,28 @@ class Scanner:
             except OSError:
                 fmtime = 0.0
             probe = self._get_probe()
-            try:
-                snap = probe.probe(abs_path, folder_id)
-                snap.relative_path = rel_path
-                snap.file_mtime = fmtime
-                snap.probe_ok = True
-            except Exception as e:
+            last_error = None
+            snap = None
+            for attempt in range(2):  # 首次 + 一次重试
+                try:
+                    snap = probe.probe(abs_path, folder_id)
+                    snap.relative_path = rel_path
+                    snap.file_mtime = fmtime
+                    snap.probe_ok = True
+                    break
+                except Exception as e:
+                    last_error = e
+                    if attempt == 0:
+                        import sys
+                        print(
+                            f"[LeanReel] FFprobe 探测失败(第1次,将重试): {abs_path}\n  {e}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+            if snap is None:
                 import sys
                 print(
-                    f"[LeanReel] FFprobe 探测失败: {abs_path}\n  {e}",
+                    f"[LeanReel] FFprobe 探测失败: {abs_path}\n  {last_error}",
                     file=sys.stderr,
                     flush=True,
                 )
@@ -418,7 +431,7 @@ class Scanner:
                     size_bytes=file_size,
                     file_mtime=fmtime,
                     probe_ok=False,
-                    probe_error=str(e)[:200],
+                    probe_error=str(last_error)[:200],
                 )
             try:
                 self._repo.save(snap)
