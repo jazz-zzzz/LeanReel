@@ -20,6 +20,7 @@ class LibraryPanel(QWidget):
         super().__init__()
         self._libraries = []
         self._folders_map = {}
+        self.empty_item = None
         self.setup_ui()
 
     def setup_ui(self):
@@ -62,6 +63,7 @@ class LibraryPanel(QWidget):
 
     def _rebuild_tree(self, filter_text: str = ""):
         self.tree.clear()
+        self.empty_item = None
         for lib in self._libraries:
             folders = self._folders_map.get(lib.id, [])
             if filter_text:
@@ -85,10 +87,17 @@ class LibraryPanel(QWidget):
                     display = "..." + display[-77:]
                 folder_item = QTreeWidgetItem([f"  {display}"])
                 folder_item.setData(0, Qt.UserRole, ("folder", folder.id))
+                folder_item.setToolTip(0, folder.path)
                 folder_item.setForeground(0, Qt.gray)
                 lib_item.addChild(folder_item)
 
             lib_item.setExpanded(True)
+
+        if self.tree.topLevelItemCount() == 0:
+            self.empty_item = QTreeWidgetItem(["没有匹配的库或文件夹"])
+            self.empty_item.setFlags(Qt.NoItemFlags)
+            self.empty_item.setForeground(0, Qt.gray)
+            self.tree.addTopLevelItem(self.empty_item)
 
     def _filter_tree(self, text: str):
         self._rebuild_tree(text)
@@ -119,9 +128,9 @@ class LibraryPanel(QWidget):
         menu = QMenu()
         if kind == "library":
             menu.addAction("添加文件夹...", lambda: self._add_folder_dialog(obj_id))
-            menu.addAction("删除库", lambda: self._delete_library(obj_id))
+            menu.addAction("从 LeanReel 删除库", lambda: self._delete_library(obj_id))
         elif kind == "folder":
-            menu.addAction("移除文件夹", lambda: self._remove_folder(obj_id))
+            menu.addAction("从片库移除文件夹", lambda: self._remove_folder(obj_id))
         menu.exec(self.tree.viewport().mapToGlobal(pos))
 
     def _add_folder_dialog(self, lib_id):
@@ -130,7 +139,23 @@ class LibraryPanel(QWidget):
             self.folder_added.emit(lib_id, path)
 
     def _delete_library(self, lib_id):
-        self.library_deleted.emit(lib_id)
+        result = QMessageBox.question(
+            self,
+            "删除库",
+            "从 LeanReel 删除这个库？磁盘上的视频文件不会被删除。",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if result == QMessageBox.Yes:
+            self.library_deleted.emit(lib_id)
 
     def _remove_folder(self, folder_id):
-        self.folder_removed.emit(folder_id)
+        result = QMessageBox.question(
+            self,
+            "移除文件夹",
+            "从当前片库移除这个文件夹？磁盘上的视频文件不会被删除。",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if result == QMessageBox.Yes:
+            self.folder_removed.emit(folder_id)

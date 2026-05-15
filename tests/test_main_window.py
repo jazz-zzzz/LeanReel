@@ -252,7 +252,8 @@ def test_file_list_updates_correct_row_after_sorting():
     panel.close()
 
 
-def test_library_panel_delete_and_remove_actions_emit_signals():
+def test_library_panel_delete_and_remove_actions_emit_signals(monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
     from leanreel.gui.library_panel import LibraryPanel
 
     app = get_app()
@@ -262,6 +263,7 @@ def test_library_panel_delete_and_remove_actions_emit_signals():
     panel.library_deleted.connect(deleted_libraries.append)
     panel.folder_removed.connect(removed_folders.append)
 
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.Yes)
     panel._delete_library(7)
     panel._remove_folder(11)
 
