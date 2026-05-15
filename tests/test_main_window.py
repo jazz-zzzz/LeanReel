@@ -48,13 +48,13 @@ def test_file_list_displays_codec_strategy_and_estimated_savings():
         file_name="movie.mkv",
         size_bytes=10 * 1024**3,
         video_codec="h264",
-        hdr_type=HDRType.HDR10P,
+        hdr_type=HDRType.SDR,
     )
 
     panel.populate([snap], {"movie.mkv": MatchResult(strategy=strategy)})
 
     assert panel.table.item(0, 3).text() == "h264"
-    assert panel.table.item(0, 4).text() == "HDR10+"
+    assert panel.table.item(0, 4).text() == "SDR"
     assert panel.table.item(0, 5).text() == "均衡压缩"
     assert "3.5-5.0 GB" in panel.table.item(0, 6).text()
     assert "35-50%" in panel.table.item(0, 6).text()
@@ -139,6 +139,39 @@ def test_file_list_can_switch_between_flat_and_tree_modes():
     assert panel.table.isHidden()
     assert panel.tree.topLevelItemCount() == 2
     assert panel.tree.topLevelItem(0).childCount() == 1
+    panel.close()
+
+
+def test_file_list_tree_view_columns_are_aligned_with_headers():
+    from leanreel.data.models import FileSnapshot
+    from leanreel.gui.file_list import FileListPanel, MatchResult
+
+    app = get_app()
+    panel = FileListPanel()
+    snap = FileSnapshot(
+        relative_path="Season 01/Episode 01.mkv",
+        file_name="Episode 01.mkv",
+        size_bytes=10 * 1024**3,
+        video_codec="h264",
+        video_width=1920,
+        video_height=1080,
+    )
+
+    panel.populate(
+        [snap],
+        {"Season 01/Episode 01.mkv": MatchResult(strategy="x265 HEVC CRF 20 标准转码", estimate={"percentage": "35-50%"})},
+    )
+    panel.set_view_mode("tree")
+
+    folder = panel.tree.topLevelItem(0)
+    child = folder.child(0)
+    assert panel.tree.headerItem().text(0) == "文件名"
+    assert child.text(0) == "Episode 01.mkv"
+    assert "GB" in child.text(1)
+    assert "h264" in child.text(2)
+    assert child.text(3) == "SDR"
+    assert child.text(4) == "x265 HEVC CRF 20 标准转码"
+    assert "GB" in child.text(5)
     panel.close()
 
 
@@ -304,6 +337,118 @@ def test_file_list_does_not_select_skipped_sources_with_select_all():
     assert panel.get_checked_relative_paths() == ["sdr.mkv"]
     assert not (panel.table.item(1, 0).flags() & Qt.ItemIsEnabled)
     assert not (panel.table.item(2, 0).flags() & Qt.ItemIsEnabled)
+    assert panel.selection_label.text() == "已选中 1/1 个可处理文件"
+    panel.close()
+
+
+def test_file_list_protected_sources_show_skip_reason_and_not_processing():
+    from leanreel.data.models import FileSnapshot, HDRType
+    from leanreel.gui.file_list import FileListPanel, MatchResult
+
+    app = get_app()
+    panel = FileListPanel()
+    snapshots = [
+        FileSnapshot(
+            relative_path="hevc.mkv",
+            file_name="hevc.mkv",
+            size_bytes=1024,
+            video_codec="hevc",
+            hdr_type=HDRType.SDR,
+        ),
+        FileSnapshot(
+            relative_path="hdr10.mkv",
+            file_name="hdr10.mkv",
+            size_bytes=2048,
+            video_codec="h264",
+            hdr_type=HDRType.HDR10,
+        ),
+    ]
+
+    panel.populate(
+        snapshots,
+        {
+            "hevc.mkv": MatchResult(strategy=None),
+            "hdr10.mkv": MatchResult(strategy=None),
+        },
+    )
+
+    assert panel.table.item(0, 5).text() == "跳过：HEVC/H.265 片源"
+    assert panel.table.item(0, 6).text() == "不处理"
+    assert panel.table.item(1, 5).text() == "跳过：HDR10 片源"
+    assert panel.table.item(1, 6).text() == "不处理"
+    assert panel.table.item(0, 0).toolTip() == "跳过：HEVC/H.265 片源"
+    assert panel.table.item(1, 0).toolTip() == "跳过：HDR10 片源"
+    panel.close()
+
+
+def test_file_list_unmatched_non_protected_source_still_shows_unmatched():
+    from leanreel.data.models import FileSnapshot, HDRType
+    from leanreel.gui.file_list import FileListPanel
+
+    app = get_app()
+    panel = FileListPanel()
+    snap = FileSnapshot(
+        relative_path="unknown.mkv",
+        file_name="unknown.mkv",
+        size_bytes=4096,
+        video_codec="h264",
+        hdr_type=HDRType.SDR,
+    )
+
+    panel.populate([snap], {"unknown.mkv": None})
+
+    assert panel.table.item(0, 5).text() == "未匹配"
+    assert panel.table.item(0, 6).text() == "—"
+    panel.close()
+
+
+def test_file_list_filter_shows_only_protected_rows():
+    from leanreel.data.models import FileSnapshot, HDRType
+    from leanreel.gui.file_list import FileListPanel, MatchResult
+
+    app = get_app()
+    panel = FileListPanel()
+    snapshots = [
+        FileSnapshot(relative_path="sdr.mkv", file_name="sdr.mkv", size_bytes=1024, video_codec="h264"),
+        FileSnapshot(relative_path="hevc.mkv", file_name="hevc.mkv", size_bytes=1024, video_codec="hevc"),
+        FileSnapshot(relative_path="hdr.mkv", file_name="hdr.mkv", size_bytes=1024, video_codec="h264", hdr_type=HDRType.HDR10),
+    ]
+    matches = {
+        "sdr.mkv": MatchResult(strategy="x265 HEVC CRF 20 标准转码", estimate={"percentage": "35-50%"}),
+        "hevc.mkv": MatchResult(strategy=None),
+        "hdr.mkv": MatchResult(strategy=None),
+    }
+
+    panel.populate(snapshots, matches)
+    panel.filter_combo.setCurrentText("已保护跳过")
+
+    assert panel.table.isRowHidden(0)
+    assert not panel.table.isRowHidden(1)
+    assert not panel.table.isRowHidden(2)
+    panel.close()
+
+
+def test_file_list_selection_count_uses_processable_total():
+    from leanreel.data.models import FileSnapshot, HDRType
+    from leanreel.gui.file_list import FileListPanel, MatchResult
+
+    app = get_app()
+    panel = FileListPanel()
+    snapshots = [
+        FileSnapshot(relative_path="sdr-a.mkv", file_name="sdr-a.mkv", size_bytes=1024, video_codec="h264"),
+        FileSnapshot(relative_path="sdr-b.mkv", file_name="sdr-b.mkv", size_bytes=1024, video_codec="h264"),
+        FileSnapshot(relative_path="hdr.mkv", file_name="hdr.mkv", size_bytes=1024, video_codec="h264", hdr_type=HDRType.HDR10),
+    ]
+    matches = {
+        "sdr-a.mkv": MatchResult(strategy="x265 HEVC CRF 20 标准转码", estimate={"percentage": "35-50%"}),
+        "sdr-b.mkv": MatchResult(strategy="x265 HEVC CRF 20 标准转码", estimate={"percentage": "35-50%"}),
+        "hdr.mkv": MatchResult(strategy=None),
+    }
+
+    panel.populate(snapshots, matches)
+    panel.select_all()
+
+    assert panel.selection_label.text() == "已选中 2/2 个可处理文件"
     panel.close()
 
 

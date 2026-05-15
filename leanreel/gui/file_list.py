@@ -13,7 +13,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QColor
 
-_HEADERS = ["", "文件名", "体积", "编码信息", "HDR", "匹配策略", "预计节省"]
+_HEADERS = ["", "文件名", "体积", "编码信息", "HDR", "处理状态", "预计结果"]
+_TREE_HEADERS = ["文件名", "体积", "编码信息", "HDR", "处理状态", "预计结果"]
 
 # ── 列配色 ──
 _COLOR_CODEC_OK = QColor("#8db87c")
@@ -36,6 +37,16 @@ class MatchResult:
     estimate: dict | None = None
 
 
+@dataclass(frozen=True)
+class FileDecisionDisplay:
+    status_key: str
+    strategy_text: str
+    result_text: str
+    result_sort: int | float
+    processable: bool
+    tooltip: str
+
+
 class SortableTableWidgetItem(QTableWidgetItem):
     """QTableWidgetItem that sorts by a hidden numeric value when present."""
 
@@ -53,7 +64,7 @@ class SortableTableWidgetItem(QTableWidgetItem):
 
 
 from leanreel.gui.utils import _format_bytes
-from leanreel.core.matcher import is_protected_source
+from leanreel.core.matcher import get_skip_reason
 
 
 def _scale_bytes(size_bytes: int | float) -> tuple[float, str, int]:
@@ -99,6 +110,8 @@ class FileListPanel(QWidget):
         self._last_matches: dict[str, Any] = {}
         self._last_strategies: list[Any] | None = None
         self._row_by_path: dict[str, int] = {}
+        self._row_status_keys: dict[int, str] = {}
+        self._row_processable: dict[int, bool] = {}
         self.current_view_mode = "flat"
         self.setup_ui()
 
@@ -109,12 +122,6 @@ class FileListPanel(QWidget):
         # 顶部信息栏
         info_layout = QHBoxLayout()
         self.summary_label = QLabel("未扫描")
-        self.view_combo = QComboBox()
-        self.view_combo.addItem("平铺", "flat")
-        self.view_combo.addItem("目录树", "tree")
-        self.view_combo.currentIndexChanged.connect(
-            lambda _i: self.set_view_mode(self.view_combo.currentData())
-        )
         self.refresh_btn = QPushButton("刷新")
         self.refresh_btn.setToolTip("重新扫描当前文件夹，重建缓存")
         self.refresh_btn.clicked.connect(self.refresh_requested.emit)
@@ -126,7 +133,12 @@ class FileListPanel(QWidget):
             lambda _i: self.set_view_mode(self.view_combo.currentData())
         )
         self.filter_combo = QComboBox()
-        self.filter_combo.addItems(["全部", "待处理", "已跳过", "已完成"])
+        self.filter_combo.addItem("全部", "all")
+        self.filter_combo.addItem("可处理", "processable")
+        self.filter_combo.addItem("已保护跳过", "protected")
+        self.filter_combo.addItem("探测失败", "probe_failed")
+        self.filter_combo.addItem("已选择", "checked")
+        self.filter_combo.currentIndexChanged.connect(lambda _i: self._apply_filter())
         info_layout.addWidget(self.summary_label)
         info_layout.addStretch()
         info_layout.addWidget(self.view_combo)
@@ -155,12 +167,12 @@ class FileListPanel(QWidget):
         self.table.setColumnWidth(2, 70)
         self.table.setColumnWidth(3, 175)
         self.table.setColumnWidth(4, 60)
-        self.table.setColumnWidth(5, 160)
+        self.table.setColumnWidth(5, 260)
         self.table.setColumnWidth(6, 190)
 
         self.tree = QTreeWidget()
-        self.tree.setColumnCount(len(_HEADERS))
-        self.tree.setHeaderLabels(_HEADERS)
+        self.tree.setColumnCount(len(_TREE_HEADERS))
+        self.tree.setHeaderLabels(_TREE_HEADERS)
         self.tree.setSortingEnabled(True)
         self.tree.hide()
 
@@ -205,10 +217,14 @@ class FileListPanel(QWidget):
         self._last_strategies = strategies
         self._snapshots_by_path = {snap.relative_path: snap for snap in snapshots}
         self._row_by_path = {}
+        self._row_status_keys = {}
+        self._row_processable = {}
         self._strategy_lookup = self._build_strategy_lookup(strategies)
 
         if not snapshots:
             self.stack.setCurrentWidget(self.empty_label)
+            self.summary_label.setText("未扫描")
+            self._update_selection_count()
             return
 
         self.stack.setCurrentWidget(self.table)
@@ -221,9 +237,10 @@ class FileListPanel(QWidget):
             # 列0：勾选框
             self._row_by_path[snap.relative_path] = row
             check_item = QTableWidgetItem()
-            if is_protected_source(snap):
+            skip_reason = get_skip_reason(snap)
+            if skip_reason:
                 check_item.setFlags(Qt.ItemIsUserCheckable)
-                check_item.setToolTip("优质片源默认不处理")
+                check_item.setToolTip(skip_reason)
             else:
                 check_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
             check_item.setCheckState(Qt.Unchecked)
@@ -253,28 +270,42 @@ class FileListPanel(QWidget):
             hdr_item = QTableWidgetItem(self._format_hdr(snap.hdr_type))
             hdr_item.setForeground(self._hdr_color(getattr(snap, "hdr_type", None)))
             self.table.setItem(row, 4, hdr_item)
-            strategy_name, savings_text, savings_sort = self._resolve_match_display(
+            decision = self._decision_display(
                 snap, matched_strategies.get(snap.relative_path)
             )
-            # 列6：预计节省
-            self.table.setItem(row, 6, SortableTableWidgetItem(savings_text, savings_sort))
-            if strategies:
+            self._row_status_keys[row] = decision.status_key
+            self._row_processable[row] = decision.processable
+            self.table.setItem(
+                row, 6,
+                SortableTableWidgetItem(decision.result_text, decision.result_sort),
+            )
+            if strategies and decision.processable:
                 self.table.setCellWidget(
                     row, 5,
-                    self._create_strategy_combo(snap.relative_path, strategy_name),
+                    self._create_strategy_combo(snap.relative_path, decision.strategy_text),
                 )
             else:
-                self.table.setItem(row, 5, QTableWidgetItem(strategy_name))
+                strategy_item = QTableWidgetItem(decision.strategy_text)
+                strategy_item.setToolTip(decision.tooltip)
+                if decision.status_key == "protected":
+                    strategy_item.setForeground(_COLOR_HDR_DV)
+                elif decision.status_key == "probe_failed":
+                    strategy_item.setForeground(_COLOR_PROBE_FAILED)
+                self.table.setItem(row, 5, strategy_item)
             total_size += snap.size_bytes
 
         self.table.blockSignals(False)
         total_tb = total_size / (1024**4)
+        processable_count = sum(1 for value in self._row_processable.values() if value)
+        protected_count = sum(1 for value in self._row_status_keys.values() if value == "protected")
         self.summary_label.setText(
-            f"已扫描 {len(snapshots)} 个文件 · 总计 {total_tb:.2f} TB"
+            f"已扫描 {len(snapshots)} 个文件 · 可处理 {processable_count} · "
+            f"已保护跳过 {protected_count} · 总计 {total_tb:.2f} TB"
         )
         self._update_selection_count()
         self.table.setSortingEnabled(True)
         self._populate_tree(snapshots, matched_strategies)
+        self._apply_filter()
 
     def _format_hdr(self, hdr_type: Any) -> str:
         return getattr(hdr_type, "value", str(hdr_type))
@@ -373,7 +404,7 @@ class FileListPanel(QWidget):
                 folder_item.setFirstColumnSpanned(True)
                 folders[folder_name] = folder_item
                 self.tree.addTopLevelItem(folder_item)
-            strategy_name, savings_text, _savings_sort = self._resolve_match_display(
+            decision = self._decision_display(
                 snap, matched_strategies.get(snap.relative_path)
             )
             child = QTreeWidgetItem([
@@ -381,10 +412,11 @@ class FileListPanel(QWidget):
                 _format_bytes(snap.size_bytes),
                 self._format_codec(snap),
                 self._format_hdr(snap.hdr_type),
-                strategy_name,
-                savings_text,
+                decision.strategy_text,
+                decision.result_text,
             ])
             child.setData(0, Qt.UserRole, snap.relative_path)
+            child.setToolTip(4, decision.tooltip)
             folder_item.addChild(child)
         # 默认折叠，用户按需展开目录
 
@@ -397,14 +429,17 @@ class FileListPanel(QWidget):
         if snap is not None and strategy_name != "自定义":
             lookup = self._strategy_lookup.get(strategy_name, strategy_name)
             match = MatchResult(strategy=lookup) if not isinstance(lookup, MatchResult) else lookup
-            _, savings_text, savings_sort = self._resolve_match_display(snap, match)
-            self.table.setItem(row, 6, SortableTableWidgetItem(savings_text, savings_sort))
+            decision = self._decision_display(snap, match)
+            self._row_status_keys[row] = decision.status_key
+            self._row_processable[row] = decision.processable
+            self.table.setItem(row, 6, SortableTableWidgetItem(decision.result_text, decision.result_sort))
         elif snap is not None:
             self.table.setItem(row, 6, SortableTableWidgetItem("—", -1))
 
         self.strategy_override_changed.emit(relative_path, strategy_name)
         if strategy_name == "自定义":
             self.custom_strategy_requested.emit(relative_path)
+        self._apply_filter()
 
     def apply_strategy_to_row(self, relative_path: str, strategy: Any):
         """Apply a strategy object to one row and refresh its savings estimate."""
@@ -414,20 +449,24 @@ class FileListPanel(QWidget):
             return
 
         match = MatchResult(strategy=strategy) if not isinstance(strategy, MatchResult) else strategy
-        strategy_name, savings_text, savings_sort = self._resolve_match_display(snap, match)
-        self.table.setItem(row, 6, SortableTableWidgetItem(savings_text, savings_sort))
+        decision = self._decision_display(snap, match)
+        self._row_status_keys[row] = decision.status_key
+        self._row_processable[row] = decision.processable
+        self.table.setItem(row, 6, SortableTableWidgetItem(decision.result_text, decision.result_sort))
         combo = self.table.cellWidget(row, 5)
         if isinstance(combo, QComboBox):
-            if combo.findText(strategy_name) < 0:
-                combo.addItem(strategy_name)
-            if combo.currentText() != strategy_name:
+            if combo.findText(decision.strategy_text) < 0:
+                combo.addItem(decision.strategy_text)
+            if combo.currentText() != decision.strategy_text:
                 combo.blockSignals(True)
-                combo.setCurrentText(strategy_name)
+                combo.setCurrentText(decision.strategy_text)
                 combo.blockSignals(False)
         else:
             item = self.table.item(row, 5)
             if item:
-                item.setText(strategy_name)
+                item.setText(decision.strategy_text)
+                item.setToolTip(decision.tooltip)
+        self._apply_filter()
 
     def update_snapshot_row(self, snap: Any):
         """后台探测完成后增量更新单行编码信息。"""
@@ -509,16 +548,73 @@ class FileListPanel(QWidget):
 
     def _on_item_changed(self, item: QTableWidgetItem):
         if item.column() == 0:
-            self._update_selection_count()
+            self._apply_filter()
+
+    def _apply_filter(self):
+        filter_key = self.filter_combo.currentData() if hasattr(self, "filter_combo") else "all"
+        for row in range(self.table.rowCount()):
+            status_key = self._row_status_keys.get(row, "unmatched")
+            check_item = self.table.item(row, 0)
+            checked = check_item is not None and check_item.checkState() == Qt.Checked
+            hide = False
+            if filter_key == "processable":
+                hide = not self._row_processable.get(row, False)
+            elif filter_key == "protected":
+                hide = status_key != "protected"
+            elif filter_key == "probe_failed":
+                hide = status_key != "probe_failed"
+            elif filter_key == "checked":
+                hide = not checked
+            self.table.setRowHidden(row, hide)
+        self._update_selection_count()
 
     def _update_selection_count(self):
         checked = 0
-        total = self.table.rowCount()
-        for row in range(total):
+        processable_total = 0
+        for row in range(self.table.rowCount()):
+            if self._row_processable.get(row, False):
+                processable_total += 1
             item = self.table.item(row, 0)
-            if item and item.checkState() == Qt.Checked:
+            if item and item.checkState() == Qt.Checked and item.flags() & Qt.ItemIsEnabled:
                 checked += 1
-        self.selection_label.setText(f"已选中 {checked}/{total} 个文件")
+        self.selection_label.setText(f"已选中 {checked}/{processable_total} 个可处理文件")
+
+    def _decision_display(self, snap: Any, match: MatchResult | None) -> FileDecisionDisplay:
+        skip_reason = get_skip_reason(snap)
+        if skip_reason:
+            return FileDecisionDisplay(
+                status_key="protected",
+                strategy_text=skip_reason,
+                result_text="不处理",
+                result_sort=-2,
+                processable=False,
+                tooltip=skip_reason,
+            )
+
+        if (
+            getattr(snap, "probe_ok", None) is False
+            and not getattr(snap, "video_codec", "")
+            and getattr(snap, "probe_error", "")
+        ):
+            probe_error = getattr(snap, "probe_error", "") or "探测失败"
+            return FileDecisionDisplay(
+                status_key="probe_failed",
+                strategy_text="探测失败",
+                result_text="无法估算",
+                result_sort=-3,
+                processable=False,
+                tooltip=probe_error,
+            )
+
+        strategy_name, savings_text, savings_sort = self._resolve_match_display(snap, match)
+        return FileDecisionDisplay(
+            status_key="processable" if strategy_name != "未匹配" else "unmatched",
+            strategy_text=strategy_name,
+            result_text=savings_text,
+            result_sort=savings_sort,
+            processable=strategy_name != "未匹配",
+            tooltip=strategy_name,
+        )
 
     def _resolve_match_display(self, snap: Any, match: MatchResult | None) -> tuple[str, str, int | float]:
         """将 MatchResult 解析为（策略名, 节省文本, 排序列数值）三元组。"""
