@@ -209,6 +209,8 @@ class FileListPanel(QWidget):
 
         self.table.itemChanged.connect(self._on_item_changed)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
+        self.tree.itemChanged.connect(self._on_tree_item_changed)
+        self.tree.itemSelectionChanged.connect(self._on_tree_selection_changed)
 
     def populate(self, snapshots: list, matched_strategies: dict[str, MatchResult | None], strategies: list | None = None):
         """填充文件表格行。
@@ -401,6 +403,7 @@ class FileListPanel(QWidget):
 
     def _populate_tree(self, snapshots: list, matched_strategies: dict):
         self.tree.clear()
+        self.tree.blockSignals(True)
         folders: dict[str, QTreeWidgetItem] = {}
         for snap in snapshots:
             folder_name = str(snap.relative_path).replace("\\", "/").rsplit("/", 1)[0]
@@ -423,8 +426,16 @@ class FileListPanel(QWidget):
                 decision.result_text,
             ])
             child.setData(0, Qt.UserRole, snap.relative_path)
+            child.setToolTip(0, decision.tooltip or snap.file_name)
             child.setToolTip(4, decision.tooltip)
+            if decision.processable:
+                child.setFlags(child.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+                child.setCheckState(0, Qt.Unchecked)
+            else:
+                child.setFlags((child.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEnabled)
+                child.setToolTip(0, decision.tooltip)
             folder_item.addChild(child)
+        self.tree.blockSignals(False)
         # 默认折叠，用户按需展开目录
 
     def _on_strategy_combo_changed(self, relative_path: str, strategy_name: str):
@@ -552,7 +563,9 @@ class FileListPanel(QWidget):
         return None
 
     def get_checked_relative_paths(self) -> list[str]:
-        """返回所有勾中文件的 relative_path 列表。"""
+        """返回所有勾中文件的 relative_path 列表（表格和树视图均支持）。"""
+        if self.current_view_mode == "tree":
+            return self._get_checked_tree_paths()
         checked: list[str] = []
         for row in range(self.table.rowCount()):
             check_item = self.table.item(row, 0)
@@ -564,23 +577,57 @@ class FileListPanel(QWidget):
                         checked.append(path)
         return checked
 
+    def _get_checked_tree_paths(self) -> list[str]:
+        checked: list[str] = []
+        def _walk(item):
+            for i in range(item.childCount()):
+                child = item.child(i)
+                if child.childCount() > 0:
+                    _walk(child)
+                else:
+                    data = child.data(0, Qt.UserRole)
+                    if data and child.flags() & Qt.ItemIsEnabled and child.checkState(0) == Qt.Checked:
+                        checked.append(data)
+        for i in range(self.tree.topLevelItemCount()):
+            _walk(self.tree.topLevelItem(i))
+        return checked
+
     def select_all(self):
-        self.table.blockSignals(True)
-        for row in range(self.table.rowCount()):
-            item = self.table.item(row, 0)
-            if item and item.flags() & Qt.ItemIsEnabled:
-                item.setCheckState(Qt.Checked)
-        self.table.blockSignals(False)
+        if self.current_view_mode == "tree":
+            self._set_tree_checked(True)
+        else:
+            self.table.blockSignals(True)
+            for row in range(self.table.rowCount()):
+                item = self.table.item(row, 0)
+                if item and item.flags() & Qt.ItemIsEnabled:
+                    item.setCheckState(Qt.Checked)
+            self.table.blockSignals(False)
         self._update_selection_count()
 
     def deselect_all(self):
-        self.table.blockSignals(True)
-        for row in range(self.table.rowCount()):
-            item = self.table.item(row, 0)
-            if item:
-                item.setCheckState(Qt.Unchecked)
-        self.table.blockSignals(False)
+        if self.current_view_mode == "tree":
+            self._set_tree_checked(False)
+        else:
+            self.table.blockSignals(True)
+            for row in range(self.table.rowCount()):
+                item = self.table.item(row, 0)
+                if item:
+                    item.setCheckState(Qt.Unchecked)
+            self.table.blockSignals(False)
         self._update_selection_count()
+
+    def _set_tree_checked(self, checked: bool):
+        state = Qt.Checked if checked else Qt.Unchecked
+        def _walk(item):
+            for i in range(item.childCount()):
+                child = item.child(i)
+                if child.childCount() > 0:
+                    _walk(child)
+                else:
+                    if child.flags() & Qt.ItemIsEnabled:
+                        child.setCheckState(0, state)
+        for i in range(self.tree.topLevelItemCount()):
+            _walk(self.tree.topLevelItem(i))
 
     def _on_item_changed(self, item: QTableWidgetItem):
         if item.column() == 0:
@@ -595,6 +642,18 @@ class FileListPanel(QWidget):
             self.row_selected.emit(rel or "")
         else:
             self.row_selected.emit("")  # 多选或取消选中 → 清空右面板绑定
+
+    def _on_tree_item_changed(self, item: QTreeWidgetItem, column: int):
+        if column == 0:
+            self._update_selection_count()
+
+    def _on_tree_selection_changed(self):
+        items = self.tree.selectedItems()
+        if len(items) == 1 and items[0].childCount() == 0:
+            rel = items[0].data(0, Qt.UserRole) or ""
+            self.row_selected.emit(rel)
+        else:
+            self.row_selected.emit("")
 
     def _apply_filter(self):
         filter_key = self.filter_combo.currentData() if hasattr(self, "filter_combo") else "all"
