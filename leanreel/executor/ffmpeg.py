@@ -134,7 +134,25 @@ class FFmpegExecutor:
                 elif slot_id == "transcode":
                     # 使用本地副本进行编码（如果已复制到本地，否则直接用源文件）
                     encode_input = str(local_input) if local_input else task.input_path
-                    cmd = FFmpegBuilder.build(snap, strategy, encode_input, str(temp_output))
+
+                    # 自适应 CQ：低比特率源 → 提高 CQ 避免体积反超
+                    cq = strategy.video.cq if hasattr(strategy, "video") else 26
+                    if snap and snap.size_bytes > 0 and snap.duration_seconds > 0:
+                        src_mbps = (snap.size_bytes * 8) / (snap.duration_seconds * 1_000_000)
+                        pixels = max(1, (snap.video_width or 1920) * (snap.video_height or 1080))
+                        bpp = src_mbps * 1_000_000 / pixels
+                        if bpp < 2.5:
+                            cq = min(cq + 8, 35)   # 非常压缩 → 大幅提高 CQ
+                        elif bpp < 5.0:
+                            cq = min(cq + 4, 32)   # 较压缩
+                        elif bpp < 8.0:
+                            cq = min(cq + 2, 30)   # 轻微压缩
+                        # bpp >= 8.0 → 保持原 CQ（高质量源，如 remux）
+
+                    import copy
+                    adjusted = copy.deepcopy(strategy)
+                    adjusted.video.cq = cq
+                    cmd = FFmpegBuilder.build(snap, adjusted, encode_input, str(temp_output))
                     duration = snap.duration_seconds if snap else 0.0
                     input_size = snap.size_bytes if snap else 0
 
