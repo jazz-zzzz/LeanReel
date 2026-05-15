@@ -68,6 +68,29 @@ def compute_encode_summary(results: list[EncodeTask]) -> tuple[int, int]:
     return done, failed
 
 
+def _has_nvenc() -> bool:
+    """检测系统是否支持 NVENC GPU 编码。"""
+    import subprocess
+    from leanreel.executor.ffmpeg_builder import get_ffmpeg_path
+    try:
+        result = subprocess.run(
+            [get_ffmpeg_path(), "-hide_banner", "-encoders"],
+            capture_output=True, text=True, timeout=10
+        )
+        return "hevc_nvenc" in (result.stdout or "")
+    except Exception:
+        return False
+
+
+def _prioritize_strategies(strategies: list) -> list:
+    """GPU 可用时将 GPU 策略排到前面，CPU 策略排后面。"""
+    if not _has_nvenc():
+        return strategies
+    gpu = [s for s in strategies if getattr(getattr(s, "video", None), "is_gpu", False)]
+    cpu = [s for s in strategies if not getattr(getattr(s, "video", None), "is_gpu", False)]
+    return gpu + cpu
+
+
 def clear_current_state():
     """返回空状态三元组，用于库删除后完全重置。"""
     return [], {}, {}
@@ -274,7 +297,7 @@ class Application:
         db_path = str(get_data_dir() / "leanreel.db")
         db = Database(db_path)
         lib_mgr = LibraryManager(db)
-        strategies = load_strategies(str(get_strategies_dir()))
+        strategies = _prioritize_strategies(load_strategies(str(get_strategies_dir())))
         self.services = Services(
             db=db,
             lib_mgr=lib_mgr,
