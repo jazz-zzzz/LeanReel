@@ -6,8 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import Qt
 
+from leanreel.controllers.signals import AppSignals
 from leanreel.data.database import Database
 from leanreel.core.library import LibraryManager
 from leanreel.core.strategy import Strategy, load_strategies
@@ -22,16 +23,6 @@ from leanreel.gui.theme import apply_theme
 from leanreel.executor.ffmpeg import FFmpegExecutor
 from leanreel.executor.worker import EncodeTask, WorkerManager
 from leanreel.data.models import TaskStatus
-
-
-class ProbeNotifier(QObject):
-    """线程安全的通知器"""
-    probed = Signal(object, object)  # snapshot, MatchResult|None
-    all_done = Signal()
-    progress = Signal(int, int)  # done, total
-    scan_finished = Signal(object, int, str, object)  # snapshots, folder_id, folder_path, pending_jobs
-    task_updated = Signal(object)  # EncodeTask
-    encoding_done = Signal()
 
 
 def get_data_dir() -> Path:
@@ -322,7 +313,7 @@ class Application:
         self._scan_token = 0
 
     def _init_notifier(self):
-        self.notifier = ProbeNotifier()
+        self.notifier = AppSignals()
 
     def _init_ui(self):
         self.win = MainWindow()
