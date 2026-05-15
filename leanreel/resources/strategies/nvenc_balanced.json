@@ -1,12 +1,12 @@
 {
   "name": "NVENC 均衡压缩",
-  "description": "GPU 硬件加速 HEVC 编码，视觉无损。I/O 分离加速，完整保留音轨/字幕/附件/章节。SDR 片源安全。",
+  "description": "H.264→H.265，GPU 加速，CQ 26 均衡兼顾体积与画质。全保留音轨字幕。自动跳过已有 H.265。",
   "is_preset": true,
   "video": {"encoder": "hevc_nvenc", "crf": 0, "preset": "", "pix_fmt": "yuv420p10le", "gpu": true, "nv_preset": "p5", "rc": "vbr", "cq": 26},
   "hdr": {"mode": "preserve_hdr10", "dv_handling": "reinject_rpu"},
   "audio": {"mode": "keep_original", "remove_commentary": false},
   "subtitle": {"mode": "keep_all"},
   "filters": {"skip_x265": true, "min_size_gb": null, "only_remux": false},
-  "estimated_savings": "35-50%",
-  "quality_impact": "GPU 加速视觉无损，SDR 安全，完整保留所有流和元数据"
+  "estimated_savings": "35-55%",
+  "quality_impact": "视觉透明，体积约减半，GPU 硬件加速"
 }

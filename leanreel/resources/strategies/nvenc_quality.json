@@ -1,12 +1,12 @@
 {
   "name": "NVENC 高质量",
-  "description": "GPU 硬件加速 HEVC，更高质量 (CQ=18)。适合对画质要求高的收藏级影片。I/O 分离加速。",
+  "description": "H.264→H.265，优先画质，CQ 23 更少压缩损失。适合收藏级影片。全保留音轨字幕。",
   "is_preset": true,
   "video": {"encoder": "hevc_nvenc", "crf": 0, "preset": "", "pix_fmt": "yuv420p10le", "gpu": true, "nv_preset": "p5", "rc": "vbr", "cq": 23},
   "hdr": {"mode": "preserve_hdr10", "dv_handling": "reinject_rpu"},
   "audio": {"mode": "keep_original", "remove_commentary": false},
   "subtitle": {"mode": "keep_all"},
   "filters": {"skip_x265": true, "min_size_gb": null, "only_remux": false},
-  "estimated_savings": "20-35%",
-  "quality_impact": "GPU 加速高画质，CQ=18 几乎无损，完整保留所有流和元数据"
+  "estimated_savings": "25-45%",
+  "quality_impact": "高画质，画质损失肉眼不可查，GPU 硬件加速"
 }
