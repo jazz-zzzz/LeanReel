@@ -98,7 +98,6 @@ class FileListPanel(QWidget):
         self._last_matches: dict[str, Any] = {}
         self._last_strategies: list[Any] | None = None
         self.current_view_mode = "flat"
-        self._row_index: dict[str, int] = {}
         self.setup_ui()
 
     def setup_ui(self):
@@ -214,10 +213,8 @@ class FileListPanel(QWidget):
         self.table.blockSignals(True)
         self.table.clearContents()
         self.table.setRowCount(len(snapshots))
-        self._row_index.clear()
         total_size = 0
         for row, snap in enumerate(snapshots):
-            self._row_index[snap.relative_path] = row
             # 列0：勾选框
             check_item = QTableWidgetItem()
             check_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)

@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock, Event
+
+from leanreel.executor.ffmpeg import CancelledError
 from typing import Optional, Callable
 import time
 
@@ -108,7 +110,7 @@ class WorkerManager:
                 task.status = TaskStatus.COMPLETED
         except Exception as e:
             with self._lock:
-                if type(e).__name__ == "CancelledError":
+                if isinstance(e, CancelledError):
                     task.status = TaskStatus.CANCELLED
                 else:
                     task.status = TaskStatus.FAILED

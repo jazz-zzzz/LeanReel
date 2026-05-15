@@ -254,7 +254,7 @@ class EncodingController:
                 stage_text += f" {stage.internal_progress:.0%}"
             self._win.set_status(
                 f"{stage_text} ｜ {task.file_name} ｜ "
-                f"完成 {progress['completed'] + progress['failed']}/{progress['total']}"
+                f"已处理 {progress['completed'] + progress['failed']}/{progress['total']}"
                 + (f" ・ 失败 {progress['failed']}" if progress['failed'] else "")
             )
         else:
