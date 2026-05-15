@@ -814,7 +814,7 @@ def test_build_dv_p5_nvenc_includes_color_metadata():
 # ============================================================
 
 def test_ffmpeg_executor_progress_callback_is_called(monkeypatch, tmp_path):
-    """验证 FFmpegExecutor.encode 通过 run_ffmpeg 进度回调更新 task.progress"""
+    """验证 FFmpegExecutor.encode 通过管线阶段和 run_ffmpeg 进度回调更新 task.progress"""
     from leanreel.executor import ffmpeg as ffmpeg_mod
     from leanreel.executor.worker import EncodeTask
 
@@ -854,19 +854,21 @@ def test_ffmpeg_executor_progress_callback_is_called(monkeypatch, tmp_path):
     executor = FFmpegExecutor(temp_dir=str(temp_dir), progress_callback=fake_progress_cb)
     executor.encode(task)
 
-    # task.progress 由 _make_progress_cb 计算: elapsed / duration
-    # 6.0 / 30.0 = 0.2, 12.0 / 30.0 = 0.4
-    assert task.progress == pytest.approx(0.4)
-    # 外部 progress_callback 至少被调用两次
-    assert len(progress_tasks) >= 2
-    # 第一次回调时 progress 约为 0.2
-    assert progress_tasks[0][1] == pytest.approx(0.2, abs=1e-6)
-    # 第二次回调时 progress 约为 0.4
-    assert progress_tasks[1][1] == pytest.approx(0.4, abs=1e-6)
+    # 所有阶段完成后，总进度应为 1.0
+    assert task.progress == pytest.approx(1.0)
+    # 管线各阶段 + transcode 子进度均触发回调，应 >= 4 次
+    assert len(progress_tasks) >= 4, f"expected >=4 progress callbacks, got {len(progress_tasks)}"
+    # 进度值应单调递增
+    progress_values = [p for _, p in progress_tasks]
+    for j in range(1, len(progress_values)):
+        assert progress_values[j] >= progress_values[j - 1], f"progress decreased at index {j}"
+    # 所有进度值在 [0, 1] 范围内
+    for p in progress_values:
+        assert 0.0 <= p <= 1.0, f"progress out of range: {p}"
 
 
 def test_ffmpeg_executor_progress_callback_clamped_to_one(monkeypatch, tmp_path):
-    """验证进度值不会超过 1.0"""
+    """验证管线总进度值和阶段进度值都不会超过 1.0"""
     from leanreel.executor import ffmpeg as ffmpeg_mod
     from leanreel.executor.worker import EncodeTask
 
@@ -895,11 +897,18 @@ def test_ffmpeg_executor_progress_callback_clamped_to_one(monkeypatch, tmp_path)
         snapshot=snap,
     )
 
+    # 不设置 progress_callback — 仅验证内部 task.progress
     FFmpegExecutor(temp_dir=str(tmp_path / "temp")).encode(task)
 
-    # 1h / 10s = 360，但 progress 应被 clamp 在 1.0
-    assert task.progress <= 1.0
+    # 所有阶段完成后，总进度应为 1.0
     assert task.progress == pytest.approx(1.0)
+    # 管线计划存在
+    assert task.pipeline_plan is not None
+    # transcode 阶段内部进度也应被 clamp 在 1.0
+    for stage in task.pipeline_plan.stages:
+        if stage.slot.slot_id == "transcode":
+            assert stage.internal_progress <= 1.0
+            break
 
 
 # ============================================================

@@ -26,6 +26,16 @@ class EncodeTask:
     original_size: int = 0
     compressed_size: int = 0
 
+    # New fields for pipeline support
+    pipeline_plan: object | None = None   # PipelinePlan | None
+    current_stage_index: int = -1         # index into stages
+
+    @property
+    def current_stage(self):
+        if self.pipeline_plan and 0 <= self.current_stage_index < len(self.pipeline_plan.stages):
+            return self.pipeline_plan.stages[self.current_stage_index]
+        return None
+
 
 class WorkerManager:
     """并行编码 Worker 管理器"""

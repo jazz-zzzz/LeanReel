@@ -116,7 +116,16 @@ class QueuePanel(QWidget):
                 ratio = f" ({pct:.0f}%)"
             info = f"{orig} → {comp}{ratio}"
         elif task.status == TaskStatus.RUNNING:
-            info = f"压缩中... {task.progress:.0f}%"
+            stage = getattr(task, 'current_stage', None)
+            if stage:
+                stage_name = stage.slot.display_name
+                if stage.progress_type.value == "indeterminate":
+                    info = f"{stage_name}..."
+                else:
+                    pct = stage.internal_progress * 100
+                    info = f"{stage_name}: {pct:.0f}%"
+            else:
+                info = f"压缩中... {task.progress:.0f}%"
         else:
             info = _format_bytes(task.original_size)
 
@@ -166,7 +175,16 @@ class QueuePanel(QWidget):
                             ratio = f" ({pct:.0f}%)"
                         info_label.setText(f"{orig} → {comp}{ratio}")
                     elif task.status == TaskStatus.RUNNING:
-                        info_label.setText(f"压缩中... {task.progress:.0f}%")
+                        stage = getattr(task, 'current_stage', None)
+                        if stage:
+                            stage_name = stage.slot.display_name
+                            if stage.progress_type.value == "indeterminate":
+                                info_label.setText(f"{stage_name}...")
+                            else:
+                                pct = stage.internal_progress * 100
+                                info_label.setText(f"{stage_name}: {pct:.0f}%")
+                        else:
+                            info_label.setText(f"压缩中... {task.progress:.0f}%")
                     else:
                         info_label.setText(_format_bytes(task.original_size))
                 return

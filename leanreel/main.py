@@ -218,9 +218,22 @@ class EncodingController:
             return
         progress = self.active_manager.get_progress()
         self._queue_panel.update_progress(progress)
-        self._win.set_status(
-            f"编码中：{progress['completed'] + progress['failed']}/{progress['total']}"
-        )
+
+        # 构建包含阶段信息的状态栏消息
+        stage = getattr(task, 'current_stage', None)
+        if stage and task.status == TaskStatus.RUNNING:
+            stage_text = stage.slot.display_name
+            if stage.progress_type.value == "estimated":
+                stage_text += f" {stage.internal_progress:.0%}"
+            self._win.set_status(
+                f"{stage_text} ｜ {task.file_name} ｜ "
+                f"完成 {progress['completed'] + progress['failed']}/{progress['total']}"
+                + (f" ・ 失败 {progress['failed']}" if progress['failed'] else "")
+            )
+        else:
+            self._win.set_status(
+                f"编码中：{progress['completed'] + progress['failed']}/{progress['total']}"
+            )
 
     def on_encoding_done(self):
         """所有编码任务完成后由后台线程触发。"""
