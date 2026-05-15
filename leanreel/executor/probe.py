@@ -30,7 +30,12 @@ def set_ffprobe_path(path: str):
 
 
 def detect_hdr_type_from_ffprobe(video_stream: dict) -> HDRType:
-    """根据 FFprobe 视频流信息判断 HDR 类型"""
+    """根据 FFprobe 视频流信息判断 HDR 类型
+
+    优先通过 side_data_list 检测 DV（需要 ffprobe 支持 -show_side_data），
+    其次通过 color_transfer/color_primaries 检测 HDR10/HDR10+，
+    最后通过编码标签和像素格式做推断。
+    """
     side_data = video_stream.get("side_data_list", [])
     dv_info = next((s for s in side_data if s.get("side_data_type", "").startswith("Dolby Vision")), None)
     if dv_info:
@@ -46,11 +51,26 @@ def detect_hdr_type_from_ffprobe(video_stream: dict) -> HDRType:
     color_pr = video_stream.get("color_primaries", "")
 
     if color_tr == "smpte2084" and color_pr == "bt2020":
-        # 检查是否有 HDR10+ 元数据
         for sd in side_data:
             if sd.get("side_data_type") == "HDR Dynamic Metadata":
                 return HDRType.HDR10P
         return HDRType.HDR10
+
+    # 回退推断：无 side_data / color_primaries 时通过编码标签和像素格式检测
+    pix_fmt = video_stream.get("pix_fmt", "")
+    codec = video_stream.get("codec_name", "")
+    codec_tag = video_stream.get("codec_tag_string", "")
+    profile_str = str(video_stream.get("profile", ""))
+
+    if codec_tag and any(tag in codec_tag.lower() for tag in ("dvh", "dvhe", "dav1")):
+        return HDRType.DV_P8
+
+    if color_tr or color_pr:
+        return HDRType.SDR
+
+    if "10" in profile_str or "10" in pix_fmt:
+        if codec in ("hevc", "h265"):
+            return HDRType.HDR10
 
     return HDRType.SDR
 
@@ -114,23 +134,36 @@ class FFprobeRunner:
         self.ffprobe = ffprobe_path or get_ffprobe_path()
 
     def probe(self, file_path: str, library_folder_id: int = 0) -> FileSnapshot:
-        """对单个文件运行 FFprobe，返回 FileSnapshot"""
+        """对单个文件运行 FFprobe，返回 FileSnapshot
+
+        先尝试带 ``-show_side_data``（检测 Dolby Vision profile 需要），
+        如果失败则回退到不带 ``-show_side_data`` 的基本探测。
+        """
         file_path = os.path.normpath(file_path)
-        cmd = [
+        base_cmd = [
             self.ffprobe,
             "-v", "quiet",
             "-print_format", "json",
             "-show_format",
             "-show_streams",
-            "-show_side_data",
-            file_path
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        if result.returncode != 0:
-            stderr_snippet = (result.stderr or "").strip()[:200]
+
+        # 第一次尝试：带 -show_side_data（部分 ffprobe build 不支持）
+        data = None
+        for extra_flags in (["-show_side_data"], []):
+            result = subprocess.run(base_cmd + extra_flags + [file_path],
+                                   capture_output=True, text=True, timeout=60)
+            if result.returncode == 0:
+                try:
+                    data = json.loads(result.stdout)
+                    if data.get("streams"):
+                        break
+                except json.JSONDecodeError:
+                    continue
+
+        if data is None:
             raise RuntimeError(
-                f"FFprobe 失败 (exit={result.returncode}): {stderr_snippet}"
+                f"FFprobe 失败：无法解析输出"
             )
 
-        data = json.loads(result.stdout)
         return parse_ffprobe_output(data, library_folder_id)
