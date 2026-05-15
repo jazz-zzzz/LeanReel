@@ -154,7 +154,8 @@ class FFprobeRunner:
         data = None
         for extra_flags in (["-show_side_data"], []):
             result = subprocess.run(base_cmd + extra_flags + [file_path],
-                                   capture_output=True, text=True, encoding="utf-8", timeout=30)
+                                   capture_output=True, text=True,
+                                   encoding="utf-8", errors="replace", timeout=30)
             if result.returncode == 0:
                 try:
                     data = json.loads(result.stdout)
