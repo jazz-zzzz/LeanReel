@@ -11,8 +11,9 @@ from PySide6.QtCore import Signal
 
 from leanreel.core.strategy import Strategy
 
+_CPU_ENCODERS = ["libx265"]
 _GPU_ENCODERS = ["hevc_nvenc", "h264_nvenc"]
-_ALL_ENCODERS = [*_GPU_ENCODERS, "copy"]
+_ALL_ENCODERS = [*_CPU_ENCODERS, *_GPU_ENCODERS, "copy"]
 _NV_PRESETS = ["p1", "p2", "p3", "p4", "p5", "p6", "p7"]
 
 _ROW_STYLE = """
@@ -20,9 +21,9 @@ QPushButton {
     background-color: #1c1a16;
     border: 1px solid #2e2b25;
     border-radius: 4px;
-    padding: 3px 8px;
+    padding: 5px 8px;
     text-align: left;
-    min-height: 24px;
+    min-height: 42px;
     font-size: 12px;
     color: #c8c0b8;
 }
@@ -95,11 +96,13 @@ class PresetCardPanel(QWidget):
                                              else "COPY")
         savings = getattr(s, "estimated_savings", "") or ""
         prefix = "●" if index == 0 else "○"
-        text = f"{prefix}  {s.name}    [{tag}]  {savings}"
+        text = f"{prefix}  {s.name}\n   [{tag}]  {savings}"
 
         btn = QPushButton(text)
         btn.setCheckable(True)
         btn.setStyleSheet(_ROW_STYLE)
+        btn.setMinimumHeight(44)
+        btn.setToolTip(f"{s.name}\n{s.description}".strip())
         btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         btn.clicked.connect(lambda checked=False, i=index: self._on_card_clicked(i))
         return btn
@@ -143,7 +146,7 @@ class PresetCardPanel(QWidget):
                                                  else "COPY")
             savings = getattr(s, "estimated_savings", "") or ""
             prefix = "●" if i == self._active_preset_index else "○"
-            text = f"{prefix}  {s.name}    [{tag}]  {savings}"
+            text = f"{prefix}  {s.name}\n   [{tag}]  {savings}"
             btn.setText(text)
             btn.setChecked(i == self._active_preset_index)
 
@@ -243,6 +246,12 @@ class StrategyPanel(QWidget):
         self.custom_encoder_combo.addItems(_ALL_ENCODERS)
         self.custom_encoder_combo.currentIndexChanged.connect(self._on_encoder_changed)
 
+        self.custom_crf_spin = QSpinBox()
+        self.custom_crf_spin.setRange(0, 51)
+        self.custom_crf_spin.setValue(20)
+        self.crf_label = QLabel("CRF")
+        self.crf_label.setToolTip("x265 质量参数，数字越小画质越高，体积越大")
+
         self.custom_cq_spin = QSpinBox()
         self.custom_cq_spin.setRange(0, 51)
         self.custom_cq_spin.setValue(26)
@@ -262,6 +271,7 @@ class StrategyPanel(QWidget):
         self.custom_savings_label = QLabel("预计节省：35-50%")
 
         custom_layout.addRow("编码器", self.custom_encoder_combo)
+        custom_layout.addRow(self.crf_label, self.custom_crf_spin)
         custom_layout.addRow(self.cq_label, self.custom_cq_spin)
         custom_layout.addRow(self.nvpreset_label, self.custom_nvpreset_combo)
         custom_layout.addRow("音轨", self.custom_audio_combo)
@@ -274,6 +284,7 @@ class StrategyPanel(QWidget):
         # 信号连接 — 自定义参数变化时重新计算策略
         for widget in (
             self.custom_encoder_combo,
+            self.custom_crf_spin,
             self.custom_cq_spin,
             self.custom_nvpreset_combo,
             self.custom_audio_combo, self.custom_subtitle_combo,
@@ -343,6 +354,7 @@ class StrategyPanel(QWidget):
         """)
         self.start_btn.clicked.connect(self.start_requested.emit)
         layout.addWidget(self.start_btn)
+        self._on_encoder_changed()
 
     def set_strategies(self, strategies: list):
         self.preset_panel.set_strategies(strategies)
@@ -357,10 +369,11 @@ class StrategyPanel(QWidget):
 
     def _on_encoder_changed(self):
         encoder = self.custom_encoder_combo.currentText()
+        is_cpu = encoder in _CPU_ENCODERS
         is_gpu = encoder in _GPU_ENCODERS
-        is_copy = encoder == "copy"
 
-        # GPU 默认始终显示 CQ/NV preset；copy 模式全隐藏
+        self.crf_label.setVisible(is_cpu)
+        self.custom_crf_spin.setVisible(is_cpu)
         self.cq_label.setVisible(is_gpu)
         self.custom_cq_spin.setVisible(is_gpu)
         self.nvpreset_label.setVisible(is_gpu)
@@ -386,11 +399,34 @@ class StrategyPanel(QWidget):
     @property
     def custom_strategy(self):
         encoder = self.custom_encoder_combo.currentText()
+        is_gpu = encoder in _GPU_ENCODERS
+        is_cpu = encoder in _CPU_ENCODERS
+        is_copy = encoder == "copy"
 
-        if encoder == "copy":
+        if is_copy:
+            name = "Copy Streams 自定义流复制"
             savings = "5-15%"
+            quality_impact = "不重编码视频"
+            crf_val = 0
+            cq_val = 0
+        elif is_cpu:
+            crf_val = self.custom_crf_spin.value()
+            cq_val = 0
+            name = f"x265 HEVC CRF {crf_val} 自定义转码"
+            quality_impact = "CPU x265 编码"
+            if crf_val <= 18:
+                savings = "20-35%"
+            elif crf_val <= 20:
+                savings = "35-50%"
+            elif crf_val <= 22:
+                savings = "50-70%"
+            else:
+                savings = "60-75%"
         else:
+            crf_val = 0
             cq_val = self.custom_cq_spin.value()
+            name = f"NVENC HEVC CQ {cq_val} 自定义转码"
+            quality_impact = "GPU 硬件编码"
             if cq_val <= 20:
                 savings = "15-30%"
             elif cq_val <= 24:
@@ -403,24 +439,24 @@ class StrategyPanel(QWidget):
         nv_preset = self.custom_nvpreset_combo.currentText().lower()
 
         return Strategy.from_dict({
-            "name": "自定义",
+            "name": name,
             "description": "手动配置的压缩策略",
             "is_preset": False,
             "video": {
                 "encoder": encoder,
-                "crf": 0,
-                "preset": "",
+                "crf": crf_val,
+                "preset": "slow" if is_cpu else "",
                 "pix_fmt": "yuv420p10le",
-                "gpu": True,
-                "nv_preset": nv_preset,
-                "rc": "vbr",
-                "cq": self.custom_cq_spin.value(),
+                "gpu": is_gpu,
+                "nv_preset": nv_preset if is_gpu else "",
+                "rc": "vbr" if is_gpu else "",
+                "cq": cq_val,
             },
             "audio": {"mode": self.custom_audio_combo.currentText()},
             "subtitle": {"mode": self.custom_subtitle_combo.currentText()},
             "filters": {"skip_x265": False},
             "estimated_savings": savings,
-            "quality_impact": "GPU 硬件编码",
+            "quality_impact": quality_impact,
         })
 
     @property

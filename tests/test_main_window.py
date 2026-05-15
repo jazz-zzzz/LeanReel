@@ -35,6 +35,18 @@ def test_main_window_has_status_bar():
     win.close()
 
 
+def test_main_window_default_splitter_gives_strategy_panel_room():
+    from leanreel.gui.main_window import MainWindow
+
+    app = get_app()
+    window = MainWindow()
+    sizes = window.splitter.sizes()
+
+    assert len(sizes) == 3
+    assert window.strategy_placeholder.minimumWidth() >= 320
+    window.close()
+
+
 def test_file_list_displays_codec_strategy_and_estimated_savings():
     from leanreel.core.strategy import Strategy
     from leanreel.data.models import FileSnapshot, HDRType
@@ -479,14 +491,53 @@ def test_strategy_panel_custom_controls_emit_recomputed_strategy():
     panel.custom_strategy_changed.connect(changes.append)
 
     panel.show_custom_strategy()
+    panel.custom_encoder_combo.setCurrentText("hevc_nvenc")
     panel.custom_cq_spin.setValue(25)
 
     assert panel.custom_group.isVisibleTo(panel)
     assert changes
-    assert changes[-1].name == "自定义"
+    assert changes[-1].name == "NVENC HEVC CQ 25 自定义转码"
     assert changes[-1].video.cq == 25
     assert changes[-1].estimated_savings == "35-55%"
-    assert panel.current_strategy.name == "自定义"
+    assert panel.current_strategy.name == "NVENC HEVC CQ 25 自定义转码"
+    panel.close()
+
+
+def test_strategy_panel_custom_x265_uses_crf_name_and_cpu_metadata():
+    from leanreel.gui.strategy_panel import StrategyPanel
+
+    app = get_app()
+    panel = StrategyPanel()
+    panel.show_custom_strategy()
+    panel.custom_encoder_combo.setCurrentText("libx265")
+    panel.custom_crf_spin.setValue(18)
+
+    strategy = panel.current_strategy
+
+    assert strategy.name == "x265 HEVC CRF 18 自定义转码"
+    assert strategy.video.encoder == "libx265"
+    assert strategy.video.gpu is False
+    assert strategy.video.crf == 18
+    assert strategy.quality_impact == "CPU x265 编码"
+    panel.close()
+
+
+def test_strategy_panel_custom_copy_hides_quality_controls_and_uses_copy_metadata():
+    from leanreel.gui.strategy_panel import StrategyPanel
+
+    app = get_app()
+    panel = StrategyPanel()
+    panel.show_custom_strategy()
+    panel.custom_encoder_combo.setCurrentText("copy")
+
+    strategy = panel.current_strategy
+
+    assert strategy.name == "Copy Streams 自定义流复制"
+    assert strategy.video.encoder == "copy"
+    assert strategy.video.gpu is False
+    assert strategy.quality_impact == "不重编码视频"
+    assert not panel.custom_cq_spin.isVisibleTo(panel)
+    assert not panel.custom_crf_spin.isVisibleTo(panel)
     panel.close()
 
 

@@ -183,6 +183,28 @@ class TestSetStrategies:
                 f"预估节省 '{s.estimated_savings}' 未在任何卡片文本中找到"
             )
 
+    def test_strategy_rows_use_two_line_technical_layout(self, qtbot):
+        panel = PresetCardPanel()
+        qtbot.addWidget(panel)
+        strategies = [
+            Strategy.from_dict({
+                "name": "x265 HEVC CRF 18 高质量转码",
+                "description": "CPU x265 慢速高质量，适合值得保留细节的 SDR H.264 片源。",
+                "is_preset": True,
+                "video": {"encoder": "libx265", "crf": 18, "preset": "slow"},
+                "estimated_savings": "20-35%",
+            }),
+        ]
+
+        panel.set_strategies(strategies)
+
+        button = panel.card_group.buttons()[0]
+        assert "x265 HEVC CRF 18 高质量转码" in button.text()
+        assert "\n" in button.text()
+        assert "CPU" in button.text()
+        assert "20-35%" in button.text()
+        assert button.minimumHeight() >= 42
+
     def test_default_first_card_is_checked(self, qtbot):
         """第一个策略应默认选中"""
         panel = PresetCardPanel()

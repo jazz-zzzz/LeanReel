@@ -30,11 +30,13 @@ class MainWindow(QMainWindow):
         self.library_panel = QWidget()
         self.file_list_panel = QWidget()
         self.strategy_placeholder = QWidget()
+        self.library_panel.setMinimumWidth(220)
+        self.strategy_placeholder.setMinimumWidth(320)
 
         self.splitter.addWidget(self.library_panel)
         self.splitter.addWidget(self.file_list_panel)
         self.splitter.addWidget(self.strategy_placeholder)
-        self.splitter.setSizes([220, 700, 240])
+        self.splitter.setSizes([240, 820, 340])
 
         self.layout.addWidget(self.splitter)
 
@@ -80,6 +82,7 @@ class MainWindow(QMainWindow):
         widget.setVisible(True)
 
     def set_strategy_widget(self, widget: QWidget):
+        widget.setMinimumWidth(320)
         self.splitter.replaceWidget(2, widget)
         widget.setVisible(True)
 
