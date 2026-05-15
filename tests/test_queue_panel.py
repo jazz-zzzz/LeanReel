@@ -105,7 +105,7 @@ class TestQueuePanelAddTask:
         assert icon_label.text() == _STATUS_ICONS[TaskStatus.COMPLETED]
 
     def test_add_task_row_shows_failed_info(self, qtbot):
-        """FAILED 任务显示压缩前后大小（无比例，compressed 可能为0）"""
+        """FAILED 任务显示失败原因"""
         panel = QueuePanel()
         qtbot.addWidget(panel)
 
@@ -125,7 +125,8 @@ class TestQueuePanelAddTask:
         assert icon_label.text() == _STATUS_ICONS[TaskStatus.FAILED]
 
         info_label = widget.findChild(QLabel, "queue_info")
-        assert "8.8 GB" in info_label.text()
+        assert info_label.text() == "失败：编码器崩溃"
+        assert info_label.toolTip() == "编码器崩溃"
 
         name_label = widget.findChild(QLabel, "queue_name")
         assert name_label.text() == "失败文件.mkv"
@@ -368,8 +369,8 @@ class TestQueuePanelClear:
         assert panel.total_progress.value() == 0
         assert panel.total_label.text() == "就绪"
 
-    def test_clear_all_removes_all_task_rows_including_running(self, qtbot):
-        """clear_all() 清空所有任务行，包括 RUNNING 和 PENDING 状态的任务。"""
+    def test_clear_finished_keeps_running_and_pending_rows(self, qtbot):
+        """清空已完成只移除终态任务，保留 RUNNING 和 PENDING。"""
         panel = QueuePanel()
         qtbot.addWidget(panel)
 
@@ -413,11 +414,15 @@ class TestQueuePanelClear:
 
         assert panel.task_layout.count() == 5  # 4 tasks + 1 stretch
 
-        panel.clear_all()
+        panel.clear_finished()
         qtbot.wait(50)
 
-        # 所有任务行被清除，仅剩 stretch
-        assert panel.task_layout.count() == 1
+        visible_names = []
+        for index in range(panel.task_layout.count() - 1):
+            row = panel.task_layout.itemAt(index).widget()
+            visible_names.append(row.findChild(QLabel, "queue_name").text())
+
+        assert visible_names == ["running_task.mkv", "pending_task.mkv"]
 
 
 class TestQueuePanelProgress:
@@ -545,3 +550,24 @@ def test_queue_panel_cancel_all_button_emits_cancel_signal(qtbot):
     panel.cancel_btn.click()
 
     assert emitted == [-1]
+
+
+def test_queue_panel_failed_task_shows_error_message(qtbot):
+    panel = QueuePanel()
+    qtbot.addWidget(panel)
+    task = EncodeTask(
+        file_name="failed.mkv",
+        input_path="/movies/failed.mkv",
+        output_path="/movies/failed_SS.mkv",
+        status=TaskStatus.FAILED,
+        original_size=1_000_000_000,
+        compressed_size=0,
+        error_message="编码器崩溃",
+    )
+
+    panel.add_task_row(task)
+
+    row = panel.task_layout.itemAt(0).widget()
+    info_label = row.findChild(QLabel, "queue_info")
+    assert info_label.text() == "失败：编码器崩溃"
+    assert info_label.toolTip() == "编码器崩溃"

@@ -26,6 +26,13 @@ _STATUS_ICONS = {
     TaskStatus.CANCELLED: "⊘",
 }
 
+_TERMINAL_STATUSES = {
+    TaskStatus.COMPLETED.value,
+    TaskStatus.FAILED.value,
+    TaskStatus.SKIPPED.value,
+    TaskStatus.CANCELLED.value,
+}
+
 
 from leanreel.gui.utils import _format_bytes
 
@@ -73,7 +80,7 @@ class QueuePanel(QWidget):
         self.cancel_btn = QPushButton("取消全部")
         self.cancel_btn.clicked.connect(lambda: self.cancel_requested.emit(-1))
         self.clear_btn = QPushButton("清空已完成")
-        self.clear_btn.clicked.connect(self.clear_all)
+        self.clear_btn.clicked.connect(self.clear_finished)
         btn_layout.addWidget(self.pause_btn)
         btn_layout.addWidget(self.cancel_btn)
         btn_layout.addWidget(self.clear_btn)
@@ -91,6 +98,7 @@ class QueuePanel(QWidget):
 
     def add_task_row(self, task):
         row = QWidget()
+        row.setProperty("task_status", task.status.value)
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(4, 2, 4, 2)
         row_layout.setSpacing(8)
@@ -107,34 +115,41 @@ class QueuePanel(QWidget):
         name_label.setStyleSheet("color: #e8e3db;")
         row_layout.addWidget(name_label, 1)
 
-        if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+        info = self._task_info_text(task)
+        info_label = QLabel(info)
+        info_label.setObjectName("queue_info")
+        info_label.setStyleSheet("color: #8a857c; font-size: 11px;")
+        if task.status == TaskStatus.FAILED:
+            info_label.setToolTip(getattr(task, "error_message", "") or "未知错误")
+        row_layout.addWidget(info_label)
+
+        self.task_layout.insertWidget(self.task_layout.count() - 1, row)
+
+    @staticmethod
+    def _task_info_text(task) -> str:
+        if task.status == TaskStatus.FAILED:
+            error_message = getattr(task, "error_message", "") or "未知错误"
+            return f"失败：{error_message}"
+        if task.status == TaskStatus.COMPLETED:
             orig = _format_bytes(task.original_size)
             comp = _format_bytes(task.compressed_size) if task.compressed_size else "—"
             ratio = ""
             if task.compressed_size and task.original_size:
                 pct = (1 - task.compressed_size / task.original_size) * 100
                 ratio = f" ({pct:.0f}%)"
-            info = f"{orig} → {comp}{ratio}"
-        elif task.status == TaskStatus.RUNNING:
-            stage = getattr(task, 'current_stage', None)
+            return f"{orig} → {comp}{ratio}"
+        if task.status == TaskStatus.SKIPPED:
+            return getattr(task, "error_message", "") or "已跳过"
+        if task.status == TaskStatus.RUNNING:
+            stage = getattr(task, "current_stage", None)
             if stage:
                 stage_name = stage.slot.display_name
                 if stage.progress_type.value == "indeterminate":
-                    info = f"{stage_name}..."
-                else:
-                    pct = stage.internal_progress * 100
-                    info = f"{stage_name}: {pct:.0f}%"
-            else:
-                info = f"压缩中... {task.progress:.0f}%"
-        else:
-            info = _format_bytes(task.original_size)
-
-        info_label = QLabel(info)
-        info_label.setObjectName("queue_info")
-        info_label.setStyleSheet("color: #8a857c; font-size: 11px;")
-        row_layout.addWidget(info_label)
-
-        self.task_layout.insertWidget(self.task_layout.count() - 1, row)
+                    return f"{stage_name}..."
+                pct = stage.internal_progress * 100
+                return f"{stage_name}: {pct:.0f}%"
+            return f"压缩中... {task.progress:.0f}%"
+        return _format_bytes(task.original_size)
 
     def clear_all(self):
         """清空所有任务行（包括 RUNNING、PENDING 等）。"""
@@ -142,6 +157,14 @@ class QueuePanel(QWidget):
             item = self.task_layout.itemAt(i)
             if item and item.widget():
                 item.widget().deleteLater()
+
+    def clear_finished(self):
+        """清空已完成、失败、跳过和已取消任务，保留运行中和等待中任务。"""
+        for i in reversed(range(self.task_layout.count() - 1)):
+            item = self.task_layout.itemAt(i)
+            widget = item.widget() if item else None
+            if widget and widget.property("task_status") in _TERMINAL_STATUSES:
+                widget.deleteLater()
 
     def clear_tasks(self):
         self.clear_all()
@@ -157,6 +180,7 @@ class QueuePanel(QWidget):
                 name_label = row.findChild(QLabel, "queue_name")
                 if name_label is None or name_label.text() != task.file_name:
                     continue
+                row.setProperty("task_status", task.status.value)
 
                 icon_label = row.findChild(QLabel, "queue_icon")
                 if icon_label is not None:
@@ -166,25 +190,9 @@ class QueuePanel(QWidget):
 
                 info_label = row.findChild(QLabel, "queue_info")
                 if info_label is not None:
-                    if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
-                        orig = _format_bytes(task.original_size)
-                        comp = _format_bytes(task.compressed_size) if task.compressed_size else "—"
-                        ratio = ""
-                        if task.compressed_size and task.original_size:
-                            pct = (1 - task.compressed_size / task.original_size) * 100
-                            ratio = f" ({pct:.0f}%)"
-                        info_label.setText(f"{orig} → {comp}{ratio}")
-                    elif task.status == TaskStatus.RUNNING:
-                        stage = getattr(task, 'current_stage', None)
-                        if stage:
-                            stage_name = stage.slot.display_name
-                            if stage.progress_type.value == "indeterminate":
-                                info_label.setText(f"{stage_name}...")
-                            else:
-                                pct = stage.internal_progress * 100
-                                info_label.setText(f"{stage_name}: {pct:.0f}%")
-                        else:
-                            info_label.setText(f"压缩中... {task.progress:.0f}%")
+                    info_label.setText(self._task_info_text(task))
+                    if task.status == TaskStatus.FAILED:
+                        info_label.setToolTip(getattr(task, "error_message", "") or "未知错误")
                     else:
-                        info_label.setText(_format_bytes(task.original_size))
+                        info_label.setToolTip("")
                 return
