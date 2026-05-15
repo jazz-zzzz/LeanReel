@@ -155,7 +155,6 @@ class FileListPanel(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSortingEnabled(True)
-        self.table.horizontalHeader().setStretchLastSection(True)
         header = self.table.horizontalHeader()
         header.setSortIndicatorShown(True)
         header.setSectionsMovable(False)
