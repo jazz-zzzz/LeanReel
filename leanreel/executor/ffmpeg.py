@@ -64,6 +64,7 @@ class FFmpegExecutor:
         task_temp_dir = temp_dir / output_key
         task_temp_dir.mkdir(parents=True, exist_ok=True)
         temp_output = task_temp_dir / final_output.name
+        local_input: Optional[Path] = None  # 复制到本地的源文件副本
         rpu_file: Optional[Path] = None
         dv_output: Optional[Path] = None
 
@@ -94,22 +95,43 @@ class FFmpegExecutor:
                     plan.mark_stage_completed(i)
 
                 elif slot_id == "copy_in":
-                    # 对于本地文件，"复制入"阶段验证源文件存在性
+                    # 将源文件复制到本地临时目录（I/O 分离核心）
                     source_path = Path(task.input_path)
                     if source_path.exists():
-                        stage.internal_progress = 1.0
+                        total_bytes = source_path.stat().st_size
+                        local_input = task_temp_dir / source_path.name
+                        bytes_copied = 0
+
+                        with open(source_path, "rb") as src, open(local_input, "wb") as dst:
+                            while True:
+                                if self._cancel_event.is_set():
+                                    break
+                                chunk = src.read(8 * 1024 * 1024)  # 8 MB chunks
+                                if not chunk:
+                                    break
+                                dst.write(chunk)
+                                bytes_copied += len(chunk)
+                                if total_bytes > 0:
+                                    stage.internal_progress = bytes_copied / total_bytes
+                                    task.progress = plan.compute_overall_progress()
+                                    self._emit_progress(task)
+
                     plan.mark_stage_completed(i)
 
                 elif slot_id == "extract_rpu":
                     rpu_file = task_temp_dir / f"{final_output.stem}.rpu"
                     if rpu_file.exists():
                         rpu_file.unlink()
-                    if not DoviTool.extract_rpu(task.input_path, str(rpu_file)):
+                    # 使用本地副本（如果已复制到本地）
+                    extract_source = str(local_input) if local_input else task.input_path
+                    if not DoviTool.extract_rpu(extract_source, str(rpu_file)):
                         raise RuntimeError(f"Dolby Vision RPU extraction failed: {task.file_name}")
                     plan.mark_stage_completed(i)
 
                 elif slot_id == "transcode":
-                    cmd = FFmpegBuilder.build(snap, strategy, task.input_path, str(temp_output))
+                    # 使用本地副本进行编码（如果已复制到本地，否则直接用源文件）
+                    encode_input = str(local_input) if local_input else task.input_path
+                    cmd = FFmpegBuilder.build(snap, strategy, encode_input, str(temp_output))
                     duration = snap.duration_seconds if snap else 0.0
 
                     def _transcode_progress(line: str):
@@ -189,6 +211,11 @@ class FFmpegExecutor:
         finally:
             if rpu_file and rpu_file.exists():
                 rpu_file.unlink()
+            if local_input and local_input.exists():
+                try:
+                    local_input.unlink()
+                except OSError:
+                    pass
             try:
                 task_temp_dir.rmdir()
             except OSError:

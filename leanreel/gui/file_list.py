@@ -225,10 +225,11 @@ class FileListPanel(QWidget):
             codec_item = QTableWidgetItem(self._format_codec(snap))
             if getattr(snap, "video_codec", ""):
                 codec_item.setForeground(_COLOR_CODEC_OK)
-            elif getattr(snap, "probe_ok", None) is False:
+            elif getattr(snap, "probe_ok", None) is False and getattr(snap, "probe_error", ""):
                 codec_item.setForeground(_COLOR_PROBE_FAILED)
-                err = getattr(snap, "probe_error", "") or "未知错误"
-                codec_item.setToolTip(err)
+                codec_item.setToolTip(getattr(snap, "probe_error", ""))
+            elif getattr(snap, "probe_ok", None) is False:
+                codec_item.setForeground(_COLOR_CODEC_MISSING)
             else:
                 codec_item.setForeground(_COLOR_CODEC_MISSING)
             self.table.setItem(row, 3, codec_item)
@@ -275,8 +276,12 @@ class FileListPanel(QWidget):
     def _format_codec(snap: Any) -> str:
         codec = getattr(snap, "video_codec", "") or ""
         if not codec:
-            if getattr(snap, "probe_ok", None) is False:
+            probe_ok = getattr(snap, "probe_ok", None)
+            probe_error = getattr(snap, "probe_error", "") or ""
+            if probe_ok is False and probe_error:
                 return "探测失败"
+            elif probe_ok is False and not probe_error:
+                return "探测中..."
             return "未识别"
         parts = [codec]
         w = getattr(snap, "video_width", 0) or 0
@@ -420,11 +425,14 @@ class FileListPanel(QWidget):
             probe_failed = getattr(snap, "probe_ok", None) is False and not getattr(
                 snap, "video_codec", ""
             )
-            if probe_failed:
-                err = getattr(snap, "probe_error", "") or "未知错误"
+            probe_error = getattr(snap, "probe_error", "") or ""
+            if probe_failed and probe_error:
                 codec_item = QTableWidgetItem("探测失败")
-                codec_item.setToolTip(err)
+                codec_item.setToolTip(probe_error)
                 codec_item.setForeground(_COLOR_PROBE_FAILED)
+            elif probe_failed:
+                codec_item = QTableWidgetItem("探测中...")
+                codec_item.setForeground(_COLOR_CODEC_MISSING)
             else:
                 codec_item = QTableWidgetItem(self._format_codec(snap))
                 codec_item.setForeground(
