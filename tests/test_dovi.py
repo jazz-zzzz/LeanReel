@@ -66,11 +66,12 @@ def test_extract_rpu_calls_subprocess_with_correct_args(monkeypatch):
 
     def fake_run(cmd, **kwargs):
         calls.append(cmd)
-        return subprocess.CompletedProcess(cmd, 0)
+        return subprocess.CompletedProcess(cmd, 0, stderr="")
 
     monkeypatch.setattr("subprocess.run", fake_run)
-    result = DoviTool.extract_rpu("source.mkv", "/tmp/rpu.bin")
-    assert result is True
+    ok, stderr = DoviTool.extract_rpu("source.mkv", "/tmp/rpu.bin")
+    assert ok is True
+    assert stderr == ""
     assert len(calls) == 1
     assert "extract-rpu" in calls[0]
     assert "source.mkv" in calls[0]
@@ -84,11 +85,12 @@ def test_inject_rpu_calls_subprocess_with_correct_args(monkeypatch):
 
     def fake_run(cmd, **kwargs):
         calls.append(cmd)
-        return subprocess.CompletedProcess(cmd, 0)
+        return subprocess.CompletedProcess(cmd, 0, stderr="")
 
     monkeypatch.setattr("subprocess.run", fake_run)
-    result = DoviTool.inject_rpu("encoded.hevc", "/tmp/rpu.bin", "output.mkv")
-    assert result is True
+    ok, stderr = DoviTool.inject_rpu("encoded.hevc", "/tmp/rpu.bin", "output.mkv")
+    assert ok is True
+    assert stderr == ""
     assert len(calls) == 1
     assert "inject-rpu" in calls[0]
     assert "encoded.hevc" in calls[0]
@@ -104,8 +106,9 @@ def test_extract_rpu_returns_false_on_nonzero_exit(monkeypatch):
         return subprocess.CompletedProcess(cmd, 1, stderr="extraction error")
 
     monkeypatch.setattr("subprocess.run", fake_run)
-    result = DoviTool.extract_rpu("source.mkv", "/tmp/rpu.bin")
-    assert result is False
+    ok, stderr = DoviTool.extract_rpu("source.mkv", "/tmp/rpu.bin")
+    assert not ok
+    assert "extraction error" in stderr
 
 
 def test_inject_rpu_returns_false_on_nonzero_exit(monkeypatch):
@@ -115,8 +118,9 @@ def test_inject_rpu_returns_false_on_nonzero_exit(monkeypatch):
         return subprocess.CompletedProcess(cmd, 1, stderr="injection error")
 
     monkeypatch.setattr("subprocess.run", fake_run)
-    result = DoviTool.inject_rpu("bad.hevc", "/tmp/rpu.bin", "out.mkv")
-    assert result is False
+    ok, stderr = DoviTool.inject_rpu("bad.hevc", "/tmp/rpu.bin", "out.mkv")
+    assert not ok
+    assert "injection error" in stderr
 
 
 def test_extract_rpu_propagates_timeout(monkeypatch):

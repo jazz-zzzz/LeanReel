@@ -44,13 +44,15 @@ class DoviTool:
                 "--rpu-in", rpu_file, "-o", output]
 
     @staticmethod
-    def extract_rpu(input_file: str, rpu_output: str) -> bool:
+    def extract_rpu(input_file: str, rpu_output: str) -> tuple[bool, str]:
         cmd = DoviTool.build_extract_command(input_file, rpu_output)
-        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=120)
-        return result.returncode == 0
+        result = subprocess.run(cmd, capture_output=True, text=True,
+                                encoding="utf-8", errors="replace", timeout=120)
+        return result.returncode == 0, result.stderr.strip()
 
     @staticmethod
-    def inject_rpu(encoded_hevc: str, rpu_file: str, output: str) -> bool:
+    def inject_rpu(encoded_hevc: str, rpu_file: str, output: str) -> tuple[bool, str]:
         cmd = DoviTool.build_inject_command(encoded_hevc, rpu_file, output)
-        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=120)
-        return result.returncode == 0
+        result = subprocess.run(cmd, capture_output=True, text=True,
+                                encoding="utf-8", errors="replace", timeout=120)
+        return result.returncode == 0, result.stderr.strip()
