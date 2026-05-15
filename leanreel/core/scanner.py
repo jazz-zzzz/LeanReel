@@ -1,6 +1,7 @@
 """文件扫描器 — 递归扫描视频文件，FFprobe 提取元数据并缓存，支持异步后台探测"""
 import json
 import os
+import time
 import threading
 from dataclasses import asdict
 from pathlib import Path
@@ -70,43 +71,57 @@ class SnapshotRepository:
     # ── 写入 ──
 
     def save(self, snap: FileSnapshot):
-        """插入或更新快照记录（ON CONFLICT upsert）。"""
-        self._db.execute(
-            """INSERT INTO file_snapshot
-               (library_folder_id, relative_path, file_name, size_bytes,
-                video_codec, video_width, video_height, hdr_type,
-                audio_tracks, subtitle_tracks, duration_seconds, bitrate_bps,
-                file_mtime, probe_ok)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-               ON CONFLICT(library_folder_id, relative_path) DO UPDATE SET
-               size_bytes=excluded.size_bytes, video_codec=excluded.video_codec,
-               video_width=excluded.video_width, video_height=excluded.video_height,
-               hdr_type=excluded.hdr_type, audio_tracks=excluded.audio_tracks,
-               subtitle_tracks=excluded.subtitle_tracks,
-               duration_seconds=excluded.duration_seconds, bitrate_bps=excluded.bitrate_bps,
-               file_mtime=excluded.file_mtime, probe_ok=excluded.probe_ok,
-               scanned_at=datetime('now')""",
-            [
-                snap.library_folder_id,
-                snap.relative_path,
-                snap.file_name,
-                snap.size_bytes,
-                snap.video_codec,
-                snap.video_width,
-                snap.video_height,
-                snap.hdr_type.value,
-                self._serialize_audio_tracks(snap.audio_tracks),
-                self._serialize_subtitle_tracks(snap.subtitle_tracks),
-                snap.duration_seconds,
-                snap.bitrate_bps,
-                snap.file_mtime,
-                1 if snap.probe_ok else 0,
-            ],
-        )
+        """插入或更新快照记录（ON CONFLICT upsert），含 SQLITE_BUSY 重试。"""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                self._db.execute(
+                    """INSERT INTO file_snapshot
+                       (library_folder_id, relative_path, file_name, size_bytes,
+                        video_codec, video_width, video_height, hdr_type,
+                        audio_tracks, subtitle_tracks, duration_seconds, bitrate_bps,
+                        file_mtime, probe_ok)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                       ON CONFLICT(library_folder_id, relative_path) DO UPDATE SET
+                       file_name=excluded.file_name,
+                       size_bytes=excluded.size_bytes, video_codec=excluded.video_codec,
+                       video_width=excluded.video_width, video_height=excluded.video_height,
+                       hdr_type=excluded.hdr_type, audio_tracks=excluded.audio_tracks,
+                       subtitle_tracks=excluded.subtitle_tracks,
+                       duration_seconds=excluded.duration_seconds, bitrate_bps=excluded.bitrate_bps,
+                       file_mtime=excluded.file_mtime, probe_ok=excluded.probe_ok,
+                       scanned_at=datetime('now')""",
+                    [
+                        snap.library_folder_id,
+                        snap.relative_path,
+                        snap.file_name,
+                        snap.size_bytes,
+                        snap.video_codec,
+                        snap.video_width,
+                        snap.video_height,
+                        snap.hdr_type.value,
+                        self._serialize_audio_tracks(snap.audio_tracks),
+                        self._serialize_subtitle_tracks(snap.subtitle_tracks),
+                        snap.duration_seconds,
+                        snap.bitrate_bps,
+                        snap.file_mtime,
+                        1 if snap.probe_ok else 0,
+                    ],
+                )
+                return
+            except Exception as e:
+                if "database is locked" in str(e).lower() and attempt < max_retries - 1:
+                    time.sleep(0.1 * (attempt + 1))
+                    continue
+                raise
 
     # ── 行 → 模型 ──
 
     def _row_to_snapshot(self, row: dict) -> FileSnapshot:
+        try:
+            hdr = HDRType(row["hdr_type"])
+        except ValueError:
+            hdr = HDRType.SDR
         return FileSnapshot(
             id=row["id"],
             library_folder_id=row["library_folder_id"],
@@ -116,7 +131,7 @@ class SnapshotRepository:
             video_codec=row["video_codec"],
             video_width=row["video_width"],
             video_height=row["video_height"],
-            hdr_type=HDRType(row["hdr_type"]),
+            hdr_type=hdr,
             audio_tracks=self._deserialize_audio_tracks(row["audio_tracks"]),
             subtitle_tracks=self._deserialize_subtitle_tracks(row["subtitle_tracks"]),
             duration_seconds=row["duration_seconds"],
@@ -203,6 +218,9 @@ class Scanner:
         results = []
         probe_jobs = []
 
+        # 批量加载缓存到内存 dict，避免逐文件 DB 查询
+        cached_dict = {s.relative_path: s for s in self._repo.load_all(library_folder_id)}
+
         for rel_path, abs_path in found_files:
             try:
                 st = os.stat(abs_path)
@@ -210,7 +228,7 @@ class Scanner:
             except OSError:
                 file_size, file_mtime = 0, 0.0
 
-            existing = self._repo.get_cached(library_folder_id, rel_path)
+            existing = cached_dict.get(rel_path)
             if existing and existing.size_bytes == file_size and existing.file_mtime == file_mtime:
                 results.append(existing)
                 continue
@@ -263,6 +281,9 @@ class Scanner:
         results: list[FileSnapshot] = []
         pending: list[tuple[int, str, str, int]] = []
 
+        # 批量加载缓存到内存 dict，避免逐文件 DB 查询
+        cached_dict = {s.relative_path: s for s in self._repo.load_all(library_folder_id)}
+
         for rel_path, abs_path in found_files:
             try:
                 st = os.stat(abs_path)
@@ -270,7 +291,7 @@ class Scanner:
             except OSError:
                 file_size, file_mtime = 0, 0.0
 
-            existing = self._repo.get_cached(library_folder_id, rel_path)
+            existing = cached_dict.get(rel_path)
             if existing and existing.size_bytes == file_size and existing.file_mtime == file_mtime:
                 results.append(existing)
                 continue

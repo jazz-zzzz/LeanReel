@@ -27,16 +27,7 @@ _STATUS_ICONS = {
 }
 
 
-def _format_bytes(size_bytes):
-    value = float(size_bytes or 0)
-    units = ["B", "KB", "MB", "GB", "TB"]
-    idx = 0
-    while abs(value) >= 1024 and idx < len(units) - 1:
-        value /= 1024
-        idx += 1
-    if idx == 0:
-        return f"{int(value)} {units[idx]}"
-    return f"{value:.1f} {units[idx]}"
+from leanreel.gui.utils import _format_bytes
 
 
 class QueuePanel(QWidget):
@@ -79,8 +70,8 @@ class QueuePanel(QWidget):
         btn_layout = QHBoxLayout()
         self.pause_btn = QPushButton("暂停")
         self.pause_btn.clicked.connect(self.pause_requested.emit)
-        self.clear_btn = QPushButton("清空已完成")
-        self.clear_btn.clicked.connect(self.clear_completed)
+        self.clear_btn = QPushButton("清空所有")
+        self.clear_btn.clicked.connect(self.clear_all)
         btn_layout.addWidget(self.pause_btn)
         btn_layout.addWidget(self.clear_btn)
         btn_layout.addStretch()
@@ -132,14 +123,15 @@ class QueuePanel(QWidget):
 
         self.task_layout.insertWidget(self.task_layout.count() - 1, row)
 
-    def clear_completed(self):
+    def clear_all(self):
+        """清空所有任务行（包括 RUNNING、PENDING 等）。"""
         for i in reversed(range(self.task_layout.count() - 1)):
             item = self.task_layout.itemAt(i)
             if item and item.widget():
                 item.widget().deleteLater()
 
     def clear_tasks(self):
-        self.clear_completed()
+        self.clear_all()
         self.total_progress.setValue(0)
         self.total_label.setText("就绪")
 

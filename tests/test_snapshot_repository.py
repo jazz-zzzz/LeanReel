@@ -261,8 +261,8 @@ def test_save_upserts_existing_snapshot_with_new_values(repo, folder_id):
     assert loaded.video_height == 2160
 
 
-def test_save_upsert_preserves_file_name_from_first_insert(repo, folder_id):
-    """file_name 不在 DO UPDATE SET 列表中 → upsert 时应保留第一次的值。"""
+def test_save_upsert_updates_file_name_on_conflict(repo, folder_id):
+    """file_name 现在在 DO UPDATE SET 中 → upsert 时应更新为新值。"""
     snap1 = make_snap(
         folder_id,
         rel_path="Movies/Horror/The Thing.mkv",
@@ -270,7 +270,7 @@ def test_save_upsert_preserves_file_name_from_first_insert(repo, folder_id):
     )
     repo.save(snap1)
 
-    # 第二次 save 时修改 file_name（但 upsert 不会更新该字段）
+    # 第二次 save 时修改 file_name（现在 upsert 会更新该字段）
     snap2 = make_snap(
         folder_id,
         rel_path="Movies/Horror/The Thing.mkv",
@@ -281,7 +281,7 @@ def test_save_upsert_preserves_file_name_from_first_insert(repo, folder_id):
 
     loaded = repo.get_cached(folder_id, "Movies/Horror/The Thing.mkv")
     assert loaded is not None
-    assert loaded.file_name == "The Thing (1982).mkv", "file_name 不在 ON CONFLICT UPDATE SET 中，应保留第一次的值"
+    assert loaded.file_name == "The Thing (Different Name).mkv", "file_name 现在在 ON CONFLICT UPDATE SET 中，应更新为第二次的值"
     assert loaded.video_codec == "vp9", "其他字段仍应正常更新"
 
 

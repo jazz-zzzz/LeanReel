@@ -29,6 +29,7 @@ class ProbeNotifier(QObject):
     probed = Signal(object)
     all_done = Signal()
     progress = Signal(int, int)  # done, total
+    scan_finished = Signal(object, int, str)  # snapshots, folder_id, folder_path
     task_updated = Signal(object)  # EncodeTask
     encoding_done = Signal()
 
@@ -148,7 +149,10 @@ class EncodingController:
 
             self._win.show_queue()
             self.active_manager = WorkerManager(
-                FFmpegExecutor(temp_dir=self._strategy_panel.temp_dir),
+                FFmpegExecutor(
+                    temp_dir=self._strategy_panel.temp_dir,
+                    progress_callback=lambda t: self._notifier.task_updated.emit(t),
+                ),
                 self._strategy_panel.worker_count,
                 progress_callback=lambda t: self._notifier.task_updated.emit(t),
             )
@@ -303,6 +307,7 @@ class Application:
         self.notifier.all_done.connect(
             lambda: self.win.set_status("编码信息探测完成")
         )
+        self.notifier.scan_finished.connect(self._on_scan_finished)
         self.notifier.task_updated.connect(self.encoding_ctrl.on_task_updated)
         self.notifier.encoding_done.connect(self.encoding_ctrl.on_encoding_done)
 
@@ -333,12 +338,25 @@ class Application:
         self._refresh_libraries()
         self.win.set_status(f"扫描 {path}...")
 
-        snapshots = self.services.scanner.scan_folder_fast(folder.id, path)
+        def _scan_in_background():
+            snapshots = self.services.scanner.scan_folder_fast(folder.id, path)
+            self.notifier.scan_finished.emit(snapshots, folder.id, path)
+
+        threading.Thread(target=_scan_in_background, daemon=True).start()
+
+    def _on_scan_finished(self, snapshots, folder_id, folder_path):
+        """扫描后台线程完成后的回调（在主线程执行）"""
         self.current_snapshots = snapshots
-        self.current_folder_paths[folder.id] = path
+        self.current_folder_paths[folder_id] = folder_path
         self.strategy_overrides = {}
 
         self._populate_file_list(snapshots)
+
+        # 区分"无视频文件"和"有待探测文件"
+        if len(snapshots) == 0:
+            self.win.set_status(f"未找到视频文件：{folder_path}")
+            return
+
         pending = self.services.scanner.pending_count
         if pending > 0:
             self.win.set_status(f"扫描中：0/{pending} 个文件已探测...")

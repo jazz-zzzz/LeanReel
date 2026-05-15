@@ -192,7 +192,8 @@ class TestEncodingControllerStart:
         # 验证队列被显示
         mock_win.show_queue.assert_called_once()
         # 验证 FFmpegExecutor 用正确的 temp_dir 创建
-        mock_ffmpeg.assert_called_once_with(temp_dir="/tmp/leanreel_encode")
+        mock_ffmpeg.assert_called_once()
+        assert mock_ffmpeg.call_args[1].get("temp_dir") == "/tmp/leanreel_encode"
         # 验证 WorkerManager 用正确的 worker_count 创建
         assert mock_worker_mgr.call_count == 1
         wm_args = mock_worker_mgr.call_args

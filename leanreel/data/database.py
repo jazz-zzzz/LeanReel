@@ -72,6 +72,11 @@ class Database:
             self.conn.execute("ALTER TABLE file_snapshot ADD COLUMN probe_ok INTEGER DEFAULT 0")
 
     def execute(self, sql: str, params=None):
+        """执行 SQL 语句，每条语句自动提交（设计意图：简化调用方，无需手动管理事务）。
+
+        对于需要批量事务的场景，使用 begin() 开启事务后，
+        execute() 将进入事务模式（不自动提交），由调用方显式 commit() 结束。
+        """
         try:
             cur = self.conn.execute(sql, params or [])
             rows = [dict(row) for row in cur.fetchall()] if cur.description else []
@@ -82,6 +87,29 @@ class Database:
             if self.conn.in_transaction:
                 self.conn.rollback()
             raise
+
+    def begin(self):
+        """开启显式事务。此后 execute() 不会自动提交，由调用方显式 commit() 结束。
+
+        典型用法:
+            db.begin()
+            try:
+                db.execute("INSERT INTO ...")
+                db.execute("INSERT INTO ...")
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
+        """
+        self.conn.execute("BEGIN IMMEDIATE")
+
+    def commit(self):
+        """提交当前事务。"""
+        self.conn.commit()
+
+    def rollback(self):
+        """回滚当前事务。"""
+        self.conn.rollback()
 
     @property
     def last_insert_id(self) -> int:

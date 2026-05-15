@@ -1,6 +1,7 @@
 """FFmpeg 执行器 — 编码编排，I/O 分离、临时文件管理、Dolby Vision 流程"""
 import shutil
 import tempfile
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -28,6 +29,7 @@ class FFmpegExecutor:
     def __init__(self, progress_callback=None, temp_dir: Optional[str] = None):
         self.progress_callback = progress_callback
         self.temp_dir = temp_dir
+        self._cancel_event = threading.Event()
 
     def _get_temp_dir(self) -> Path:
         if self.temp_dir:
@@ -37,6 +39,33 @@ class FFmpegExecutor:
         d.mkdir(parents=True, exist_ok=True)
         return d
 
+    def cancel(self):
+        """终止正在运行的 ffmpeg 子进程。"""
+        self._cancel_event.set()
+
+    def _make_progress_cb(self, task):
+        """创建进度回调：解析 ffmpeg stderr 中的 time= 行，更新 task.progress。"""
+        duration = task.snapshot.duration_seconds if task.snapshot else 0.0
+
+        def _on_progress(line: str):
+            if "time=" not in line:
+                return
+            try:
+                time_str = line.split("time=")[1].split()[0]
+                parts = time_str.split(":")
+                hours = int(parts[0])
+                minutes = int(parts[1])
+                seconds = float(parts[2])
+                elapsed = hours * 3600 + minutes * 60 + seconds
+                if duration > 0:
+                    task.progress = min(elapsed / duration, 1.0)
+            except (ValueError, IndexError):
+                pass
+            if self.progress_callback:
+                self.progress_callback(task)
+
+        return _on_progress
+
     def encode(self, task) -> None:
         if task.snapshot is None or task.strategy is None:
             raise ValueError("EncodeTask requires snapshot and strategy")
@@ -45,6 +74,10 @@ class FFmpegExecutor:
         temp_dir = self._get_temp_dir()
         temp_output = temp_dir / final_output.name
         rpu_file: Optional[Path] = None
+        dv_output: Optional[Path] = None
+
+        # 每次 encode 前重置取消事件
+        self._cancel_event.clear()
 
         # 如果临时文件已存在，先删除（避免 -n 跳过）
         if temp_output.exists():
@@ -66,7 +99,11 @@ class FFmpegExecutor:
                 task.input_path,
                 str(temp_output),
             )
-            exit_code, stderr_tail = run_ffmpeg(cmd, self.progress_callback)
+            exit_code, stderr_tail = run_ffmpeg(
+                cmd,
+                progress_callback=self._make_progress_cb(task),
+                cancel_event=self._cancel_event,
+            )
             if exit_code != 0:
                 if temp_output.exists():
                     temp_output.unlink()
@@ -96,6 +133,9 @@ class FFmpegExecutor:
         except Exception:
             if temp_output.exists():
                 temp_output.unlink()
+            # Issue 4: 清理 inject_rpu 失败时残留的 dv_output
+            if dv_output and dv_output.exists():
+                dv_output.unlink()
             raise
         finally:
             if rpu_file and rpu_file.exists():

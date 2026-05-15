@@ -51,18 +51,7 @@ class SortableTableWidgetItem(QTableWidgetItem):
         return super().__lt__(other)
 
 
-def _format_bytes(size_bytes: int | float | None) -> str:
-    if size_bytes is None:
-        return "—"
-    value = float(size_bytes)
-    units = ["B", "KB", "MB", "GB", "TB"]
-    unit_index = 0
-    while abs(value) >= 1024 and unit_index < len(units) - 1:
-        value /= 1024
-        unit_index += 1
-    if unit_index == 0:
-        return f"{int(value)} {units[unit_index]}"
-    return f"{value:.1f} {units[unit_index]}"
+from leanreel.gui.utils import _format_bytes
 
 
 def _scale_bytes(size_bytes: int | float) -> tuple[float, str, int]:
@@ -95,7 +84,7 @@ def _parse_savings_range(percent_text: str) -> tuple[float, float] | None:
 
 
 class FileListPanel(QWidget):
-    file_selection_changed = Signal(list)
+    file_selection_changed = Signal(list)  # 预留：选中文件变化时通知外部（当前无人连接）
     strategy_override_changed = Signal(str, str)
     custom_strategy_requested = Signal(str)
 
@@ -159,9 +148,16 @@ class FileListPanel(QWidget):
         self.tree.setSortingEnabled(True)
         self.tree.hide()
 
+        # 空状态提示
+        self.empty_label = QLabel("请先在左侧添加库和文件夹以扫描视频文件")
+        self.empty_label.setAlignment(Qt.AlignCenter)
+        self.empty_label.setStyleSheet("color: #6b6560; font-size: 14px; padding: 40px;")
+
         self.stack = QStackedWidget()
         self.stack.addWidget(self.table)
         self.stack.addWidget(self.tree)
+        self.stack.addWidget(self.empty_label)
+        self.stack.setCurrentWidget(self.empty_label)
         layout.addWidget(self.stack)
 
     def populate(self, snapshots: list, matched_strategies: dict[str, MatchResult | None], strategies: list | None = None):
@@ -175,6 +171,12 @@ class FileListPanel(QWidget):
         self._last_strategies = strategies
         self._snapshots_by_path = {snap.relative_path: snap for snap in snapshots}
         self._strategy_lookup = self._build_strategy_lookup(strategies)
+
+        if not snapshots:
+            self.stack.setCurrentWidget(self.empty_label)
+            return
+
+        self.stack.setCurrentWidget(self.table)
         self.table.setSortingEnabled(False)
         self.table.clearContents()
         self.table.setRowCount(len(snapshots))
@@ -242,7 +244,10 @@ class FileListPanel(QWidget):
         elif h >= 2160:
             parts.append("4K")
         elif h >= 1440:
-            parts.append("2K") if w >= 2560 else parts.append(f"{h}p")
+            if w >= 2560:
+                parts.append("2K")
+            else:
+                parts.append(f"{h}p")
         elif h >= 1080:
             parts.append("1080p")
         elif h >= 720:

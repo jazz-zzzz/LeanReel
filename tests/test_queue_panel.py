@@ -368,6 +368,57 @@ class TestQueuePanelClear:
         assert panel.total_progress.value() == 0
         assert panel.total_label.text() == "就绪"
 
+    def test_clear_all_removes_all_task_rows_including_running(self, qtbot):
+        """clear_all() 清空所有任务行，包括 RUNNING 和 PENDING 状态的任务。"""
+        panel = QueuePanel()
+        qtbot.addWidget(panel)
+
+        tasks = [
+            EncodeTask(
+                file_name="running_task.mkv",
+                input_path="/movies/running_task.mkv",
+                output_path="/movies/running_task_SS.mkv",
+                status=TaskStatus.RUNNING,
+                original_size=5_000_000_000,
+                progress=45.0,
+            ),
+            EncodeTask(
+                file_name="completed_task.mkv",
+                input_path="/movies/completed_task.mkv",
+                output_path="/movies/completed_task_SS.mkv",
+                status=TaskStatus.COMPLETED,
+                original_size=8_000_000_000,
+                compressed_size=3_000_000_000,
+            ),
+            EncodeTask(
+                file_name="pending_task.mkv",
+                input_path="/movies/pending_task.mkv",
+                output_path="/movies/pending_task_SS.mkv",
+                status=TaskStatus.PENDING,
+                original_size=2_000_000_000,
+            ),
+            EncodeTask(
+                file_name="failed_task.mkv",
+                input_path="/movies/failed_task.mkv",
+                output_path="/movies/failed_task_SS.mkv",
+                status=TaskStatus.FAILED,
+                original_size=6_000_000_000,
+                compressed_size=0,
+                error_message="编码错误",
+            ),
+        ]
+
+        for t in tasks:
+            panel.add_task_row(t)
+
+        assert panel.task_layout.count() == 5  # 4 tasks + 1 stretch
+
+        panel.clear_all()
+        qtbot.wait(50)
+
+        # 所有任务行被清除，仅剩 stretch
+        assert panel.task_layout.count() == 1
+
 
 class TestQueuePanelProgress:
     """update_progress() 方法测试"""
@@ -451,11 +502,11 @@ class TestQueuePanelButtons:
         button_texts = [btn.text() for btn in buttons]
 
         assert "暂停" in button_texts
-        assert "清空已完成" in button_texts
+        assert "清空所有" in button_texts
         assert "取消" not in button_texts
 
     def test_clear_button_removes_rows(self, qtbot):
-        """点击清空已完成按钮移除所有任务行"""
+        """点击清空所有按钮移除所有任务行"""
         panel = QueuePanel()
         qtbot.addWidget(panel)
 

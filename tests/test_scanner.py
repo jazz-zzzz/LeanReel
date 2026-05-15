@@ -200,3 +200,154 @@ def test_scanner_persists_tracks_as_json_and_restores_typed_snapshot(tmp_path: P
         title="Chinese forced",
         is_forced=True,
     )
+
+
+# ── Issue 3 测试：HDRType 无效值回退 ──
+
+def test_hdr_type_fallback_on_invalid_value(tmp_path: Path):
+    """数据库中 hdr_type 字段为无效值时，_row_to_snapshot 应回退到 SDR 而非崩溃。"""
+    from leanreel.core.scanner import SnapshotRepository
+
+    db = Database(str(tmp_path / "test.db"))
+    lib_id = db.insert_library(Library(name="Test"))
+    folder_id = db.insert_folder(LibraryFolder(library_id=lib_id, path=str(tmp_path)))
+
+    # 手动插入一条 hdr_type 为无效值的记录
+    file_path = tmp_path / "movie.mkv"
+    file_path.write_text("fake")
+    file_size = file_path.stat().st_size
+    db.execute(
+        """INSERT INTO file_snapshot
+           (library_folder_id, relative_path, file_name, size_bytes, hdr_type)
+           VALUES (?,?,?,?,?)""",
+        [folder_id, "movie.mkv", "movie.mkv", file_size, "INVALID_HDR_TYPE"],
+    )
+
+    repo = SnapshotRepository(db)
+    snapshots = repo.load_all(folder_id)
+
+    assert len(snapshots) == 1
+    assert snapshots[0].hdr_type is HDRType.SDR
+
+
+def test_hdr_type_fallback_on_empty_string(tmp_path: Path):
+    """数据库中 hdr_type 为空字符串时也应回退到 SDR。"""
+    from leanreel.core.scanner import SnapshotRepository
+
+    db = Database(str(tmp_path / "test.db"))
+    lib_id = db.insert_library(Library(name="Test"))
+    folder_id = db.insert_folder(LibraryFolder(library_id=lib_id, path=str(tmp_path)))
+
+    file_path = tmp_path / "movie.mkv"
+    file_path.write_text("fake")
+    file_size = file_path.stat().st_size
+    db.execute(
+        """INSERT INTO file_snapshot
+           (library_folder_id, relative_path, file_name, size_bytes, hdr_type)
+           VALUES (?,?,?,?,?)""",
+        [folder_id, "movie.mkv", "movie.mkv", file_size, ""],
+    )
+
+    repo = SnapshotRepository(db)
+    snapshots = repo.load_all(folder_id)
+
+    assert len(snapshots) == 1
+    assert snapshots[0].hdr_type is HDRType.SDR
+
+
+# ── Issue 2 测试：SQLITE_BUSY 重试 ──
+
+class BusyThenOkDatabase:
+    """模拟 Database：前 N 次 execute 抛出 database is locked，然后成功。"""
+
+    def __init__(self, db: Database, busy_count: int):
+        self._real = db
+        self._busy_count = busy_count
+        self.call_count = 0
+
+    def execute(self, sql: str, params=None):
+        self.call_count += 1
+        if self.call_count <= self._busy_count:
+            raise Exception("database is locked")
+        return self._real.execute(sql, params)
+
+
+def test_save_retries_on_busy(tmp_path: Path):
+    """save() 遇到 SQLITE_BUSY 时应重试，最多 3 次后或成功后返回。"""
+    from leanreel.core.scanner import SnapshotRepository
+
+    real_db = Database(str(tmp_path / "test.db"))
+    lib_id = real_db.insert_library(Library(name="Test"))
+    folder_id = real_db.insert_folder(LibraryFolder(library_id=lib_id, path=str(tmp_path)))
+
+    # 前 1 次 execute 抛出 locked，第 2 次成功
+    busy_db = BusyThenOkDatabase(real_db, busy_count=1)
+    repo = SnapshotRepository(busy_db)
+
+    snap = FileSnapshot(
+        library_folder_id=folder_id,
+        relative_path="test.mkv",
+        file_name="test.mkv",
+        size_bytes=100,
+    )
+
+    # 不应抛出异常
+    repo.save(snap)
+
+    # 验证重试确实发生了：call_count 应为 2（1 次失败 + 1 次成功）
+    assert busy_db.call_count >= 2
+
+    # 验证数据实际被写入了真实数据库
+    rows = real_db.execute(
+        "SELECT * FROM file_snapshot WHERE library_folder_id=? AND relative_path=?",
+        [folder_id, "test.mkv"],
+    )
+    assert len(rows) == 1
+    assert rows[0]["file_name"] == "test.mkv"
+
+
+def test_save_exhausts_retries_and_raises(tmp_path: Path):
+    """save() 重试耗尽后应抛出异常。"""
+    from leanreel.core.scanner import SnapshotRepository
+
+    real_db = Database(str(tmp_path / "test.db"))
+    lib_id = real_db.insert_library(Library(name="Test"))
+    folder_id = real_db.insert_folder(LibraryFolder(library_id=lib_id, path=str(tmp_path)))
+
+    # 每次都抛出 locked，永不成功
+    busy_db = BusyThenOkDatabase(real_db, busy_count=999)
+    repo = SnapshotRepository(busy_db)
+
+    snap = FileSnapshot(
+        library_folder_id=folder_id,
+        relative_path="test.mkv",
+        file_name="test.mkv",
+        size_bytes=100,
+    )
+
+    with pytest.raises(Exception, match="database is locked"):
+        repo.save(snap)
+
+    # 验证重试了 3 次
+    assert busy_db.call_count == 3
+
+
+def test_save_does_not_retry_non_busy_errors(tmp_path: Path):
+    """save() 不应重试非 SQLITE_BUSY 错误。"""
+    from leanreel.core.scanner import SnapshotRepository
+
+    class NonBusyErrorDatabase:
+        def execute(self, sql, params=None):
+            raise ValueError("something else broke")
+
+    repo = SnapshotRepository(NonBusyErrorDatabase())
+
+    snap = FileSnapshot(
+        library_folder_id=1,
+        relative_path="test.mkv",
+        file_name="test.mkv",
+        size_bytes=100,
+    )
+
+    with pytest.raises(ValueError, match="something else broke"):
+        repo.save(snap)

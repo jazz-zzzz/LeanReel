@@ -10,7 +10,7 @@ from PySide6.QtGui import QFont
 
 class LibraryPanel(QWidget):
     library_selected = Signal(int)
-    folder_selected = Signal(int)
+    folder_selected = Signal(int)  # 预留：文件夹被选中时通知外部（当前无人连接）
     library_added = Signal(str)
     folder_added = Signal(int, str)
     library_deleted = Signal(int)

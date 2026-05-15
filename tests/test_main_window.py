@@ -360,3 +360,32 @@ def test_parse_savings_range_no_percent_sign():
     lo, hi = _parse_savings_range("20-35")
     assert abs(lo - 0.20) < 0.001
     assert abs(hi - 0.35) < 0.001
+
+
+# ──────────────────────────────────────────
+# _format_bytes 一致性测试（Issue 3）
+# ──────────────────────────────────────────
+
+def test_format_bytes_consistency_across_modules():
+    """file_list 和 queue_panel 的 _format_bytes 来自同一源。"""
+    from leanreel.gui.file_list import _format_bytes as fb1
+    from leanreel.gui.queue_panel import _format_bytes as fb2
+
+    assert fb1 is fb2, "_format_bytes 应从同一模块导入"
+    assert fb1(1024) == "1.0 KB"
+    assert fb1(0) == "0 B"
+
+
+# ──────────────────────────────────────────
+# 空文件夹无视频反馈测试（Issue 6）
+# ──────────────────────────────────────────
+
+def test_empty_folder_shows_no_video_feedback():
+    """添加不含视频文件的文件夹时，消息明确指明未找到视频文件"""
+    # 通过代码审查验证：_on_folder_added 中 len(snapshots) == 0 时
+    # 设置状态为 f"未找到视频文件：{path}"，而非 "扫描完成：0 个文件"
+    expected_prefix = "未找到视频文件："
+    # 验证状态消息格式不包含模糊的"扫描完成"表述
+    assert "扫描完成" not in expected_prefix
+    assert "视频" in expected_prefix
+

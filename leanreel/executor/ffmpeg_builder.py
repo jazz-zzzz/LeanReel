@@ -1,5 +1,6 @@
 """FFmpeg 命令构建 — 纯命令生成，不涉及 I/O"""
 import subprocess
+import threading
 
 from leanreel.data.models import FileSnapshot, HDRType
 from leanreel.core.strategy import Strategy
@@ -45,7 +46,7 @@ class FFmpegBuilder:
                 "-rc", v.rc,
                 "-cq", str(v.cq),
             ])
-            if snapshot.hdr_type in (HDRType.HDR10, HDRType.HDR10P, HDRType.DV_P7, HDRType.DV_P8):
+            if snapshot.hdr_type in (HDRType.HDR10, HDRType.HDR10P, HDRType.DV_P5, HDRType.DV_P7, HDRType.DV_P8):
                 cmd.extend([
                     "-color_primaries", "bt2020",
                     "-color_trc", "smpte2084",
@@ -60,7 +61,7 @@ class FFmpegBuilder:
                 "-preset", v.preset,
                 "-pix_fmt", v.pix_fmt,
             ])
-            if snapshot.hdr_type in (HDRType.HDR10, HDRType.HDR10P, HDRType.DV_P7, HDRType.DV_P8):
+            if snapshot.hdr_type in (HDRType.HDR10, HDRType.HDR10P, HDRType.DV_P5, HDRType.DV_P7, HDRType.DV_P8):
                 cmd.extend([
                     "-color_primaries", "bt2020",
                     "-color_trc", "smpte2084",
@@ -131,8 +132,15 @@ class FFmpegBuilder:
         return cmd
 
 
-def run_ffmpeg(cmd: list[str], progress_callback=None) -> tuple[int, str]:
-    """执行 FFmpeg 命令，返回 (exit_code, stderr_tail)"""
+def run_ffmpeg(cmd: list[str], progress_callback=None,
+               cancel_event: threading.Event | None = None) -> tuple[int, str]:
+    """执行 FFmpeg 命令，返回 (exit_code, stderr_tail)
+
+    Args:
+        cmd: FFmpeg 命令行参数列表
+        progress_callback: 可选，收到含 "time=" 的 stderr 行时调用，传入原始行
+        cancel_event: 可选，设置时终止子进程并返回
+    """
     try:
         proc = subprocess.Popen(
             cmd, stderr=subprocess.PIPE, text=True,
@@ -147,5 +155,8 @@ def run_ffmpeg(cmd: list[str], progress_callback=None) -> tuple[int, str]:
             stderr_lines.pop(0)
         if progress_callback and "time=" in line:
             progress_callback(line)
+        if cancel_event and cancel_event.is_set():
+            proc.terminate()
+            break
     exit_code = proc.wait()
     return exit_code, "".join(stderr_lines[-20:])

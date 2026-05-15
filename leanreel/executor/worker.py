@@ -108,6 +108,9 @@ class WorkerManager:
     def cancel(self):
         self._cancelled = True
         self._paused.set()  # 解除暂停，让线程可以退出
+        # 尝试终止正在运行的 ffmpeg 子进程
+        if hasattr(self.executor, 'cancel'):
+            self.executor.cancel()
         with self._lock:
             for t in self._tasks:
                 if t.status == TaskStatus.PENDING:

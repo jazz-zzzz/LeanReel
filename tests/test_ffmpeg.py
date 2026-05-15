@@ -98,7 +98,7 @@ def test_ffmpeg_executor_runs_built_command(monkeypatch, balanced_strategy, tmp_
 
     calls = []
 
-    def fake_run(cmd, progress_callback=None):
+    def fake_run(cmd, progress_callback=None, cancel_event=None):
         # 模拟 ffmpeg 在临时路径创建输出文件
         temp_out = cmd[-1]
         Path(temp_out).parent.mkdir(parents=True, exist_ok=True)
@@ -145,7 +145,7 @@ def test_ffmpeg_executor_raises_when_command_fails(monkeypatch, balanced_strateg
     from leanreel.executor import ffmpeg
     from leanreel.executor.worker import EncodeTask
 
-    monkeypatch.setattr(ffmpeg, "run_ffmpeg", lambda cmd, progress_callback=None: (1, "mock_error"))
+    monkeypatch.setattr(ffmpeg, "run_ffmpeg", lambda cmd, progress_callback=None, cancel_event=None: (1, "mock_error"))
     temp_dir = tmp_path / "temp"
     task = EncodeTask(
         file_name="sample.mkv",
@@ -298,7 +298,7 @@ def test_ffmpeg_executor_dovi_flow(monkeypatch, tmp_path):
     dovi_extract_calls = []
     dovi_inject_calls = []
 
-    def fake_run_ffmpeg(cmd, progress_callback=None):
+    def fake_run_ffmpeg(cmd, progress_callback=None, cancel_event=None):
         ffmpeg_calls.append(cmd)
         Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
         Path(cmd[-1]).write_text("")
@@ -351,7 +351,7 @@ def test_ffmpeg_executor_dovi_cleanup_rpu_on_failure(monkeypatch, tmp_path):
     from leanreel.executor.worker import EncodeTask
     from leanreel.executor import dovi as dovi_mod
 
-    def fake_run_ffmpeg(cmd, progress_callback=None):
+    def fake_run_ffmpeg(cmd, progress_callback=None, cancel_event=None):
         Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
         return 1, "mock_error"  # 模拟失败
 
@@ -696,3 +696,264 @@ def test_dv_p8_enum_value():
     assert HDRType.DV_P8.value == "DV_P8"
     assert isinstance(HDRType.DV_P8, HDRType)
     assert HDRType.DV_P8 != HDRType.DV_P7
+
+
+# ============================================================
+# F. Issue 1 修复验证：DV_P5 色彩元数据测试
+# ============================================================
+
+def test_build_dv_p5_includes_color_metadata():
+    """DV_P5 snapshot 的命令包含完整色彩空间元数据（bt2020/smpte2084/bt2020nc）"""
+    snap = FileSnapshot(video_codec="hevc", hdr_type=HDRType.DV_P5,
+                        video_width=3840, video_height=2160)
+    strategy = Strategy.from_dict({
+        "name": "DV_P5测试", "is_preset": False,
+        "video": {"encoder": "libx265", "crf": 20, "preset": "slow", "pix_fmt": "yuv420p10le"},
+        "hdr": {"mode": "preserve_hdr10"},
+        "audio": {"mode": "keep_original"},
+        "subtitle": {"mode": "keep_all"},
+        "filters": {},
+    })
+    cmd = FFmpegBuilder.build(snap, strategy, "dv_p5_sample.mkv", "output.mkv")
+    joined = " ".join(cmd)
+
+    # DV_P5 必须有完整色彩元数据（否则播放器无法正确渲染）
+    assert "-color_primaries bt2020" in joined
+    assert "-color_trc smpte2084" in joined
+    assert "-colorspace bt2020nc" in joined
+    # DV_P5 不是 HDR10+，不应有 -hdr10+
+    assert "-hdr10+" not in cmd
+
+
+def test_build_dv_p5_nvenc_includes_color_metadata():
+    """DV_P5 + NVENC GPU 编码器也包含色彩元数据"""
+    snap = FileSnapshot(video_codec="hevc", hdr_type=HDRType.DV_P5,
+                        video_width=3840, video_height=2160)
+    strategy = Strategy.from_dict({
+        "name": "NVENC DV_P5", "is_preset": False,
+        "video": {"encoder": "hevc_nvenc", "gpu": True, "nv_preset": "p1",
+                   "rc": "vbr", "cq": 26},
+        "hdr": {"mode": "preserve_hdr10"},
+        "audio": {"mode": "keep_original"},
+        "subtitle": {"mode": "keep_all"},
+        "filters": {},
+    })
+    cmd = FFmpegBuilder.build(snap, strategy, "dv_p5_gpu.mkv", "output.mkv")
+    joined = " ".join(cmd)
+
+    assert "-c:V" in cmd and "hevc_nvenc" in cmd
+    assert "-color_primaries bt2020" in joined
+    assert "-color_trc smpte2084" in joined
+    assert "-colorspace bt2020nc" in joined
+
+
+# ============================================================
+# G. Issue 2 修复验证：进度回调测试
+# ============================================================
+
+def test_ffmpeg_executor_progress_callback_is_called(monkeypatch, tmp_path):
+    """验证 FFmpegExecutor.encode 通过 run_ffmpeg 进度回调更新 task.progress"""
+    from leanreel.executor import ffmpeg as ffmpeg_mod
+    from leanreel.executor.worker import EncodeTask
+
+    progress_tasks = []
+
+    def fake_run(cmd, progress_callback=None, cancel_event=None):
+        # 模拟 ffmpeg stderr 含 time= 行
+        Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
+        Path(cmd[-1]).write_text("encoded")
+        if progress_callback:
+            progress_callback("frame=  150 fps= 25 time=00:00:06.00 bitrate=5000kbits/s")
+            progress_callback("frame=  300 fps= 25 time=00:00:12.00 bitrate=4800kbits/s")
+        return 0, ""
+
+    def fake_progress_cb(task):
+        progress_tasks.append((task.file_name, task.progress))
+
+    monkeypatch.setattr(ffmpeg_mod, "run_ffmpeg", fake_run)
+
+    strategy = Strategy.from_dict({
+        "name": "test", "video": {"encoder": "libx265", "crf": 20, "preset": "slow"},
+        "audio": {"mode": "keep_original"}, "subtitle": {"mode": "keep_all"},
+        "filters": {},
+    })
+    snap = FileSnapshot(video_codec="h264", duration_seconds=30.0)
+
+    temp_dir = tmp_path / "temp"
+    task = EncodeTask(
+        file_name="progress.mkv",
+        input_path=str(tmp_path / "progress.mkv"),
+        output_path=str(tmp_path / "progress_SS.mkv"),
+        strategy=strategy,
+        snapshot=snap,
+    )
+    task.progress = 0.0
+
+    executor = FFmpegExecutor(temp_dir=str(temp_dir), progress_callback=fake_progress_cb)
+    executor.encode(task)
+
+    # task.progress 由 _make_progress_cb 计算: elapsed / duration
+    # 6.0 / 30.0 = 0.2, 12.0 / 30.0 = 0.4
+    assert task.progress == pytest.approx(0.4)
+    # 外部 progress_callback 至少被调用两次
+    assert len(progress_tasks) >= 2
+    # 第一次回调时 progress 约为 0.2
+    assert progress_tasks[0][1] == pytest.approx(0.2, abs=1e-6)
+    # 第二次回调时 progress 约为 0.4
+    assert progress_tasks[1][1] == pytest.approx(0.4, abs=1e-6)
+
+
+def test_ffmpeg_executor_progress_callback_clamped_to_one(monkeypatch, tmp_path):
+    """验证进度值不会超过 1.0"""
+    from leanreel.executor import ffmpeg as ffmpeg_mod
+    from leanreel.executor.worker import EncodeTask
+
+    def fake_run(cmd, progress_callback=None, cancel_event=None):
+        Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
+        Path(cmd[-1]).write_text("encoded")
+        if progress_callback:
+            # 时间超过总时长（ffmpeg 可能报出轻微超过 duration 的时间）
+            progress_callback("frame=99999 fps=25 time=01:00:00.00 bitrate=5000kbits/s")
+        return 0, ""
+
+    monkeypatch.setattr(ffmpeg_mod, "run_ffmpeg", fake_run)
+
+    strategy = Strategy.from_dict({
+        "name": "test", "video": {"encoder": "libx265", "crf": 20, "preset": "slow"},
+        "audio": {"mode": "keep_original"}, "subtitle": {"mode": "keep_all"},
+        "filters": {},
+    })
+    snap = FileSnapshot(video_codec="h264", duration_seconds=10.0)
+
+    task = EncodeTask(
+        file_name="overflow.mkv",
+        input_path=str(tmp_path / "overflow.mkv"),
+        output_path=str(tmp_path / "overflow_SS.mkv"),
+        strategy=strategy,
+        snapshot=snap,
+    )
+
+    FFmpegExecutor(temp_dir=str(tmp_path / "temp")).encode(task)
+
+    # 1h / 10s = 360，但 progress 应被 clamp 在 1.0
+    assert task.progress <= 1.0
+    assert task.progress == pytest.approx(1.0)
+
+
+# ============================================================
+# H. Issue 3 修复验证：取消终止 ffmpeg 进程测试
+# ============================================================
+
+def test_cancel_terminates_running_process():
+    """验证 run_ffmpeg 在 cancel_event 被设置时调用 proc.terminate()"""
+    from unittest.mock import patch, MagicMock
+    import threading
+    from leanreel.executor.ffmpeg_builder import run_ffmpeg
+
+    cancel_event = threading.Event()
+
+    class StderrWithCancel:
+        """可迭代 stderr 模拟：持续产出行，取消逻辑由 run_ffmpeg 循环体内的 cancel_event 检查处理"""
+        def __init__(self):
+            self._count = 0
+        def __iter__(self):
+            return self
+        def __next__(self):
+            import time
+            time.sleep(0.01)
+            self._count += 1
+            return f"frame={self._count} time=00:00:04.00 bitrate=5000kbits/s\n"
+
+    mock_proc = MagicMock()
+    mock_proc.stderr = StderrWithCancel()
+    mock_proc.wait.return_value = 0
+
+    cmd = ["ffmpeg", "-i", "in.mkv", "-c:v", "libx265", "out.mkv"]
+
+    with patch("leanreel.executor.ffmpeg_builder.subprocess.Popen",
+               return_value=mock_proc) as mock_popen:
+        def trigger_cancel():
+            import time
+            time.sleep(0.1)
+            cancel_event.set()
+
+        t = threading.Thread(target=trigger_cancel, daemon=True)
+        t.start()
+        run_ffmpeg(cmd, cancel_event=cancel_event)
+
+    # Popen 参数验证
+    mock_popen.assert_called_once()
+    # terminate 必须被调用（因为 cancel_event 被设置）
+    mock_proc.terminate.assert_called_once()
+
+
+def test_ffmpeg_executor_cancel_sets_event():
+    """验证 FFmpegExecutor.cancel() 设置内部 cancel_event"""
+    executor = FFmpegExecutor()
+    assert not executor._cancel_event.is_set()
+    executor.cancel()
+    assert executor._cancel_event.is_set()
+
+
+# ============================================================
+# I. Issue 4 修复验证：inject_rpu 失败时 dv_output 清理测试
+# ============================================================
+
+def test_encode_cleans_up_dv_output_on_inject_failure(monkeypatch, tmp_path):
+    """验证 inject_rpu 失败时 dv_output 临时文件被清理，不泄漏在磁盘上"""
+    from leanreel.executor import ffmpeg as ffmpeg_mod
+    from leanreel.executor import dovi as dovi_mod
+    from leanreel.executor.worker import EncodeTask
+
+    def fake_run_ffmpeg(cmd, progress_callback=None, cancel_event=None):
+        Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
+        Path(cmd[-1]).write_text("encoded_data")
+        return 0, ""
+
+    def fake_extract(input_file, rpu_output):
+        Path(rpu_output).write_text("rpu_data")
+        return True
+
+    def fake_inject(encoded, rpu, output):
+        # 模拟 dovi_tool 部分写入输出文件后失败
+        Path(output).write_text("partial_dv_data")
+        return False
+
+    monkeypatch.setattr(ffmpeg_mod, "run_ffmpeg", fake_run_ffmpeg)
+    monkeypatch.setattr(dovi_mod.DoviTool, "extract_rpu", staticmethod(fake_extract))
+    monkeypatch.setattr(dovi_mod.DoviTool, "inject_rpu", staticmethod(fake_inject))
+
+    strategy = Strategy.from_dict({
+        "name": "DV测试", "video": {"encoder": "libx265", "crf": 20, "preset": "slow"},
+        "hdr": {"dv_handling": "reinject_rpu"},
+        "audio": {"mode": "keep_original"},
+        "subtitle": {"mode": "keep_chinese"},
+        "filters": {},
+    })
+    snap = FileSnapshot(video_codec="h264", hdr_type=HDRType.DV_P7)
+
+    temp_dir = tmp_path / "temp"
+    task = EncodeTask(
+        file_name="dv_fail.mkv",
+        input_path=str(tmp_path / "dv_fail.mkv"),
+        output_path=str(tmp_path / "dv_fail_SS.mkv"),
+        strategy=strategy,
+        snapshot=snap,
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        FFmpegExecutor(temp_dir=str(temp_dir)).encode(task)
+
+    assert "inject" in str(exc_info.value).lower()
+
+    # dv_output 临时文件必须被清理
+    dv_files = list(temp_dir.glob("*_dv.mkv"))
+    assert len(dv_files) == 0, f"dv_output files leaked: {dv_files}"
+
+    # RPU 临时文件也必须被清理（finally 块）
+    rpu_files = list(temp_dir.glob("*.rpu"))
+    assert len(rpu_files) == 0, f"rpu files leaked: {rpu_files}"
+
+    # 编码输出临时文件也应被清理
+    temp_outputs = list(temp_dir.glob("dv_fail_SS.mkv"))
+    assert len(temp_outputs) == 0, f"temp output files leaked: {temp_outputs}"
