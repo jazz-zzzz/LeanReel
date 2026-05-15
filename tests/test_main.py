@@ -3,7 +3,8 @@ from pathlib import Path
 
 from leanreel.core.strategy import Strategy
 from leanreel.data.models import FileSnapshot
-from leanreel.main import build_encode_tasks, make_output_path
+from leanreel.executor.worker import EncodeTask, TaskStatus
+from leanreel.main import build_encode_tasks, make_output_path, compute_encode_summary
 
 
 def test_make_output_path_adds_suffix_without_overwriting_original():
@@ -63,4 +64,69 @@ def test_build_encode_tasks_supports_per_file_strategy_overrides():
     assert [task.strategy_name for task in tasks] == ["均衡压缩", "自定义"]
     assert tasks[1].strategy is custom_strategy
 
+
+def test_build_encode_tasks_skips_snapshots_with_unknown_folder():
+    strategy = Strategy.from_dict({
+        "name": "均衡压缩",
+        "video": {"encoder": "libx265"},
+        "filters": {},
+    })
+    snapshots = [
+        FileSnapshot(library_folder_id=7, relative_path="a.mkv", file_name="a.mkv"),
+        FileSnapshot(library_folder_id=99, relative_path="orphan.mkv", file_name="orphan.mkv"),
+    ]
+
+    tasks = build_encode_tasks(snapshots, {7: "D:/TV"}, strategy)
+
+    assert len(tasks) == 1
+    assert tasks[0].file_name == "a.mkv"
+
+
+def test_build_encode_tasks_returns_empty_list_for_empty_snapshots():
+    strategy = Strategy.from_dict({
+        "name": "均衡压缩",
+        "video": {"encoder": "libx265"},
+        "filters": {},
+    })
+
+    tasks = build_encode_tasks([], {7: "D:/TV"}, strategy)
+
+    assert tasks == []
+
+
+def test_compute_encode_summary_counts_completed_and_failed():
+    tasks = [
+        EncodeTask(file_name="a.mkv", input_path="/in/a.mkv", output_path="/out/a.mkv"),
+        EncodeTask(file_name="b.mkv", input_path="/in/b.mkv", output_path="/out/b.mkv"),
+        EncodeTask(file_name="c.mkv", input_path="/in/c.mkv", output_path="/out/c.mkv"),
+        EncodeTask(file_name="d.mkv", input_path="/in/d.mkv", output_path="/out/d.mkv"),
+    ]
+    tasks[0].status = TaskStatus.COMPLETED
+    tasks[1].status = TaskStatus.COMPLETED
+    tasks[2].status = TaskStatus.FAILED
+    tasks[3].status = TaskStatus.SKIPPED
+
+    done, failed = compute_encode_summary(tasks)
+
+    assert done == 2
+    assert failed == 1
+
+
+def test_compute_encode_summary_returns_zero_for_all_pending():
+    tasks = [
+        EncodeTask(file_name="a.mkv", input_path="/in/a.mkv", output_path="/out/a.mkv"),
+        EncodeTask(file_name="b.mkv", input_path="/in/b.mkv", output_path="/out/b.mkv"),
+    ]
+
+    done, failed = compute_encode_summary(tasks)
+
+    assert done == 0
+    assert failed == 0
+
+
+def test_compute_encode_summary_returns_zero_for_empty_list():
+    done, failed = compute_encode_summary([])
+
+    assert done == 0
+    assert failed == 0
 

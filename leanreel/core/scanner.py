@@ -20,7 +20,7 @@ class Scanner:
         self._probe = probe_runner
         self.max_workers = max(1, max_workers)
         self._probe_lock = threading.Lock()
-        self._pending_jobs: list[tuple[int, str, str]] = []
+        self._pending_jobs: list[tuple[int, str, str, int]] = []
 
     def _get_probe(self):
         if self._probe is None:

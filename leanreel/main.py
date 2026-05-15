@@ -58,6 +58,13 @@ def make_output_path(source: Path) -> Path:
     return source.with_name(f"{source.stem}_SS{source.suffix}")
 
 
+def compute_encode_summary(results: list[EncodeTask]) -> tuple[int, int]:
+    """从编码结果中统计完成数和失败数。返回 (done, failed)。"""
+    done = sum(1 for t in results if t.status == TaskStatus.COMPLETED)
+    failed = sum(1 for t in results if t.status == TaskStatus.FAILED)
+    return done, failed
+
+
 def build_encode_tasks(
     snapshots,
     folder_paths: dict[int, str],
@@ -118,6 +125,7 @@ class Application:
         self.active_custom_path: str | None = None
         self.active_manager: WorkerManager | None = None
         self.encoding_in_progress = False
+        self._encode_lock = threading.Lock()
 
     def _init_notifier(self):
         self.notifier = ProbeNotifier()
@@ -259,9 +267,11 @@ class Application:
     # ── 编码控制 ──
 
     def _on_start_requested(self):
-        if self.encoding_in_progress:
-            self.win.set_status("编码正在进行中，请等待完成")
-            return
+        with self._encode_lock:
+            if self.encoding_in_progress:
+                self.win.set_status("编码正在进行中，请等待完成")
+                return
+            self.encoding_in_progress = True
         try:
             default_strategy = self.strategy_panel.current_preset_strategy or self.strategy_panel.current_strategy
             if default_strategy is None:
@@ -281,7 +291,6 @@ class Application:
                 self.queue_panel.add_task_row(task)
 
             self.win.show_queue()
-            self.encoding_in_progress = True
             self.active_manager = WorkerManager(
                 FFmpegExecutor(temp_dir=self.strategy_panel.temp_dir),
                 self.strategy_panel.worker_count,
@@ -297,7 +306,8 @@ class Application:
             t = threading.Thread(target=_run_encode, daemon=True)
             t.start()
         except Exception as e:
-            self.encoding_in_progress = False
+            with self._encode_lock:
+                self.encoding_in_progress = False
             self.win.set_status(f"错误：{e}")
 
     def _on_pause_requested(self):
@@ -329,12 +339,12 @@ class Application:
         )
 
     def _on_encoding_done(self):
-        self.encoding_in_progress = False
+        with self._encode_lock:
+            self.encoding_in_progress = False
         if self.active_manager is None:
             return
         results = self.active_manager.get_results()
-        done = sum(1 for t in results if t.status == TaskStatus.COMPLETED)
-        failed = sum(1 for t in results if t.status == TaskStatus.FAILED)
+        done, failed = compute_encode_summary(results)
         self.win.set_status(
             f"编码完成：成功 {done}/{len(results)}"
             + (f"，失败 {failed}" if failed else "")

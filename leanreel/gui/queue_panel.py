@@ -101,12 +101,14 @@ class QueuePanel(QWidget):
         row_layout.setSpacing(8)
 
         icon_label = QLabel(_STATUS_ICONS.get(task.status, "?"))
+        icon_label.setObjectName("queue_icon")
         icon_color = _STATUS_COLORS.get(task.status, QColor("#5c5851"))
         icon_label.setStyleSheet(f"color: {icon_color.name()}; font-weight: bold; font-size: 14px;")
         icon_label.setFixedWidth(20)
         row_layout.addWidget(icon_label)
 
         name_label = QLabel(task.file_name)
+        name_label.setObjectName("queue_name")
         name_label.setStyleSheet("color: #e8e3db;")
         row_layout.addWidget(name_label, 1)
 
@@ -124,6 +126,7 @@ class QueuePanel(QWidget):
             info = _format_bytes(task.original_size)
 
         info_label = QLabel(info)
+        info_label.setObjectName("queue_info")
         info_label.setStyleSheet("color: #8a857c; font-size: 11px;")
         row_layout.addWidget(info_label)
 
@@ -146,30 +149,28 @@ class QueuePanel(QWidget):
             item = self.task_layout.itemAt(i)
             if item and item.widget():
                 row = item.widget()
-                labels = row.findChildren(QLabel)
-                if len(labels) < 2:
-                    continue
-                if labels[1].text() != task.file_name:
+                name_label = row.findChild(QLabel, "queue_name")
+                if name_label is None or name_label.text() != task.file_name:
                     continue
 
-                # 更新状态图标
-                icon_label = labels[0]
-                icon_color = _STATUS_COLORS.get(task.status, QColor("#5c5851"))
-                icon_label.setText(_STATUS_ICONS.get(task.status, "?"))
-                icon_label.setStyleSheet(f"color: {icon_color.name()}; font-weight: bold; font-size: 14px;")
+                icon_label = row.findChild(QLabel, "queue_icon")
+                if icon_label is not None:
+                    icon_color = _STATUS_COLORS.get(task.status, QColor("#5c5851"))
+                    icon_label.setText(_STATUS_ICONS.get(task.status, "?"))
+                    icon_label.setStyleSheet(f"color: {icon_color.name()}; font-weight: bold; font-size: 14px;")
 
-                # 更新进度/大小信息
-                info_label = labels[2]
-                if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
-                    orig = _format_bytes(task.original_size)
-                    comp = _format_bytes(task.compressed_size) if task.compressed_size else "—"
-                    ratio = ""
-                    if task.compressed_size and task.original_size:
-                        pct = (1 - task.compressed_size / task.original_size) * 100
-                        ratio = f" ({pct:.0f}%)"
-                    info_label.setText(f"{orig} → {comp}{ratio}")
-                elif task.status == TaskStatus.RUNNING:
-                    info_label.setText(f"压缩中... {task.progress:.0f}%")
-                else:
-                    info_label.setText(_format_bytes(task.original_size))
+                info_label = row.findChild(QLabel, "queue_info")
+                if info_label is not None:
+                    if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+                        orig = _format_bytes(task.original_size)
+                        comp = _format_bytes(task.compressed_size) if task.compressed_size else "—"
+                        ratio = ""
+                        if task.compressed_size and task.original_size:
+                            pct = (1 - task.compressed_size / task.original_size) * 100
+                            ratio = f" ({pct:.0f}%)"
+                        info_label.setText(f"{orig} → {comp}{ratio}")
+                    elif task.status == TaskStatus.RUNNING:
+                        info_label.setText(f"压缩中... {task.progress:.0f}%")
+                    else:
+                        info_label.setText(_format_bytes(task.original_size))
                 return
