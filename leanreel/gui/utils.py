@@ -4,9 +4,11 @@
 def _format_bytes(size_bytes):
     """将字节数格式化为人类可读的字符串（如 1.5 GB）。"""
     value = float(size_bytes or 0)
+    if value <= 0:
+        return "—"
     units = ["B", "KB", "MB", "GB", "TB"]
     idx = 0
-    while abs(value) >= 1024 and idx < len(units) - 1:
+    while value >= 1024 and idx < len(units) - 1:
         value /= 1024
         idx += 1
     if idx == 0:

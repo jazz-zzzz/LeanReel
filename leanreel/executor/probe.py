@@ -84,7 +84,7 @@ def parse_ffprobe_output(data: dict, library_folder_id: int) -> FileSnapshot:
     subtitle_streams = [s for s in streams if s["codec_type"] == "subtitle"]
 
     filename = os.path.basename(fmt.get("filename", ""))
-    size = int(fmt.get("size", 0))
+    size = max(0, int(fmt.get("size", 0)))
     duration = float(fmt.get("duration", 0))
     bitrate = int(fmt.get("bit_rate", 0))
 

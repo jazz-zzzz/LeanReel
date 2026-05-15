@@ -659,7 +659,7 @@ def test_format_bytes_consistency_across_modules():
 
     assert fb1 is fb2, "_format_bytes 应从同一模块导入"
     assert fb1(1024) == "1.0 KB"
-    assert fb1(0) == "0 B"
+    assert fb1(0) == "—"
 
 
 # ──────────────────────────────────────────
