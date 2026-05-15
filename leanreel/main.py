@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtCore import QObject, Signal
 
 from leanreel.data.database import Database
 from leanreel.core.library import LibraryManager
@@ -442,24 +442,9 @@ class Application:
 
             done_count = [0]
             lock = threading.Lock()
-            batch: list = []
-            batch_lock = threading.Lock()
 
             def on_probed(snap):
-                with batch_lock:
-                    batch.append(snap)
-
-            def flush_batch():
-                with batch_lock:
-                    if not batch:
-                        return
-                    for s in batch:
-                        self.notifier.probed.emit(s)
-                    batch.clear()
-
-            batch_timer = QTimer()
-            batch_timer.timeout.connect(flush_batch)
-            batch_timer.start(200)
+                self.notifier.probed.emit(snap)
 
             def on_progress():
                 with lock:
@@ -467,8 +452,6 @@ class Application:
                     self.notifier.progress.emit(done_count[0], pending)
 
             def on_finished():
-                batch_timer.stop()
-                flush_batch()
                 self.notifier.all_done.emit()
 
             self.services.scanner.start_background_probe_jobs(

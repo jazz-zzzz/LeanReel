@@ -273,7 +273,10 @@ class Scanner:
                     probed = list(pool.map(_run, probe_jobs))
 
             for snap in probed:
-                self._repo.save(snap)
+                try:
+                    self._repo.save(snap)
+                except Exception:
+                    pass
             results.extend(probed)
 
         return results
@@ -361,9 +364,20 @@ class Scanner:
                 probe_error=str(e)[:200],
             )
 
-        self._repo.save(snap)
+        try:
+            self._repo.save(snap)
+        except Exception as save_err:
+            import sys
+            print(
+                f"[LeanReel] 保存快照失败: {abs_path}\n  {save_err}",
+                file=sys.stderr,
+                flush=True,
+            )
         if on_done:
-            on_done(snap)
+            try:
+                on_done(snap)
+            except Exception:
+                pass
         return self.pending_count > 0
 
     def start_background_probe_jobs(
@@ -406,17 +420,36 @@ class Scanner:
                     probe_ok=False,
                     probe_error=str(e)[:200],
                 )
-            self._repo.save(snap)
+            try:
+                self._repo.save(snap)
+            except Exception as save_err:
+                import sys
+                print(
+                    f"[LeanReel] 保存快照失败: {abs_path}\n  {save_err}",
+                    file=sys.stderr,
+                    flush=True,
+                )
             if on_done:
-                on_done(snap)
+                try:
+                    on_done(snap)
+                except Exception:
+                    pass
             if on_progress:
-                on_progress()
+                try:
+                    on_progress()
+                except Exception:
+                    pass
 
         def _run():
             if jobs:
                 workers = min(self.max_workers, len(jobs))
                 with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-                    list(pool.map(_probe_one, jobs))
+                    futures = [pool.submit(_probe_one, job) for job in jobs]
+                    for f in concurrent.futures.as_completed(futures):
+                        try:
+                            f.result()
+                        except Exception:
+                            pass  # _probe_one 内部已经打印过错误
             if on_finished:
                 on_finished()
 
