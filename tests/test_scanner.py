@@ -206,7 +206,7 @@ def test_scanner_persists_tracks_as_json_and_restores_typed_snapshot(tmp_path: P
 
 def test_hdr_type_fallback_on_invalid_value(tmp_path: Path):
     """数据库中 hdr_type 字段为无效值时，_row_to_snapshot 应回退到 SDR 而非崩溃。"""
-    from leanreel.core.scanner import SnapshotRepository
+    from leanreel.core.repository import SnapshotRepository
 
     db = Database(str(tmp_path / "test.db"))
     lib_id = db.insert_library(Library(name="Test"))
@@ -232,7 +232,7 @@ def test_hdr_type_fallback_on_invalid_value(tmp_path: Path):
 
 def test_hdr_type_fallback_on_empty_string(tmp_path: Path):
     """数据库中 hdr_type 为空字符串时也应回退到 SDR。"""
-    from leanreel.core.scanner import SnapshotRepository
+    from leanreel.core.repository import SnapshotRepository
 
     db = Database(str(tmp_path / "test.db"))
     lib_id = db.insert_library(Library(name="Test"))
@@ -274,7 +274,7 @@ class BusyThenOkDatabase:
 
 def test_save_retries_on_busy(tmp_path: Path):
     """save() 遇到 SQLITE_BUSY 时应重试，最多 3 次后或成功后返回。"""
-    from leanreel.core.scanner import SnapshotRepository
+    from leanreel.core.repository import SnapshotRepository
 
     real_db = Database(str(tmp_path / "test.db"))
     lib_id = real_db.insert_library(Library(name="Test"))
@@ -308,7 +308,7 @@ def test_save_retries_on_busy(tmp_path: Path):
 
 def test_save_exhausts_retries_and_raises(tmp_path: Path):
     """save() 重试耗尽后应抛出异常。"""
-    from leanreel.core.scanner import SnapshotRepository
+    from leanreel.core.repository import SnapshotRepository
 
     real_db = Database(str(tmp_path / "test.db"))
     lib_id = real_db.insert_library(Library(name="Test"))
@@ -356,7 +356,7 @@ def test_fast_scan_batches_keep_independent_pending_jobs(tmp_path: Path):
 
 def test_save_does_not_retry_non_busy_errors(tmp_path: Path):
     """save() 不应重试非 SQLITE_BUSY 错误。"""
-    from leanreel.core.scanner import SnapshotRepository
+    from leanreel.core.repository import SnapshotRepository
 
     class NonBusyErrorDatabase:
         def execute(self, sql, params=None):

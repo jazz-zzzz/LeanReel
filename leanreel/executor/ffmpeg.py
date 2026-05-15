@@ -39,7 +39,8 @@ class FFmpegExecutor:
         self.temp_dir = temp_dir
         self.sync_output = sync_output
         self.keep_temp = keep_temp
-        self._active_cancel_event: Optional[threading.Event] = None
+        self._cancel_events: dict[str, threading.Event] = {}
+        self._cancel_lock = threading.Lock()
 
     def _get_temp_dir(self) -> Path:
         if self.temp_dir:
@@ -50,9 +51,10 @@ class FFmpegExecutor:
         return d
 
     def cancel(self):
-        """终止正在运行的编码。只影响当前活跃的 encode() 调用。"""
-        if self._active_cancel_event:
-            self._active_cancel_event.set()
+        """终止所有正在运行的编码。"""
+        with self._cancel_lock:
+            for event in list(self._cancel_events.values()):
+                event.set()
 
     def _emit_progress(self, task):
         """触发外部进度回调（如果已设置）。"""
@@ -81,7 +83,8 @@ class FFmpegExecutor:
 
         # 每次 encode 创建独立的取消事件（防止多 worker 相互干扰）
         cancel_event = threading.Event()
-        self._active_cancel_event = cancel_event
+        with self._cancel_lock:
+            self._cancel_events[task.input_path] = cancel_event
 
         # 如果临时文件已存在，先删除
         if temp_output.exists():
@@ -127,11 +130,15 @@ class FFmpegExecutor:
                 elif slot_id == "extract_rpu":
                     rpu_file = task_temp_dir / f"{final_output.stem}.rpu"
                     if rpu_file.exists():
-                        rpu_file.unlink()
+                        try:
+                            rpu_file.unlink()
+                        except OSError:
+                            pass
                     # 使用本地副本（如果已复制到本地）
                     extract_source = str(local_input) if local_input else task.input_path
-                    if not DoviTool.extract_rpu(extract_source, str(rpu_file)):
-                        raise RuntimeError(f"Dolby Vision RPU extraction failed: {task.file_name}")
+                    ok, stderr = DoviTool.extract_rpu(extract_source, str(rpu_file))
+                    if not ok:
+                        raise RuntimeError(f"Dolby Vision RPU extraction failed: {task.file_name}\n{stderr[:500]}")
                     plan.mark_stage_completed(i)
 
                 elif slot_id == "transcode":
@@ -208,9 +215,13 @@ class FFmpegExecutor:
                 elif slot_id == "inject_rpu":
                     dv_output = task_temp_dir / f"{final_output.stem}_dv{final_output.suffix}"
                     if dv_output.exists():
-                        dv_output.unlink()
-                    if not DoviTool.inject_rpu(str(temp_output), str(rpu_file), str(dv_output)):
-                        raise RuntimeError(f"Dolby Vision RPU injection failed: {task.file_name}")
+                        try:
+                            dv_output.unlink()
+                        except OSError:
+                            pass
+                    ok, stderr = DoviTool.inject_rpu(str(temp_output), str(rpu_file), str(dv_output))
+                    if not ok:
+                        raise RuntimeError(f"Dolby Vision RPU injection failed: {task.file_name}\n{stderr[:500]}")
                     if temp_output.exists():
                         temp_output.unlink()
                     temp_output = dv_output
@@ -235,9 +246,13 @@ class FFmpegExecutor:
                             task.compressed_size = task.original_size
                             stage.detail = "跳过（输出 ≥ 原体积）"
                     else:
-                        # 不同步：体积记录临时输出文件大小
-                        if temp_output.exists():
-                            task.compressed_size = temp_output.stat().st_size
+                        # 至少保留编码产物
+                        final_output.parent.mkdir(parents=True, exist_ok=True)
+                        if final_output.exists():
+                            final_output.unlink()
+                        shutil.move(str(temp_output), str(final_output))
+                        if final_output.exists():
+                            task.compressed_size = final_output.stat().st_size
                     plan.mark_stage_completed(i)
 
                 task.progress = plan.compute_overall_progress()
@@ -269,16 +284,17 @@ class FFmpegExecutor:
                     pass
             raise
         finally:
-            self._active_cancel_event = None
+            with self._cancel_lock:
+                self._cancel_events.pop(task.input_path, None)
             if not self.keep_temp:
                 if rpu_file and rpu_file.exists():
-                    rpu_file.unlink()
+                    try:
+                        rpu_file.unlink()
+                    except OSError:
+                        pass
                 if local_input and local_input.exists():
                     try:
                         local_input.unlink()
                     except OSError:
                         pass
-                try:
-                    task_temp_dir.rmdir()
-                except OSError:
-                    pass
+                shutil.rmtree(str(task_temp_dir), ignore_errors=True)

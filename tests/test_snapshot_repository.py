@@ -15,7 +15,7 @@ from leanreel.data.models import (
     LibraryFolder,
     SubtitleTrack,
 )
-from leanreel.core.scanner import SnapshotRepository
+from leanreel.core.repository import SnapshotRepository
 
 
 # ── fixtures ──
