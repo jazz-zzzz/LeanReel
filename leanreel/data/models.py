@@ -70,6 +70,7 @@ class FileSnapshot:
     bitrate_bps: int = 0
     file_mtime: float = 0.0
     probe_ok: bool = False
+    probe_error: str = ""
     scanned_at: str = ""
 
 

@@ -227,6 +227,8 @@ class FileListPanel(QWidget):
                 codec_item.setForeground(_COLOR_CODEC_OK)
             elif getattr(snap, "probe_ok", None) is False:
                 codec_item.setForeground(_COLOR_PROBE_FAILED)
+                err = getattr(snap, "probe_error", "") or "未知错误"
+                codec_item.setToolTip(err)
             else:
                 codec_item.setForeground(_COLOR_CODEC_MISSING)
             self.table.setItem(row, 3, codec_item)
@@ -419,7 +421,9 @@ class FileListPanel(QWidget):
                 snap, "video_codec", ""
             )
             if probe_failed:
+                err = getattr(snap, "probe_error", "") or "未知错误"
                 codec_item = QTableWidgetItem("探测失败")
+                codec_item.setToolTip(err)
                 codec_item.setForeground(_COLOR_PROBE_FAILED)
             else:
                 codec_item = QTableWidgetItem(self._format_codec(snap))

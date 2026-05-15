@@ -254,7 +254,7 @@ class Scanner:
                     snap.relative_path = rel
                     snap.file_mtime = fmtime
                     snap.probe_ok = True
-                except Exception:
+                except Exception as e:
                     snap = FileSnapshot(
                         library_folder_id=fid,
                         relative_path=rel,
@@ -262,6 +262,7 @@ class Scanner:
                         size_bytes=fsize,
                         file_mtime=fmtime,
                         probe_ok=False,
+                        probe_error=str(e)[:200],
                     )
                 return snap
 
@@ -349,7 +350,7 @@ class Scanner:
             snap.relative_path = rel_path
             snap.file_mtime = fmtime
             snap.probe_ok = True
-        except Exception:
+        except Exception as e:
             snap = FileSnapshot(
                 library_folder_id=folder_id,
                 relative_path=rel_path,
@@ -357,6 +358,7 @@ class Scanner:
                 size_bytes=file_size,
                 file_mtime=fmtime,
                 probe_ok=False,
+                probe_error=str(e)[:200],
             )
 
         self._repo.save(snap)
@@ -402,6 +404,7 @@ class Scanner:
                     size_bytes=file_size,
                     file_mtime=fmtime,
                     probe_ok=False,
+                    probe_error=str(e)[:200],
                 )
             self._repo.save(snap)
             if on_done:
