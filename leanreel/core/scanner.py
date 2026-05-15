@@ -295,12 +295,10 @@ class Scanner:
 
             existing = cached_dict.get(rel_path)
             if existing and existing.size_bytes == file_size and existing.file_mtime == file_mtime:
-                results.append(existing)
-                continue
-
-            if existing and not existing.probe_ok and existing.file_mtime == file_mtime:
-                results.append(existing)
-                continue
+                if existing.probe_ok:
+                    results.append(existing)
+                    continue
+                # probe_ok=False 但文件未变：仍需重新探测（之前可能因临时问题失败）
 
             placeholder = FileSnapshot(
                 library_folder_id=library_folder_id,
