@@ -1,7 +1,7 @@
 """策略匹配器测试"""
 import pytest
 from leanreel.core.strategy import Strategy, FilterRule
-from leanreel.core.matcher import Matcher, estimate_savings
+from leanreel.core.matcher import Matcher, estimate_savings, get_skip_reason
 from leanreel.data.models import FileSnapshot, HDRType
 
 @pytest.fixture
@@ -30,12 +30,27 @@ def strip_only():
     }
     return Strategy.from_dict(data)
 
-def test_match_skips_x265(balanced, strip_only):
+def test_match_skips_hevc_sources_completely(balanced, strip_only):
     matcher = Matcher([balanced, strip_only])
     snap = FileSnapshot(video_codec="hevc", size_bytes=50000000000)
     result = matcher.match(snap)
-    # balanced has skip_x265=True, so it should not match. Only strip_only matches.
-    assert result.name == "仅去冗余"
+    assert result is None
+    assert get_skip_reason(snap) == "跳过：HEVC/H.265 片源"
+
+
+@pytest.mark.parametrize("hdr_type", [HDRType.HDR10, HDRType.HDR10P, HDRType.DV_P5, HDRType.DV_P7, HDRType.DV_P8])
+def test_match_skips_hdr_and_dolby_vision_sources_completely(balanced, strip_only, hdr_type):
+    matcher = Matcher([balanced, strip_only])
+    snap = FileSnapshot(video_codec="h264", hdr_type=hdr_type, size_bytes=50000000000)
+
+    result = matcher.match(snap)
+
+    assert result is None
+    assert get_skip_reason(snap) in {
+        "跳过：HDR10 片源",
+        "跳过：HDR10+ 片源",
+        "跳过：Dolby Vision 片源",
+    }
 
 def test_match_x264_gets_balanced(balanced, strip_only):
     matcher = Matcher([balanced, strip_only])
@@ -103,7 +118,7 @@ def test_match_only_remux_filter_matches_large_legacy_codec():
 
 
 def test_match_only_remux_skips_modern_codecs():
-    """only_remux 跳过 hevc 文件，即使文件很大"""
+    """HEVC 文件即使很大也被安全闸门完全跳过。"""
     remux_strategy = Strategy.from_dict({
         "name": "REMUX专用", "is_preset": True,
         "video": {"encoder": "copy"},
@@ -120,7 +135,7 @@ def test_match_only_remux_skips_modern_codecs():
     })
     matcher = Matcher([remux_strategy, fallback])
     large_hevc = FileSnapshot(video_codec="hevc", size_bytes=50_000_000_000)
-    assert matcher.match(large_hevc).name == "兜底策略"
+    assert matcher.match(large_hevc) is None
 
 
 def test_match_min_size_gb_filter():

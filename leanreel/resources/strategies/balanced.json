@@ -1,6 +1,6 @@
 {
-  "name": "均衡压缩",
-  "description": "视觉无损，适合大多数场景。HDR10保留，DV回注RPU，音频原样保留。",
+  "name": "x265 HEVC CRF 20 标准转码",
+  "description": "CPU 软编码，体积和画质折中，适合多数 SDR H.264 片源。",
   "is_preset": true,
   "video": {"encoder": "libx265", "crf": 20, "preset": "slow", "pix_fmt": "yuv420p10le"},
   "hdr": {"mode": "preserve_hdr10", "dv_handling": "reinject_rpu"},
@@ -8,5 +8,5 @@
   "subtitle": {"mode": "keep_chinese"},
   "filters": {"skip_x265": true, "min_size_gb": null, "only_remux": false},
   "estimated_savings": "35-50%",
-  "quality_impact": "视觉无损，HDR/DV完整保留，音频原样保留"
+  "quality_impact": "通用质量，速度较慢，默认不处理 HEVC/HDR/DV 片源"
 }

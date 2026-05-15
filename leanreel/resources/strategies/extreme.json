@@ -1,6 +1,6 @@
 {
-  "name": "极限压缩",
-  "description": "最大化体积缩减。使用较高CRF，DV降级为HDR10以简化处理。去除非中文音轨和字幕。",
+  "name": "x265 HEVC CRF 22 高压缩转码",
+  "description": "CPU 软编码，更小体积，可能有轻微画质损失，仅建议 SDR 片源手动选择。",
   "is_preset": true,
   "video": {"encoder": "libx265", "crf": 22, "preset": "slow", "pix_fmt": "yuv420p10le"},
   "hdr": {"mode": "preserve_hdr10", "dv_handling": "degrade_to_hdr10"},
@@ -8,5 +8,5 @@
   "subtitle": {"mode": "keep_chinese"},
   "filters": {"skip_x265": false, "min_size_gb": null, "only_remux": false},
   "estimated_savings": "50-70%",
-  "quality_impact": "画质轻微可见损失（4K距离几乎不可察），DV降为HDR10"
+  "quality_impact": "高压缩，画质风险更高，默认不处理 HEVC/HDR/DV 片源"
 }

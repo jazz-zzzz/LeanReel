@@ -1,8 +1,9 @@
 """Application wiring helpers."""
 from pathlib import Path
+import json
 
 from leanreel.core.strategy import Strategy
-from leanreel.data.models import FileSnapshot
+from leanreel.data.models import FileSnapshot, HDRType
 from leanreel.executor.worker import EncodeTask
 from leanreel.data.models import TaskStatus
 from leanreel.main import build_encode_tasks, make_output_path, compute_encode_summary
@@ -12,6 +13,29 @@ def test_make_output_path_adds_suffix_without_overwriting_original():
     source = Path("C:/media/Movie.mkv")
 
     assert make_output_path(source) == Path("C:/media/Movie_SS.mkv")
+
+
+def test_get_strategies_dir_refreshes_builtin_strategy_files(monkeypatch, tmp_path):
+    import leanreel.main as main_mod
+
+    monkeypatch.setattr(main_mod, "get_data_dir", lambda: tmp_path)
+    user_dir = tmp_path / "strategies"
+    user_dir.mkdir()
+    (user_dir / "balanced.json").write_text(
+        '{"name": "均衡压缩", "is_preset": true}',
+        encoding="utf-8",
+    )
+    (user_dir / "my_custom.json").write_text(
+        '{"name": "我的自定义策略", "is_preset": false}',
+        encoding="utf-8",
+    )
+
+    strategies_dir = main_mod.get_strategies_dir()
+
+    balanced = json.loads((strategies_dir / "balanced.json").read_text(encoding="utf-8"))
+    custom = json.loads((strategies_dir / "my_custom.json").read_text(encoding="utf-8"))
+    assert balanced["name"] == "x265 HEVC CRF 20 标准转码"
+    assert custom["name"] == "我的自定义策略"
 
 
 def test_build_encode_tasks_uses_strategy_and_reconstructs_input_path():
@@ -81,6 +105,24 @@ def test_build_encode_tasks_skips_snapshots_with_unknown_folder():
 
     assert len(tasks) == 1
     assert tasks[0].file_name == "a.mkv"
+
+
+def test_build_encode_tasks_skips_hevc_and_hdr_sources_even_when_checked():
+    strategy = Strategy.from_dict({
+        "name": "x265 HEVC CRF 20 标准转码",
+        "video": {"encoder": "libx265"},
+        "filters": {},
+    })
+    snapshots = [
+        FileSnapshot(library_folder_id=7, relative_path="sdr-h264.mkv", file_name="sdr-h264.mkv", video_codec="h264"),
+        FileSnapshot(library_folder_id=7, relative_path="hevc.mkv", file_name="hevc.mkv", video_codec="hevc"),
+        FileSnapshot(library_folder_id=7, relative_path="hdr.mkv", file_name="hdr.mkv", video_codec="h264", hdr_type=HDRType.HDR10),
+        FileSnapshot(library_folder_id=7, relative_path="dv.mkv", file_name="dv.mkv", video_codec="h264", hdr_type=HDRType.DV_P7),
+    ]
+
+    tasks = build_encode_tasks(snapshots, {7: "D:/Movies"}, strategy)
+
+    assert [task.file_name for task in tasks] == ["sdr-h264.mkv"]
 
 
 def test_build_encode_tasks_returns_empty_list_for_empty_snapshots():

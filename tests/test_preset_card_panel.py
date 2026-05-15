@@ -127,22 +127,46 @@ class TestSetStrategies:
                 f"策略名称 '{s.name}' 未在任何卡片文本中找到: {button_texts}"
             )
 
-    def test_card_text_contains_descriptions(self, qtbot):
-        """卡片文本应包含非空描述"""
+    def test_description_label_shows_selected_strategy_description(self, qtbot):
+        """描述独立显示在 description_label 中，选中哪个策略就显示哪个的描述"""
         panel = PresetCardPanel()
         qtbot.addWidget(panel)
         strategies = _make_strategies()
 
         panel.set_strategies(strategies)
 
-        buttons = panel.card_group.buttons()
-        button_texts = [btn.text() for btn in buttons]
-        # 策略 0 和 1 有描述
-        for idx in [0, 1, 2]:
-            desc = strategies[idx].description
-            assert any(desc in text for text in button_texts), (
-                f"描述 '{desc}' 未在任何卡片文本中找到: {button_texts}"
+        # 默认选中第一个策略，描述标签应显示其描述
+        assert panel.description_label.isVisibleTo(panel)
+        assert "视觉无损" in panel.description_label.text(), (
+            f"描述标签应包含首个策略的描述: {panel.description_label.text()}"
+        )
+
+        # 点击第二个策略，描述标签应更新
+        panel.card_group.buttons()[1].click()
+        assert panel.description_label.isVisibleTo(panel)
+        assert "最大化压缩率" in panel.description_label.text(), (
+            f"描述标签应更新为第二个策略的描述: {panel.description_label.text()}"
+        )
+
+        # 描述不应出现在紧凑按钮文本中
+        button_texts = [btn.text() for btn in panel.card_group.buttons()]
+        for text in button_texts:
+            assert "视觉无损" not in text, (
+                f"描述不应出现在按钮文本中（应紧凑显示）: {text}"
             )
+
+    def test_description_label_hides_for_empty_description(self, qtbot):
+        """当选中策略无描述时，description_label 应隐藏"""
+        panel = PresetCardPanel()
+        qtbot.addWidget(panel)
+        no_desc_strategies = _make_strategies_distinct()  # 这些策略的 description 为空
+
+        panel.set_strategies(no_desc_strategies)
+        assert not panel.description_label.isVisibleTo(panel), "空描述时标签应隐藏"
+
+        # 点击另一个空描述策略，标签仍应隐藏
+        panel.card_group.buttons()[1].click()
+        assert not panel.description_label.isVisibleTo(panel)
 
     def test_card_text_contains_estimated_savings(self, qtbot):
         """卡片文本应包含预估节省信息"""

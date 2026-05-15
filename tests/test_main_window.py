@@ -281,6 +281,32 @@ def test_file_list_custom_strategy_option_emits_request_signal():
     panel.close()
 
 
+def test_file_list_does_not_select_skipped_sources_with_select_all():
+    from leanreel.data.models import FileSnapshot, HDRType
+    from leanreel.gui.file_list import FileListPanel, MatchResult
+
+    app = get_app()
+    panel = FileListPanel()
+    snapshots = [
+        FileSnapshot(relative_path="sdr.mkv", file_name="sdr.mkv", size_bytes=1024, video_codec="h264"),
+        FileSnapshot(relative_path="hevc.mkv", file_name="hevc.mkv", size_bytes=1024, video_codec="hevc"),
+        FileSnapshot(relative_path="hdr.mkv", file_name="hdr.mkv", size_bytes=1024, video_codec="h264", hdr_type=HDRType.HDR10),
+    ]
+    matches = {
+        "sdr.mkv": MatchResult(strategy="x265 HEVC CRF 20 标准转码", estimate={"percentage": "35-50%"}),
+        "hevc.mkv": MatchResult(strategy="跳过：HEVC/H.265 片源"),
+        "hdr.mkv": MatchResult(strategy="跳过：HDR10 片源"),
+    }
+
+    panel.populate(snapshots, matches)
+    panel.select_all()
+
+    assert panel.get_checked_relative_paths() == ["sdr.mkv"]
+    assert not (panel.table.item(1, 0).flags() & Qt.ItemIsEnabled)
+    assert not (panel.table.item(2, 0).flags() & Qt.ItemIsEnabled)
+    panel.close()
+
+
 def test_file_list_can_update_row_with_custom_strategy():
     from leanreel.core.strategy import Strategy
     from leanreel.data.models import FileSnapshot

@@ -3,14 +3,40 @@ from leanreel.data.models import FileSnapshot, HDRType
 from leanreel.core.strategy import Strategy
 
 
+PROTECTED_CODECS = {"hevc", "h265"}
+PROTECTED_HDR_TYPES = {HDRType.HDR10, HDRType.HDR10P, HDRType.DV_P5, HDRType.DV_P7, HDRType.DV_P8}
+
+
+def is_protected_source(snapshot: FileSnapshot) -> bool:
+    """HEVC/H.265 和 HDR/Dolby Vision 被视为优质片源，默认完全不处理。"""
+    return get_skip_reason(snapshot) is not None
+
+
+def get_skip_reason(snapshot: FileSnapshot) -> str | None:
+    codec = (snapshot.video_codec or "").lower()
+    if codec in PROTECTED_CODECS:
+        return "跳过：HEVC/H.265 片源"
+
+    hdr_type = snapshot.hdr_type
+    if hdr_type not in PROTECTED_HDR_TYPES:
+        return None
+    if hdr_type == HDRType.HDR10:
+        return "跳过：HDR10 片源"
+    if hdr_type == HDRType.HDR10P:
+        return "跳过：HDR10+ 片源"
+    return "跳过：Dolby Vision 片源"
+
+
 class Matcher:
     """策略匹配器"""
 
     def __init__(self, strategies: list[Strategy]):
         self.strategies = strategies
 
-    def match(self, snapshot: FileSnapshot) -> Strategy:
+    def match(self, snapshot: FileSnapshot) -> Strategy | None:
         """为给定文件匹配最佳策略"""
+        if is_protected_source(snapshot):
+            return None
         for strategy in self.strategies:
             if self._check_filters(snapshot, strategy):
                 return strategy

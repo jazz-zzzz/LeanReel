@@ -187,8 +187,8 @@ class TestEncodingControllerStart:
         assert result is True
         # 验证队列被清空
         mock_queue_panel.clear_tasks.assert_called_once()
-        # 验证所有任务行被添加（3 个快照 -> 3 个任务）
-        assert mock_queue_panel.add_task_row.call_count == 3
+        # HEVC/H.265 优质片源默认完全跳过，3 个快照 -> 2 个任务
+        assert mock_queue_panel.add_task_row.call_count == 2
         # 验证队列被显示
         mock_win.show_queue.assert_called_once()
         # 验证 FFmpegExecutor 用正确的 temp_dir 创建
@@ -220,8 +220,8 @@ class TestEncodingControllerStart:
         result = controller.start(sample_snapshots, sample_folder_paths, overrides)
 
         assert result is True
-        # add_task_row 被调用 3 次
-        assert mock_queue_panel.add_task_row.call_count == 3
+        # HEVC/H.265 优质片源默认完全跳过
+        assert mock_queue_panel.add_task_row.call_count == 2
 
         # 提取所有添加的任务
         added_tasks = [
@@ -230,15 +230,13 @@ class TestEncodingControllerStart:
         # 按文件名查找
         tasks_by_name = {t.file_name: t for t in added_tasks}
         assert "Action.mkv" in tasks_by_name
-        assert "Comedy.mkv" in tasks_by_name
+        assert "Comedy.mkv" not in tasks_by_name
         assert "Drama.mkv" in tasks_by_name
 
         # Action.mkv 使用了覆盖策略
         assert tasks_by_name["Action.mkv"].strategy_name == "高质量压缩"
         assert tasks_by_name["Action.mkv"].strategy is hq_strategy
-        # Comedy.mkv 和 Drama.mkv 使用默认策略
-        assert tasks_by_name["Comedy.mkv"].strategy_name == "均衡压缩"
-        assert tasks_by_name["Comedy.mkv"].strategy is default_strategy
+        # Drama.mkv 使用默认策略
         assert tasks_by_name["Drama.mkv"].strategy_name == "均衡压缩"
 
     def test_start_returns_false_when_already_encoding(self, controller, sample_snapshots, sample_folder_paths):
