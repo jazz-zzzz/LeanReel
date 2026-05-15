@@ -386,3 +386,313 @@ def test_ffmpeg_executor_dovi_cleanup_rpu_on_failure(monkeypatch, tmp_path):
     # RPU 临时文件应该被清理
     rpu_files = list(temp_dir.glob("*.rpu"))
     assert len(rpu_files) == 0
+
+
+# ============================================================
+# A. run_ffmpeg() 单元测试（mock subprocess.Popen）
+# ============================================================
+
+def test_run_ffmpeg_returns_exit_code_and_stderr_tail():
+    """Mock Popen 返回 exit_code=0, stderr="" — 验证返回 (0, "") 且 Popen 参数正确"""
+    from unittest.mock import patch, MagicMock
+    import subprocess
+    from leanreel.executor.ffmpeg_builder import run_ffmpeg
+
+    mock_proc = MagicMock()
+    mock_proc.stderr = []
+    mock_proc.wait.return_value = 0
+
+    cmd = ["ffmpeg", "-i", "input.mkv", "-c:v", "libx265", "output.mkv"]
+    with patch("leanreel.executor.ffmpeg_builder.subprocess.Popen", return_value=mock_proc) as mock_popen:
+        exit_code, stderr_tail = run_ffmpeg(cmd)
+
+    assert exit_code == 0
+    assert stderr_tail == ""
+
+    # TDD 规则: mock 必须验证调用参数
+    mock_popen.assert_called_once_with(
+        cmd,
+        stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
+    )
+    mock_proc.wait.assert_called_once()
+
+
+def test_run_ffmpeg_captures_stderr_tail():
+    """Mock Popen 返回 30 行 stderr — 验证只返回最后 20 行"""
+    from unittest.mock import patch, MagicMock
+    import subprocess
+    from leanreel.executor.ffmpeg_builder import run_ffmpeg
+
+    # 30 行 stderr（非平凡数据，非空值）
+    stderr_30_lines = [f"ffmpeg log line #{i}\n" for i in range(1, 31)]
+    mock_proc = MagicMock()
+    mock_proc.stderr = stderr_30_lines
+    mock_proc.wait.return_value = 1
+
+    cmd = ["ffmpeg", "-i", "input.mkv", "output.mkv"]
+    with patch("leanreel.executor.ffmpeg_builder.subprocess.Popen", return_value=mock_proc) as mock_popen:
+        exit_code, stderr_tail = run_ffmpeg(cmd)
+
+    assert exit_code == 1
+    # 只有最后 20 行
+    expected_tail = "".join(stderr_30_lines[-20:])
+    assert stderr_tail == expected_tail
+    # 前 10 行（索引 0-9）不应出现在尾部
+    # 使用换行符锚定精确行，避免 "line #1" 误匹配 "line #11"
+    for i in range(1, 11):
+        assert f"ffmpeg log line #{i}\n" not in stderr_tail, f"line #{i} should not be in tail"
+    # 最后一行应在尾部
+    assert "ffmpeg log line #30\n" in stderr_tail
+
+    mock_popen.assert_called_once_with(
+        cmd,
+        stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
+    )
+
+
+def test_run_ffmpeg_passes_timeout_to_communicate():
+    """验证 Popen 参数和 progress_callback 被触发（仅 time= 行）"""
+    from unittest.mock import patch, MagicMock
+    import subprocess
+    from leanreel.executor.ffmpeg_builder import run_ffmpeg
+
+    # 混合 stderr：有些行含 time=，有些不含
+    stderr_lines = [
+        "ffmpeg version n7.0.2\n",
+        "frame=   50 fps= 25 time=00:00:02.00 bitrate=5000kbits/s\n",
+        "[libx265] starting encode\n",
+        "frame=  100 fps= 25 time=00:00:04.00 bitrate=4800kbits/s\n",
+    ]
+    mock_proc = MagicMock()
+    mock_proc.stderr = stderr_lines
+    mock_proc.wait.return_value = 0
+
+    progress_records = []
+    def progress_cb(line):
+        progress_records.append(line)
+
+    cmd = ["ffmpeg", "-i", "input.mkv", "-c:v", "libx265", "output.mkv"]
+    with patch("leanreel.executor.ffmpeg_builder.subprocess.Popen", return_value=mock_proc) as mock_popen:
+        run_ffmpeg(cmd, progress_callback=progress_cb)
+
+    # 验证 Popen 调用参数
+    mock_popen.assert_called_once_with(
+        cmd,
+        stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
+    )
+    mock_proc.wait.assert_called_once()
+
+    # 只有含 "time=" 的行触发回调
+    assert len(progress_records) == 2
+    assert "time=00:00:02.00" in progress_records[0]
+    assert "time=00:00:04.00" in progress_records[1]
+    # 不含 "time=" 的行不应出现在回调中
+    assert not any("ffmpeg version" in rec for rec in progress_records)
+    assert not any("[libx265]" in rec for rec in progress_records)
+
+
+def test_run_ffmpeg_handles_missing_executable():
+    """mock subprocess.Popen 抛出 FileNotFoundError — 验证转为 RuntimeError"""
+    from unittest.mock import patch
+    from leanreel.executor.ffmpeg_builder import run_ffmpeg
+
+    with patch("leanreel.executor.ffmpeg_builder.subprocess.Popen",
+               side_effect=FileNotFoundError("ffmpeg not found")):
+        with pytest.raises(RuntimeError, match="ffmpeg"):
+            run_ffmpeg(["nonexistent_ffmpeg", "-i", "in.mkv", "out.mkv"])
+
+
+# ============================================================
+# B. get_ffmpeg_path / set_ffmpeg_path 测试
+# ============================================================
+
+def test_get_ffmpeg_path_returns_default():
+    """重置全局状态后 get_ffmpeg_path 返回非空字符串（默认或内置路径）"""
+    import leanreel.executor.ffmpeg_builder as fb
+
+    # 重置为初始状态
+    fb._FFMPEG_PATH = None
+    result = fb.get_ffmpeg_path()
+    # 应返回内置 ffmpeg.exe 路径或 "ffmpeg" 回退
+    assert isinstance(result, str) and len(result) > 0
+
+
+def test_set_ffmpeg_path_overrides_and_get_returns_it():
+    """set_ffmpeg_path 后 get_ffmpeg_path 返回设置值"""
+    import leanreel.executor.ffmpeg_builder as fb
+
+    custom = "C:\\tools\\ffmpeg.exe"
+    try:
+        fb.set_ffmpeg_path(custom)
+        assert fb.get_ffmpeg_path() == custom
+    finally:
+        # 恢复初始状态，避免影响其他测试
+        fb._FFMPEG_PATH = None
+
+
+# ============================================================
+# C. HDR10+ 动态元数据参数测试
+# ============================================================
+
+def test_build_hdr10plus_preserves_dynamic_metadata():
+    """HDR10+ snapshot 的 hdr_type=HDR10P — 验证命令包含 -hdr10+ 且包含色彩元数据"""
+    from leanreel.core.strategy import Strategy
+
+    strategy = Strategy.from_dict({
+        "name": "HDR10+测试", "is_preset": False,
+        "video": {"encoder": "libx265", "crf": 18, "preset": "slow", "pix_fmt": "yuv420p10le"},
+        "hdr": {"mode": "preserve_hdr10"},
+        "audio": {"mode": "keep_original"},
+        "subtitle": {"mode": "keep_all"},
+        "filters": {},
+    })
+    snap = FileSnapshot(
+        video_codec="hevc", hdr_type=HDRType.HDR10P,
+        video_width=3840, video_height=2160,
+    )
+    cmd = FFmpegBuilder.build(snap, strategy, "hdr10p_sample.mkv", "output.mkv")
+    joined = " ".join(cmd)
+
+    # HDR10+ 动态元数据标志
+    assert "-hdr10+" in cmd
+    assert "-color_primaries bt2020" in joined
+    assert "-color_trc smpte2084" in joined
+    assert "-colorspace bt2020nc" in joined
+
+
+def test_build_hdr10plus_with_copy_encoder():
+    """验证 copy 编码器 + HDR10P 不会产生 -hdr10+ 标志（copy 模式不触发 HDR 逻辑）"""
+    from leanreel.core.strategy import Strategy
+
+    strategy = Strategy.from_dict({
+        "name": "copy模式", "is_preset": False,
+        "video": {"encoder": "copy"},
+        "hdr": {"mode": "preserve_hdr10"},
+        "audio": {"mode": "keep_original"},
+        "subtitle": {"mode": "keep_all"},
+        "filters": {},
+    })
+    snap = FileSnapshot(
+        video_codec="hevc", hdr_type=HDRType.HDR10P,
+        video_width=3840, video_height=2160,
+    )
+    cmd = FFmpegBuilder.build(snap, strategy, "hdr10p_copy.mkv", "output.mkv")
+    joined = " ".join(cmd)
+
+    # copy 模式不加 -hdr10+ 或色彩元数据
+    assert "-hdr10+" not in cmd
+    assert "-color_primaries" not in joined
+
+
+# ============================================================
+# D. GPU (NVENC) + HDR10 组合测试
+# ============================================================
+
+def test_build_nvenc_with_hdr10_preserves_color_info():
+    """NVENC 编码器 + HDR10 snapshot — 验证色彩元数据完整且无 -crf"""
+    from leanreel.core.strategy import Strategy
+
+    strategy = Strategy.from_dict({
+        "name": "NVENC HDR10", "is_preset": False,
+        "video": {"encoder": "hevc_nvenc", "gpu": True, "nv_preset": "p1",
+                   "rc": "vbr", "cq": 26},
+        "hdr": {"mode": "preserve_hdr10"},
+        "audio": {"mode": "keep_original"},
+        "subtitle": {"mode": "keep_all"},
+        "filters": {},
+    })
+    snap = FileSnapshot(
+        video_codec="hevc", hdr_type=HDRType.HDR10,
+        video_width=3840, video_height=2160,
+    )
+    cmd = FFmpegBuilder.build(snap, strategy, "hdr10_sample.mkv", "output.mkv")
+    joined = " ".join(cmd)
+
+    # NVENC 编码器参数
+    assert "-c:V" in cmd and "hevc_nvenc" in cmd
+    assert "-preset" in cmd and "p1" in cmd
+    assert "-rc" in cmd and "vbr" in cmd
+    assert "-cq" in cmd and "26" in cmd
+    # NVENC 不应有 -crf
+    assert "-crf" not in cmd
+    # HDR10 色彩元数据
+    assert "-color_primaries bt2020" in joined
+    assert "-color_trc smpte2084" in joined
+    assert "-colorspace bt2020nc" in joined
+    # HDR10（非 HDR10+）不应有 -hdr10+
+    assert "-hdr10+" not in cmd
+
+
+def test_build_nvenc_with_hdr10plus_preserves_color_and_dynamic_metadata():
+    """NVENC 编码器 + HDR10+ snapshot — 验证同时有色彩元数据和 -hdr10+"""
+    from leanreel.core.strategy import Strategy
+
+    strategy = Strategy.from_dict({
+        "name": "NVENC HDR10+", "is_preset": False,
+        "video": {"encoder": "hevc_nvenc", "gpu": True, "nv_preset": "p1",
+                   "rc": "vbr", "cq": 26},
+        "hdr": {"mode": "preserve_hdr10"},
+        "audio": {"mode": "keep_original"},
+        "subtitle": {"mode": "keep_all"},
+        "filters": {},
+    })
+    snap = FileSnapshot(
+        video_codec="hevc", hdr_type=HDRType.HDR10P,
+        video_width=3840, video_height=2160,
+    )
+    cmd = FFmpegBuilder.build(snap, strategy, "hdr10plus_gpu.mkv", "output.mkv")
+    joined = " ".join(cmd)
+
+    # NVENC 参数
+    assert "-c:V" in cmd and "hevc_nvenc" in cmd
+    # HDR10+ 特有: -hdr10+
+    assert "-hdr10+" in cmd
+    # HDR 色彩元数据
+    assert "-color_primaries bt2020" in joined
+    assert "-color_trc smpte2084" in joined
+    assert "-colorspace bt2020nc" in joined
+
+
+def test_build_nvenc_with_sdr_no_hdr_flags():
+    """NVENC 编码器 + SDR snapshot — 验证不产生任何 HDR 标志"""
+    from leanreel.core.strategy import Strategy
+
+    strategy = Strategy.from_dict({
+        "name": "NVENC SDR", "is_preset": False,
+        "video": {"encoder": "hevc_nvenc", "gpu": True, "nv_preset": "p1",
+                   "rc": "vbr", "cq": 23},
+        "hdr": {"mode": "preserve_hdr10"},
+        "audio": {"mode": "keep_original"},
+        "subtitle": {"mode": "keep_all"},
+        "filters": {},
+    })
+    snap = FileSnapshot(
+        video_codec="h264", hdr_type=HDRType.SDR,
+        video_width=1920, video_height=1080,
+    )
+    cmd = FFmpegBuilder.build(snap, strategy, "sdr_sample.mkv", "output.mkv")
+    joined = " ".join(cmd)
+
+    assert "-c:V" in cmd and "hevc_nvenc" in cmd
+    assert "-color_primaries" not in joined
+    assert "-color_trc" not in joined
+    assert "-colorspace" not in joined
+    assert "-hdr10+" not in cmd
+
+
+# ============================================================
+# E. DV_P5 和 DV_P8 的 HDRType 枚举测试
+# ============================================================
+
+def test_dv_p5_enum_value():
+    """确认 HDRType.DV_P5.value == "DV_P5" """
+    assert HDRType.DV_P5.value == "DV_P5"
+    assert isinstance(HDRType.DV_P5, HDRType)
+    assert HDRType.DV_P5 != HDRType.DV_P7
+
+
+def test_dv_p8_enum_value():
+    """确认 HDRType.DV_P8.value == "DV_P8" """
+    assert HDRType.DV_P8.value == "DV_P8"
+    assert isinstance(HDRType.DV_P8, HDRType)
+    assert HDRType.DV_P8 != HDRType.DV_P7

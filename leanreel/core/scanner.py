@@ -7,16 +7,177 @@ from pathlib import Path
 from typing import Optional, Callable
 
 from leanreel.data.database import Database
-from leanreel.data.models import AudioTrack, FileSnapshot, SubtitleTrack
+from leanreel.data.models import AudioTrack, FileSnapshot, HDRType, SubtitleTrack
 
 VIDEO_EXTENSIONS = {".mkv", ".mp4", ".avi", ".ts", ".mov", ".wmv", ".m2ts", ".mts"}
 
 
+def find_video_files(folder_path: str) -> list[tuple[str, str]]:
+    """递归查找所有视频文件，使用 scandir 加速。
+
+    返回 [(relative_path, absolute_path), ...]
+    """
+    results: list[tuple[str, str]] = []
+    folder_path = os.path.normpath(folder_path)
+
+    def _walk(current: str):
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    if entry.is_dir(follow_symlinks=False):
+                        _walk(entry.path)
+                    elif entry.is_file(follow_symlinks=False):
+                        ext = os.path.splitext(entry.name)[1].lower()
+                        if ext in VIDEO_EXTENSIONS:
+                            rel_path = os.path.relpath(entry.path, folder_path)
+                            results.append((rel_path, entry.path))
+        except OSError:
+            pass
+
+    _walk(folder_path)
+    return results
+
+
+class SnapshotRepository:
+    """快照持久层：负责 FileSnapshot 的 JSON 序列化/反序列化与 SQLite 读写。
+
+    将数据转换和存储逻辑从 Scanner 中分离出来，保持单一职责。
+    """
+
+    def __init__(self, db: Database):
+        self._db = db
+
+    # ── 查询 ──
+
+    def load_all(self, library_folder_id: int) -> list[FileSnapshot]:
+        """从数据库加载某个目录下的全部已缓存快照。"""
+        rows = self._db.execute(
+            "SELECT * FROM file_snapshot WHERE library_folder_id=? ORDER BY relative_path",
+            [library_folder_id],
+        )
+        return [self._row_to_snapshot(r) for r in rows]
+
+    def get_cached(self, folder_id: int, rel_path: str) -> Optional[FileSnapshot]:
+        """按目录+相对路径查询单条缓存快照，未命中返回 None。"""
+        rows = self._db.execute(
+            "SELECT * FROM file_snapshot WHERE library_folder_id=? AND relative_path=?",
+            [folder_id, rel_path],
+        )
+        if not rows:
+            return None
+        return self._row_to_snapshot(rows[0])
+
+    # ── 写入 ──
+
+    def save(self, snap: FileSnapshot):
+        """插入或更新快照记录（ON CONFLICT upsert）。"""
+        self._db.execute(
+            """INSERT INTO file_snapshot
+               (library_folder_id, relative_path, file_name, size_bytes,
+                video_codec, video_width, video_height, hdr_type,
+                audio_tracks, subtitle_tracks, duration_seconds, bitrate_bps,
+                file_mtime, probe_ok)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(library_folder_id, relative_path) DO UPDATE SET
+               size_bytes=excluded.size_bytes, video_codec=excluded.video_codec,
+               video_width=excluded.video_width, video_height=excluded.video_height,
+               hdr_type=excluded.hdr_type, audio_tracks=excluded.audio_tracks,
+               subtitle_tracks=excluded.subtitle_tracks,
+               duration_seconds=excluded.duration_seconds, bitrate_bps=excluded.bitrate_bps,
+               file_mtime=excluded.file_mtime, probe_ok=excluded.probe_ok,
+               scanned_at=datetime('now')""",
+            [
+                snap.library_folder_id,
+                snap.relative_path,
+                snap.file_name,
+                snap.size_bytes,
+                snap.video_codec,
+                snap.video_width,
+                snap.video_height,
+                snap.hdr_type.value,
+                self._serialize_audio_tracks(snap.audio_tracks),
+                self._serialize_subtitle_tracks(snap.subtitle_tracks),
+                snap.duration_seconds,
+                snap.bitrate_bps,
+                snap.file_mtime,
+                1 if snap.probe_ok else 0,
+            ],
+        )
+
+    # ── 行 → 模型 ──
+
+    def _row_to_snapshot(self, row: dict) -> FileSnapshot:
+        return FileSnapshot(
+            id=row["id"],
+            library_folder_id=row["library_folder_id"],
+            relative_path=row["relative_path"],
+            file_name=row["file_name"],
+            size_bytes=row["size_bytes"],
+            video_codec=row["video_codec"],
+            video_width=row["video_width"],
+            video_height=row["video_height"],
+            hdr_type=HDRType(row["hdr_type"]),
+            audio_tracks=self._deserialize_audio_tracks(row["audio_tracks"]),
+            subtitle_tracks=self._deserialize_subtitle_tracks(row["subtitle_tracks"]),
+            duration_seconds=row["duration_seconds"],
+            bitrate_bps=row["bitrate_bps"],
+            file_mtime=row.get("file_mtime", 0.0),
+            probe_ok=bool(row.get("probe_ok", 0)),
+        )
+
+    # ── JSON 序列化 ──
+
+    def _serialize_audio_tracks(self, tracks: list[AudioTrack]) -> str:
+        return json.dumps([asdict(track) for track in tracks], ensure_ascii=False)
+
+    def _serialize_subtitle_tracks(self, tracks: list[SubtitleTrack]) -> str:
+        return json.dumps([asdict(track) for track in tracks], ensure_ascii=False)
+
+    # ── JSON 反序列化 ──
+
+    def _deserialize_audio_tracks(self, raw: str) -> list[AudioTrack]:
+        return [
+            AudioTrack(
+                codec=item.get("codec", ""),
+                channels=item.get("channels", 0),
+                language=item.get("language", ""),
+                title=item.get("title", ""),
+                is_commentary=item.get("is_commentary", False),
+            )
+            for item in self._load_track_json(raw)
+        ]
+
+    def _deserialize_subtitle_tracks(self, raw: str) -> list[SubtitleTrack]:
+        return [
+            SubtitleTrack(
+                codec=item.get("codec", ""),
+                language=item.get("language", ""),
+                title=item.get("title", ""),
+                is_forced=item.get("is_forced", False),
+            )
+            for item in self._load_track_json(raw)
+        ]
+
+    def _load_track_json(self, raw: str) -> list[dict]:
+        if not raw:
+            return []
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(data, list):
+            return []
+        return [item for item in data if isinstance(item, dict)]
+
+
 class Scanner:
-    """文件夹扫描器：递归发现视频文件，调用 FFprobe 提取元数据，结果缓存至 SQLite"""
+    """文件夹扫描器门面：编排文件发现、FFprobe 探测与缓存，对外 API 不变。
+
+    内部将数据持久化委托给 SnapshotRepository，将文件发现委托给模块级函数。
+    """
 
     def __init__(self, db: Database, probe_runner=None, max_workers: int = 4):
-        self.db = db
+        self._repo = SnapshotRepository(db)
         self._probe = probe_runner
         self.max_workers = max(1, max_workers)
         self._probe_lock = threading.Lock()
@@ -25,23 +186,20 @@ class Scanner:
     def _get_probe(self):
         if self._probe is None:
             from leanreel.executor.probe import FFprobeRunner
+
             self._probe = FFprobeRunner()
         return self._probe
 
     def load_cached(self, library_folder_id: int, folder_path: str) -> list[FileSnapshot]:
         """从数据库加载已缓存的快照列表，不走文件系统。毫秒级。"""
-        rows = self.db.execute(
-            "SELECT * FROM file_snapshot WHERE library_folder_id=? ORDER BY relative_path",
-            [library_folder_id]
-        )
-        return [self._row_to_snapshot(r) for r in rows]
+        return self._repo.load_all(library_folder_id)
 
     def scan_folder(self, library_folder_id: int, folder_path: str) -> list[FileSnapshot]:
         """同步扫描（向后兼容）：并行探测所有未缓存文件，返回最终结果。"""
         from concurrent.futures import ThreadPoolExecutor
 
         folder_path = os.path.normpath(folder_path)
-        found_files = self._find_video_files(folder_path)
+        found_files = find_video_files(folder_path)
         results = []
         probe_jobs = []
 
@@ -52,7 +210,7 @@ class Scanner:
             except OSError:
                 file_size, file_mtime = 0, 0.0
 
-            existing = self._get_cached_snapshot(library_folder_id, rel_path)
+            existing = self._repo.get_cached(library_folder_id, rel_path)
             if existing and existing.size_bytes == file_size and existing.file_mtime == file_mtime:
                 results.append(existing)
                 continue
@@ -90,7 +248,7 @@ class Scanner:
                     probed = list(pool.map(_run, probe_jobs))
 
             for snap in probed:
-                self._upsert_snapshot(snap)
+                self._repo.save(snap)
             results.extend(probed)
 
         return results
@@ -101,7 +259,7 @@ class Scanner:
         需要 ffprobe 的文件排队到后台，调用 probe_next() 逐个补全。
         """
         folder_path = os.path.normpath(folder_path)
-        found_files = self._find_video_files(folder_path)
+        found_files = find_video_files(folder_path)
         results: list[FileSnapshot] = []
         pending: list[tuple[int, str, str, int]] = []
 
@@ -112,7 +270,7 @@ class Scanner:
             except OSError:
                 file_size, file_mtime = 0, 0.0
 
-            existing = self._get_cached_snapshot(library_folder_id, rel_path)
+            existing = self._repo.get_cached(library_folder_id, rel_path)
             if existing and existing.size_bytes == file_size and existing.file_mtime == file_mtime:
                 results.append(existing)
                 continue
@@ -174,68 +332,17 @@ class Scanner:
                 probe_ok=False,
             )
 
-        self._upsert_snapshot(snap)
+        self._repo.save(snap)
         if on_done:
             on_done(snap)
         return self.pending_count > 0
 
-    def _find_video_files(self, folder_path: str) -> list[tuple[str, str]]:
-        """递归查找所有视频文件，使用 scandir 加速"""
-        results: list[tuple[str, str]] = []
-        folder_path = os.path.normpath(folder_path)
-
-        def _walk(current: str):
-            try:
-                with os.scandir(current) as entries:
-                    for entry in entries:
-                        if entry.is_dir(follow_symlinks=False):
-                            _walk(entry.path)
-                        elif entry.is_file(follow_symlinks=False):
-                            ext = os.path.splitext(entry.name)[1].lower()
-                            if ext in VIDEO_EXTENSIONS:
-                                rel_path = os.path.relpath(entry.path, folder_path)
-                                results.append((rel_path, entry.path))
-            except OSError:
-                pass
-
-        _walk(folder_path)
-        return results
-
-    def _get_cached_snapshot(self, folder_id: int, rel_path: str) -> Optional[FileSnapshot]:
-        rows = self.db.execute(
-            "SELECT * FROM file_snapshot WHERE library_folder_id=? AND relative_path=?",
-            [folder_id, rel_path]
-        )
-        if not rows:
-            return None
-        return self._row_to_snapshot(rows[0])
-
-    def _upsert_snapshot(self, snap: FileSnapshot):
-        self.db.execute(
-            """INSERT INTO file_snapshot
-               (library_folder_id, relative_path, file_name, size_bytes,
-                video_codec, video_width, video_height, hdr_type,
-                audio_tracks, subtitle_tracks, duration_seconds, bitrate_bps,
-                file_mtime, probe_ok)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-               ON CONFLICT(library_folder_id, relative_path) DO UPDATE SET
-               size_bytes=excluded.size_bytes, video_codec=excluded.video_codec,
-               video_width=excluded.video_width, video_height=excluded.video_height,
-               hdr_type=excluded.hdr_type, audio_tracks=excluded.audio_tracks,
-               subtitle_tracks=excluded.subtitle_tracks,
-               duration_seconds=excluded.duration_seconds, bitrate_bps=excluded.bitrate_bps,
-               file_mtime=excluded.file_mtime, probe_ok=excluded.probe_ok,
-               scanned_at=datetime('now')""",
-            [snap.library_folder_id, snap.relative_path, snap.file_name,
-             snap.size_bytes, snap.video_codec, snap.video_width, snap.video_height,
-             snap.hdr_type.value,
-             self._serialize_audio_tracks(snap.audio_tracks),
-             self._serialize_subtitle_tracks(snap.subtitle_tracks),
-             snap.duration_seconds, snap.bitrate_bps,
-             snap.file_mtime, 1 if snap.probe_ok else 0]
-        )
-
-    def start_background_probe(self, on_done: Callable[[FileSnapshot], None], on_finished: Callable[[], None] | None = None, on_progress: Callable[[], None] | None = None):
+    def start_background_probe(
+        self,
+        on_done: Callable[[FileSnapshot], None],
+        on_finished: Callable[[], None] | None = None,
+        on_progress: Callable[[], None] | None = None,
+    ):
         """在后台线程池并行探测所有待处理文件，每个完成后回调 on_done（在探测线程调用）"""
         import concurrent.futures
 
@@ -266,7 +373,7 @@ class Scanner:
                         file_mtime=fmtime,
                         probe_ok=False,
                     )
-                self._upsert_snapshot(snap)
+                self._repo.save(snap)
                 if on_done:
                     on_done(snap)
                 if on_progress:
@@ -283,58 +390,3 @@ class Scanner:
         t = threading.Thread(target=_run, daemon=True)
         t.start()
         return t
-
-    def _row_to_snapshot(self, row: dict) -> FileSnapshot:
-        from leanreel.data.models import HDRType
-        return FileSnapshot(
-            id=row["id"], library_folder_id=row["library_folder_id"],
-            relative_path=row["relative_path"], file_name=row["file_name"],
-            size_bytes=row["size_bytes"], video_codec=row["video_codec"],
-            video_width=row["video_width"], video_height=row["video_height"],
-            hdr_type=HDRType(row["hdr_type"]),
-            audio_tracks=self._deserialize_audio_tracks(row["audio_tracks"]),
-            subtitle_tracks=self._deserialize_subtitle_tracks(row["subtitle_tracks"]),
-            duration_seconds=row["duration_seconds"], bitrate_bps=row["bitrate_bps"],
-            file_mtime=row.get("file_mtime", 0.0),
-            probe_ok=bool(row.get("probe_ok", 0)),
-        )
-
-    def _serialize_audio_tracks(self, tracks: list[AudioTrack]) -> str:
-        return json.dumps([asdict(track) for track in tracks], ensure_ascii=False)
-
-    def _serialize_subtitle_tracks(self, tracks: list[SubtitleTrack]) -> str:
-        return json.dumps([asdict(track) for track in tracks], ensure_ascii=False)
-
-    def _deserialize_audio_tracks(self, raw: str) -> list[AudioTrack]:
-        return [
-            AudioTrack(
-                codec=item.get("codec", ""),
-                channels=item.get("channels", 0),
-                language=item.get("language", ""),
-                title=item.get("title", ""),
-                is_commentary=item.get("is_commentary", False),
-            )
-            for item in self._load_track_json(raw)
-        ]
-
-    def _deserialize_subtitle_tracks(self, raw: str) -> list[SubtitleTrack]:
-        return [
-            SubtitleTrack(
-                codec=item.get("codec", ""),
-                language=item.get("language", ""),
-                title=item.get("title", ""),
-                is_forced=item.get("is_forced", False),
-            )
-            for item in self._load_track_json(raw)
-        ]
-
-    def _load_track_json(self, raw: str) -> list[dict]:
-        if not raw:
-            return []
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            return []
-        if not isinstance(data, list):
-            return []
-        return [item for item in data if isinstance(item, dict)]

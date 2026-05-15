@@ -38,7 +38,7 @@ def test_main_window_has_status_bar():
 def test_file_list_displays_codec_strategy_and_estimated_savings():
     from leanreel.core.strategy import Strategy
     from leanreel.data.models import FileSnapshot, HDRType
-    from leanreel.gui.file_list import FileListPanel
+    from leanreel.gui.file_list import FileListPanel, MatchResult
 
     app = get_app()
     panel = FileListPanel()
@@ -51,7 +51,7 @@ def test_file_list_displays_codec_strategy_and_estimated_savings():
         hdr_type=HDRType.HDR10P,
     )
 
-    panel.populate([snap], {"movie.mkv": strategy})
+    panel.populate([snap], {"movie.mkv": MatchResult(strategy=strategy)})
 
     assert panel.table.item(0, 2).text() == "h264"
     assert panel.table.item(0, 3).text() == "HDR10+"
@@ -74,7 +74,7 @@ def test_file_list_shows_unknown_when_codec_missing():
         video_codec="",
     )
 
-    panel.populate([snap], {"clip.mkv": "未匹配"})
+    panel.populate([snap], {"clip.mkv": None})
 
     assert panel.table.item(0, 2).text() == "未识别"
     panel.close()
@@ -97,14 +97,14 @@ def test_file_list_columns_are_user_resizable():
 def test_strategy_combo_has_enough_width_to_avoid_text_overlap():
     from leanreel.core.strategy import Strategy
     from leanreel.data.models import FileSnapshot
-    from leanreel.gui.file_list import FileListPanel
+    from leanreel.gui.file_list import FileListPanel, MatchResult
 
     app = get_app()
     panel = FileListPanel()
     strategy = Strategy(name="均衡压缩", estimated_savings="35-50%")
     snap = FileSnapshot(relative_path="movie.mkv", file_name="movie.mkv", size_bytes=10 * 1024**3)
 
-    panel.populate([snap], {"movie.mkv": strategy}, strategies=[strategy])
+    panel.populate([snap], {"movie.mkv": MatchResult(strategy=strategy)}, strategies=[strategy])
     combo = panel.table.cellWidget(0, 4)
 
     assert combo.minimumWidth() >= 140
@@ -143,7 +143,7 @@ def test_file_list_can_switch_between_flat_and_tree_modes():
 
 def test_file_list_sorts_size_and_estimated_savings_numerically():
     from leanreel.data.models import FileSnapshot
-    from leanreel.gui.file_list import FileListPanel
+    from leanreel.gui.file_list import FileListPanel, MatchResult
 
     app = get_app()
     panel = FileListPanel()
@@ -153,9 +153,9 @@ def test_file_list_sorts_size_and_estimated_savings_numerically():
         FileSnapshot(relative_path="medium.mkv", file_name="medium.mkv", size_bytes=2 * 1024**3),
     ]
     matches = {
-        "large.mkv": {"strategy_name": "A", "estimated_min_bytes": 4 * 1024**3, "estimated_max_bytes": 5 * 1024**3},
-        "small.mkv": {"strategy_name": "B", "estimated_min_bytes": 200 * 1024**2, "estimated_max_bytes": 300 * 1024**2},
-        "medium.mkv": {"strategy_name": "C", "estimated_min_bytes": 1 * 1024**3, "estimated_max_bytes": 2 * 1024**3},
+        "large.mkv": MatchResult(strategy="A", estimate={"estimated_min_bytes": 4 * 1024**3, "estimated_max_bytes": 5 * 1024**3}),
+        "small.mkv": MatchResult(strategy="B", estimate={"estimated_min_bytes": 200 * 1024**2, "estimated_max_bytes": 300 * 1024**2}),
+        "medium.mkv": MatchResult(strategy="C", estimate={"estimated_min_bytes": 1 * 1024**3, "estimated_max_bytes": 2 * 1024**3}),
     }
 
     panel.populate(snapshots, matches)
@@ -197,7 +197,7 @@ def test_library_panel_delete_and_remove_actions_emit_signals():
 def test_file_list_allows_per_row_strategy_override_and_updates_savings():
     from leanreel.core.strategy import Strategy
     from leanreel.data.models import FileSnapshot
-    from leanreel.gui.file_list import FileListPanel
+    from leanreel.gui.file_list import FileListPanel, MatchResult
 
     app = get_app()
     panel = FileListPanel()
@@ -209,7 +209,7 @@ def test_file_list_allows_per_row_strategy_override_and_updates_savings():
         size_bytes=10 * 1024**3,
     )
 
-    panel.populate([snap], {"movie.mkv": balanced}, strategies=[balanced, light])
+    panel.populate([snap], {"movie.mkv": MatchResult(strategy=balanced)}, strategies=[balanced, light])
     changes = []
     panel.strategy_override_changed.connect(lambda rel_path, strategy: changes.append((rel_path, strategy)))
 
@@ -229,14 +229,14 @@ def test_file_list_allows_per_row_strategy_override_and_updates_savings():
 def test_file_list_custom_strategy_option_emits_request_signal():
     from leanreel.core.strategy import Strategy
     from leanreel.data.models import FileSnapshot
-    from leanreel.gui.file_list import FileListPanel
+    from leanreel.gui.file_list import FileListPanel, MatchResult
 
     app = get_app()
     panel = FileListPanel()
     strategy = Strategy(name="均衡压缩", estimated_savings="35-50%")
     snap = FileSnapshot(relative_path="movie.mkv", file_name="movie.mkv", size_bytes=10 * 1024**3)
 
-    panel.populate([snap], {"movie.mkv": strategy}, strategies=[strategy])
+    panel.populate([snap], {"movie.mkv": MatchResult(strategy=strategy)}, strategies=[strategy])
     requests = []
     panel.custom_strategy_requested.connect(requests.append)
 
@@ -258,7 +258,7 @@ def test_file_list_can_update_row_with_custom_strategy():
     app = get_app()
     panel = FileListPanel()
     snap = FileSnapshot(relative_path="movie.mkv", file_name="movie.mkv", size_bytes=10 * 1024**3)
-    panel.populate([snap], {"movie.mkv": "未匹配"})
+    panel.populate([snap], {"movie.mkv": None})
 
     custom = Strategy(name="自定义", estimated_savings="50-70%")
     panel.apply_strategy_to_row("movie.mkv", custom)
@@ -286,3 +286,77 @@ def test_strategy_panel_custom_controls_emit_recomputed_strategy():
     assert changes[-1].estimated_savings == "50-70%"
     assert panel.current_strategy.name == "自定义"
     panel.close()
+
+
+# ──────────────────────────────────────────
+# _parse_savings_range() 模块级函数测试
+# ──────────────────────────────────────────
+
+def test_parse_savings_range_returns_fraction_for_range():
+    """正向用例 1："20-35%" 返回小数元组 (0.20, 0.35)"""
+    from leanreel.gui.file_list import _parse_savings_range
+
+    lo, hi = _parse_savings_range("20-35%")
+    assert abs(lo - 0.20) < 0.001
+    assert abs(hi - 0.35) < 0.001
+
+
+def test_parse_savings_range_with_different_range():
+    """正向用例 2："10-50%" 返回 (0.10, 0.50)"""
+    from leanreel.gui.file_list import _parse_savings_range
+
+    lo, hi = _parse_savings_range("10-50%")
+    assert abs(lo - 0.10) < 0.001
+    assert abs(hi - 0.50) < 0.001
+
+
+def test_parse_savings_range_returns_none_for_empty():
+    """空字符串返回 None"""
+    from leanreel.gui.file_list import _parse_savings_range
+
+    result = _parse_savings_range("")
+    assert result is None
+
+
+def test_parse_savings_range_returns_none_for_non_numeric():
+    """全非数字字符串返回 None"""
+    from leanreel.gui.file_list import _parse_savings_range
+
+    result = _parse_savings_range("abc")
+    assert result is None
+
+
+def test_parse_savings_range_single_number():
+    """单数字 "50%" 返回 (0.50, 0.50)"""
+    from leanreel.gui.file_list import _parse_savings_range
+
+    lo, hi = _parse_savings_range("50%")
+    assert abs(lo - 0.50) < 0.001
+    assert abs(hi - 0.50) < 0.001
+
+
+def test_parse_savings_range_decimal_percent():
+    """小数百分比 "12.5%-33.3%" 正确解析为小数"""
+    from leanreel.gui.file_list import _parse_savings_range
+
+    lo, hi = _parse_savings_range("12.5%-33.3%")
+    assert abs(lo - 0.125) < 0.001
+    assert abs(hi - 0.333) < 0.001
+
+
+def test_parse_savings_range_three_numbers_uses_first_two():
+    """三个数字只取前两个："10-20-30%" → (0.10, 0.20)"""
+    from leanreel.gui.file_list import _parse_savings_range
+
+    lo, hi = _parse_savings_range("10-20-30%")
+    assert abs(lo - 0.10) < 0.001
+    assert abs(hi - 0.20) < 0.001
+
+
+def test_parse_savings_range_no_percent_sign():
+    """无百分号的数字同样解析："20-35" → (0.20, 0.35)"""
+    from leanreel.gui.file_list import _parse_savings_range
+
+    lo, hi = _parse_savings_range("20-35")
+    assert abs(lo - 0.20) < 0.001
+    assert abs(hi - 0.35) < 0.001

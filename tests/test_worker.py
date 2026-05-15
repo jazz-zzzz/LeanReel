@@ -2,7 +2,8 @@
 import pytest
 import time
 import threading
-from leanreel.executor.worker import WorkerManager, EncodeTask, TaskStatus
+from leanreel.executor.worker import WorkerManager, EncodeTask
+from leanreel.data.models import TaskStatus
 
 
 class FakeExecutor:

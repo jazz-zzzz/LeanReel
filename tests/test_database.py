@@ -2,7 +2,7 @@
 import pytest
 from pathlib import Path
 from leanreel.data.database import Database
-from leanreel.data.models import Library, LibraryFolder, HDRType
+from leanreel.data.models import Library, LibraryFolder, HDRType, TaskStatus
 
 
 @pytest.fixture
@@ -83,7 +83,7 @@ def test_compression_history(db: Database):
         strategy_name="均衡压缩",
         original_size=50000,
         compressed_size=20000,
-        status="completed",
+        status=TaskStatus.COMPLETED,
         duration_seconds=300,
     ))
     records = db.get_history_for_library(lib_id)

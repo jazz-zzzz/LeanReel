@@ -5,7 +5,7 @@ from typing import Optional
 
 from leanreel.data.models import (
     Library, LibraryFolder, FileSnapshot,
-    CompressionRecord, AudioTrack, SubtitleTrack
+    CompressionRecord, AudioTrack, SubtitleTrack, TaskStatus
 )
 
 
@@ -136,7 +136,7 @@ class Database:
         return [CompressionRecord(
             id=r["id"], file_snapshot_id=r["file_snapshot_id"],
             strategy_name=r["strategy_name"], original_size=r["original_size"],
-            compressed_size=r["compressed_size"], status=r["status"],
+            compressed_size=r["compressed_size"], status=TaskStatus(r["status"]),
             duration_seconds=r["duration_seconds"], error_message=r["error_message"],
             created_at=r["created_at"]
         ) for r in rows]

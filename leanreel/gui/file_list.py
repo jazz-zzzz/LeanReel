@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Any
 
 from PySide6.QtWidgets import (
@@ -20,6 +21,18 @@ _COLOR_CODEC_MISSING = QColor("#6b6560")
 _COLOR_HDR_DV = QColor("#6ba8d6")
 _COLOR_HDR_HDR10 = QColor("#d4a853")
 _COLOR_HDR_SDR = QColor("#6b6560")
+
+
+@dataclass
+class MatchResult:
+    """匹配结果 — 包含策略及其估算节省空间
+
+    ``strategy`` 可以是 Strategy 对象、策略名称字符串，或 None。
+    ``estimate`` 是 ``estimate_savings()`` 返回的字典，
+    包含 ``percentage``、``estimated_min_bytes``、``estimated_max_bytes`` 等键。
+    """
+    strategy: "Strategy | str | None" = None
+    estimate: dict | None = None
 
 
 class SortableTableWidgetItem(QTableWidgetItem):
@@ -151,12 +164,11 @@ class FileListPanel(QWidget):
         self.stack.addWidget(self.tree)
         layout.addWidget(self.stack)
 
-    def populate(self, snapshots: list, matched_strategies: dict, strategies: list | None = None):
-        """Populate rows from snapshots and compatible strategy/estimate mappings.
+    def populate(self, snapshots: list, matched_strategies: dict[str, MatchResult | None], strategies: list | None = None):
+        """填充文件表格行。
 
-        ``matched_strategies`` supports the legacy ``{rel_path: strategy_name}``
-        shape as well as Strategy objects or dictionaries containing strategy
-        and estimate fields.
+        ``matched_strategies`` 将 ``relative_path`` 映射到 ``MatchResult``，
+        或 ``None``（表示未匹配）。
         """
         self._last_snapshots = list(snapshots)
         self._last_matches = dict(matched_strategies)
@@ -313,9 +325,9 @@ class FileListPanel(QWidget):
 
         snap = self._snapshots_by_path.get(relative_path)
         if snap is not None and strategy_name != "自定义":
-            _, savings_text, savings_sort = self._resolve_match_display(
-                snap, self._strategy_lookup.get(strategy_name, strategy_name)
-            )
+            lookup = self._strategy_lookup.get(strategy_name, strategy_name)
+            match = MatchResult(strategy=lookup) if not isinstance(lookup, MatchResult) else lookup
+            _, savings_text, savings_sort = self._resolve_match_display(snap, match)
             self.table.setItem(row, 5, SortableTableWidgetItem(savings_text, savings_sort))
         elif snap is not None:
             self.table.setItem(row, 5, SortableTableWidgetItem("—", -1))
@@ -331,7 +343,8 @@ class FileListPanel(QWidget):
         if row is None or snap is None:
             return
 
-        strategy_name, savings_text, savings_sort = self._resolve_match_display(snap, strategy)
+        match = MatchResult(strategy=strategy) if not isinstance(strategy, MatchResult) else strategy
+        strategy_name, savings_text, savings_sort = self._resolve_match_display(snap, match)
         self.table.setItem(row, 5, SortableTableWidgetItem(savings_text, savings_sort))
         combo = self.table.cellWidget(row, 4)
         if isinstance(combo, QComboBox):
@@ -367,42 +380,31 @@ class FileListPanel(QWidget):
     def _find_row_by_relative_path(self, relative_path: str) -> int | None:
         return self._row_index.get(relative_path)
 
-    def _resolve_match_display(self, snap: Any, match: Any) -> tuple[str, str, int | float]:
+    def _resolve_match_display(self, snap: Any, match: MatchResult | None) -> tuple[str, str, int | float]:
+        """将 MatchResult 解析为（策略名, 节省文本, 排序列数值）三元组。"""
         if match is None:
             return "未匹配", "—", -1
 
-        strategy = None
-        estimate: dict[str, Any] = {}
-        strategy_name: str | None = None
-        percent_text = ""
+        strategy = match.strategy
+        estimate = match.estimate or {}
 
-        if isinstance(match, dict):
-            strategy = match.get("strategy") or match.get("matched_strategy")
-            nested_estimate = match.get("estimate") or match.get("savings")
-            if isinstance(nested_estimate, dict):
-                estimate.update(nested_estimate)
-            estimate.update(match)
-            strategy_name = (
-                match.get("strategy_name")
-                or match.get("strategy")
-                or match.get("name")
-            )
-        elif hasattr(match, "name") or hasattr(match, "estimated_savings"):
-            strategy = match
-        else:
-            return str(match), "—", -1
-
+        # ── 提取策略名称 ──
+        strategy_name: str = "未匹配"
         if hasattr(strategy, "name"):
-            strategy_name = getattr(strategy, "name") or strategy_name
-        if not strategy_name:
-            strategy_name = "未匹配"
-        elif not isinstance(strategy_name, str):
-            strategy_name = getattr(strategy_name, "name", str(strategy_name))
+            strategy_name = strategy.name or "未匹配"
+        elif isinstance(strategy, str):
+            strategy_name = strategy
+        elif estimate.get("strategy_name"):
+            strategy_name = str(estimate["strategy_name"])
 
-        percent_text = (
-            str(estimate.get("percentage") or estimate.get("estimated_savings") or "")
-            or str(getattr(strategy, "estimated_savings", "") or "")
-        )
+        # ── 提取节省百分比文本 ──
+        percent_text = ""
+        if estimate.get("percentage"):
+            percent_text = str(estimate["percentage"])
+        elif hasattr(strategy, "estimated_savings") and strategy.estimated_savings:
+            percent_text = str(strategy.estimated_savings)
+
+        # ── 提取字节估算 ──
         min_bytes = estimate.get("estimated_min_bytes")
         max_bytes = estimate.get("estimated_max_bytes")
 

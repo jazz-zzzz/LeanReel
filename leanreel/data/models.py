@@ -13,6 +13,16 @@ class HDRType(StrEnum):
     DV_P8 = "DV_P8"
 
 
+class TaskStatus(StrEnum):
+    """任务/压缩记录的统一状态枚举"""
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    SKIPPED = "skipped"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
 @dataclass
 class AudioTrack:
     codec: str
@@ -70,7 +80,7 @@ class CompressionRecord:
     strategy_name: str = ""
     original_size: int = 0
     compressed_size: int = 0
-    status: str = "pending"
+    status: TaskStatus = TaskStatus.PENDING
     duration_seconds: int = 0
     error_message: str = ""
     created_at: str = ""

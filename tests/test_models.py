@@ -2,7 +2,7 @@
 import pytest
 from leanreel.data.models import (
     Library, LibraryFolder, FileSnapshot,
-    CompressionRecord, AudioTrack, SubtitleTrack, HDRType
+    CompressionRecord, AudioTrack, SubtitleTrack, HDRType, TaskStatus
 )
 
 
@@ -43,11 +43,11 @@ def test_compression_record():
         strategy_name="均衡压缩",
         original_size=50000000000,
         compressed_size=20000000000,
-        status="completed",
+        status=TaskStatus.COMPLETED,
         duration_seconds=15000,
     )
     assert record.original_size > record.compressed_size
-    assert record.status == "completed"
+    assert record.status == TaskStatus.COMPLETED
 
 
 def test_hdr_type_enum():
@@ -86,7 +86,7 @@ def test_subtitle_track_forced_default():
 
 def test_compression_record_default_status():
     record = CompressionRecord(file_snapshot_id=1, strategy_name="test")
-    assert record.status == "pending"
+    assert record.status == TaskStatus.PENDING
     assert record.original_size == 0
     assert record.compressed_size == 0
 

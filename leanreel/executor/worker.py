@@ -1,20 +1,12 @@
 """Worker 管理器 — 并行编码任务调度"""
 from __future__ import annotations
 from dataclasses import dataclass, field
-from enum import Enum
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock, Event
 from typing import Optional, Callable
 import time
 
-
-class TaskStatus(Enum):
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    SKIPPED = "skipped"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
+from leanreel.data.models import TaskStatus
 
 
 @dataclass

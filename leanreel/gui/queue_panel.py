@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QColor
 
-from leanreel.executor.worker import TaskStatus
+from leanreel.data.models import TaskStatus
 
 _STATUS_COLORS = {
     TaskStatus.RUNNING: QColor("#c8963e"),

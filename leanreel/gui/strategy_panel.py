@@ -41,25 +41,23 @@ QPushButton:checked:hover {{
 """
 
 
-class StrategyPanel(QWidget):
-    start_requested = Signal()
+class PresetCardPanel(QWidget):
+    """预设策略卡片面板 — 管理 QButtonGroup 样式的策略卡片列表"""
+
     strategy_changed = Signal(int)
-    custom_strategy_changed = Signal(object)
 
     def __init__(self):
         super().__init__()
         self._strategies = []
-        self._temp_dir = str(Path.home() / "Temp" / "LeanReel")
         self._active_preset_index = 0
         self._resizing = False
         self.setup_ui()
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(6)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        # ── 预设卡片 ──
         presets_label = QLabel("压缩策略")
         presets_label.setStyleSheet("font-weight: bold; color: #8a857c; font-size: 11px; padding: 2px 4px;")
         layout.addWidget(presets_label)
@@ -78,6 +76,106 @@ class StrategyPanel(QWidget):
 
         self.card_group = QButtonGroup(self)
         self.card_group.setExclusive(True)
+
+    def _make_card(self, s: Strategy, index: int) -> QPushButton:
+        tag = "GPU" if s.video.is_gpu else ("CPU" if s.video.encoder.startswith("lib") else "COPY")
+        savings = getattr(s, "estimated_savings", "") or ""
+        desc = getattr(s, "description", "") or ""
+        if len(desc) > 52:
+            desc = desc[:50] + "..."
+
+        prefix = "●" if index == 0 else "○"
+        plain = f"{prefix} {s.name}  [{tag}]  节省 {savings}"
+        if desc:
+            plain += f"\n    {desc}"
+
+        btn = QPushButton(plain)
+        btn.setCheckable(True)
+        btn.setStyleSheet(_CARD_STYLE)
+        btn.clicked.connect(lambda checked=False, i=index: self._on_card_clicked(i))
+        return btn
+
+    def set_strategies(self, strategies: list):
+        self._strategies = strategies
+        for btn in self.card_group.buttons():
+            self.card_group.removeButton(btn)
+
+        while self.card_layout.count() > 1:
+            item = self.card_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        for i, s in enumerate(strategies):
+            card = self._make_card(s, i)
+            self.card_group.addButton(card, i)
+            self.card_layout.insertWidget(self.card_layout.count() - 1, card)
+
+        if strategies:
+            self.card_group.buttons()[0].setChecked(True)
+            self._active_preset_index = 0
+
+        self._update_card_heights()
+
+    def _update_card_heights(self):
+        h = max(120, self.height() - 400)
+        self.card_area.setMaximumHeight(h)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if not self._resizing:
+            self._resizing = True
+            self._update_card_heights()
+            self._resizing = False
+
+    def _on_card_clicked(self, index: int):
+        self._active_preset_index = index
+        self._update_card_indicators()
+        self.strategy_changed.emit(index)
+
+    def _update_card_indicators(self):
+        for i, btn in enumerate(self.card_group.buttons()):
+            s = self._strategies[i]
+            tag = "GPU" if s.video.is_gpu else ("CPU" if s.video.encoder.startswith("lib") else "COPY")
+            savings = getattr(s, "estimated_savings", "") or ""
+            desc = getattr(s, "description", "") or ""
+            if len(desc) > 52:
+                desc = desc[:50] + "..."
+            prefix = "●" if i == self._active_preset_index else "○"
+            plain = f"{prefix} {s.name}  [{tag}]  节省 {savings}"
+            if desc:
+                plain += f"\n    {desc}"
+            btn.setText(plain)
+            btn.setChecked(i == self._active_preset_index)
+
+    @property
+    def current_preset_strategy(self):
+        idx = self._active_preset_index
+        if 0 <= idx < len(self._strategies):
+            return self._strategies[idx]
+        return None
+
+
+class StrategyPanel(QWidget):
+    """策略面板 — 嵌入 PresetCardPanel，自定义参数编辑 + 并行/输出设置"""
+
+    start_requested = Signal()
+    strategy_changed = Signal(int)
+    custom_strategy_changed = Signal(object)
+
+    def __init__(self):
+        super().__init__()
+        self._temp_dir = str(Path.home() / "Temp" / "LeanReel")
+        self.setup_ui()
+
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(6)
+
+        # ── 预设卡片 ──
+        self.preset_panel = PresetCardPanel()
+        self.preset_panel.strategy_changed.connect(self.strategy_changed.emit)
+        layout.addWidget(self.preset_panel)
 
         # ── 自定义区域 ──
         self.custom_group = QGroupBox("自定义参数")
@@ -186,77 +284,9 @@ class StrategyPanel(QWidget):
         self.start_btn.clicked.connect(self.start_requested.emit)
         layout.addWidget(self.start_btn)
 
-    def _make_card(self, s: Strategy, index: int) -> QPushButton:
-        tag = "GPU" if s.video.is_gpu else ("CPU" if s.video.encoder.startswith("lib") else "COPY")
-        savings = getattr(s, "estimated_savings", "") or ""
-        desc = getattr(s, "description", "") or ""
-        if len(desc) > 52:
-            desc = desc[:50] + "..."
-
-        prefix = "●" if index == 0 else "○"
-        plain = f"{prefix} {s.name}  [{tag}]  节省 {savings}"
-        if desc:
-            plain += f"\n    {desc}"
-
-        btn = QPushButton(plain)
-        btn.setCheckable(True)
-        btn.setStyleSheet(_CARD_STYLE)
-        btn.clicked.connect(lambda checked=False, i=index: self._on_card_clicked(i))
-        return btn
-
     def set_strategies(self, strategies: list):
-        self._strategies = strategies
-        for btn in self.card_group.buttons():
-            self.card_group.removeButton(btn)
-
-        while self.card_layout.count() > 1:
-            item = self.card_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-
-        for i, s in enumerate(strategies):
-            card = self._make_card(s, i)
-            self.card_group.addButton(card, i)
-            self.card_layout.insertWidget(self.card_layout.count() - 1, card)
-
-        if strategies:
-            self.card_group.buttons()[0].setChecked(True)
-            self._active_preset_index = 0
-
+        self.preset_panel.set_strategies(strategies)
         self.custom_group.hide()
-        self._update_card_heights()
-
-    def _update_card_heights(self):
-        h = max(120, self.height() - 400)
-        self.card_area.setMaximumHeight(h)
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if not self._resizing:
-            self._resizing = True
-            self._update_card_heights()
-            self._resizing = False
-
-    def _on_card_clicked(self, index: int):
-        self._active_preset_index = index
-        self.custom_group.hide()
-        self._update_card_indicators()
-        self.strategy_changed.emit(index)
-
-    def _update_card_indicators(self):
-        for i, btn in enumerate(self.card_group.buttons()):
-            s = self._strategies[i]
-            tag = "GPU" if s.video.is_gpu else ("CPU" if s.video.encoder.startswith("lib") else "COPY")
-            savings = getattr(s, "estimated_savings", "") or ""
-            desc = getattr(s, "description", "") or ""
-            if len(desc) > 52:
-                desc = desc[:50] + "..."
-            prefix = "●" if i == self._active_preset_index else "○"
-            plain = f"{prefix} {s.name}  [{tag}]  节省 {savings}"
-            if desc:
-                plain += f"\n    {desc}"
-            btn.setText(plain)
-            btn.setChecked(i == self._active_preset_index)
 
     def show_custom_strategy(self):
         self.custom_group.show()
@@ -356,7 +386,4 @@ class StrategyPanel(QWidget):
 
     @property
     def current_preset_strategy(self):
-        idx = self._active_preset_index
-        if 0 <= idx < len(self._strategies):
-            return self._strategies[idx]
-        return None
+        return self.preset_panel.current_preset_strategy

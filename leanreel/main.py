@@ -2,6 +2,7 @@
 import sys
 import os
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
@@ -14,12 +15,13 @@ from leanreel.core.matcher import Matcher, estimate_savings
 from leanreel.core.scanner import Scanner
 from leanreel.gui.main_window import MainWindow
 from leanreel.gui.library_panel import LibraryPanel
-from leanreel.gui.file_list import FileListPanel
+from leanreel.gui.file_list import FileListPanel, MatchResult
 from leanreel.gui.strategy_panel import StrategyPanel
 from leanreel.gui.queue_panel import QueuePanel
 from leanreel.gui.theme import apply_theme
 from leanreel.executor.ffmpeg import FFmpegExecutor
-from leanreel.executor.worker import EncodeTask, WorkerManager, TaskStatus
+from leanreel.executor.worker import EncodeTask, WorkerManager
+from leanreel.data.models import TaskStatus
 
 
 class ProbeNotifier(QObject):
@@ -90,6 +92,127 @@ def build_encode_tasks(
     return tasks
 
 
+@dataclass
+class Services:
+    """服务容器 — 持有所有核心服务实例，使其可注入、可测试"""
+    db: Database
+    lib_mgr: LibraryManager
+    strategies: list
+    matcher: Matcher
+    scanner: Scanner
+
+
+class EncodingController:
+    """编码控制器 — 管理编码生命周期（开始/暂停/取消/完成）"""
+
+    def __init__(self, strategy_panel, win, queue_panel, notifier):
+        self._strategy_panel = strategy_panel
+        self._win = win
+        self._queue_panel = queue_panel
+        self._notifier = notifier
+        self.active_manager: WorkerManager | None = None
+        self.encoding_in_progress = False
+        self._encode_lock = threading.Lock()
+
+    def start(self, snapshots, folder_paths, strategy_overrides):
+        """启动编码。返回 True 表示编码已成功启动。"""
+        with self._encode_lock:
+            if self.encoding_in_progress:
+                self._win.set_status("编码正在进行中，请等待完成")
+                return False
+            self.encoding_in_progress = True
+
+        try:
+            default_strategy = self._strategy_panel.current_preset_strategy or self._strategy_panel.current_strategy
+            if default_strategy is None:
+                self._win.set_status("没有可用策略")
+                with self._encode_lock:
+                    self.encoding_in_progress = False
+                return False
+
+            tasks = build_encode_tasks(
+                snapshots,
+                folder_paths,
+                default_strategy,
+                strategy_overrides,
+            )
+            if not tasks:
+                self._win.set_status("没有可压缩文件")
+                with self._encode_lock:
+                    self.encoding_in_progress = False
+                return False
+
+            self._queue_panel.clear_tasks()
+            for task in tasks:
+                self._queue_panel.add_task_row(task)
+
+            self._win.show_queue()
+            self.active_manager = WorkerManager(
+                FFmpegExecutor(temp_dir=self._strategy_panel.temp_dir),
+                self._strategy_panel.worker_count,
+                progress_callback=lambda t: self._notifier.task_updated.emit(t),
+            )
+
+            def _run_encode():
+                try:
+                    self.active_manager.start(tasks)
+                finally:
+                    self._notifier.encoding_done.emit()
+
+            t = threading.Thread(target=_run_encode, daemon=True)
+            t.start()
+            return True
+        except Exception as e:
+            with self._encode_lock:
+                self.encoding_in_progress = False
+            self._win.set_status(f"错误：{e}")
+            return False
+
+    def toggle_pause(self):
+        """切换暂停/继续状态。"""
+        if self.active_manager is None:
+            return
+        if self.active_manager.is_paused:
+            self.active_manager.resume()
+            self._win.set_status("编码已恢复")
+            self._queue_panel.pause_btn.setText("暂停")
+        else:
+            self.active_manager.pause()
+            self._win.set_status("编码已暂停（等待当前任务完成）")
+            self._queue_panel.pause_btn.setText("继续")
+
+    def cancel(self, _idx=None):
+        """取消当前编码。"""
+        if self.active_manager is None:
+            return
+        self.active_manager.cancel()
+        self._win.set_status("正在取消编码...")
+
+    def on_task_updated(self, task):
+        """单个任务状态更新时由 WorkerManager 回调触发。"""
+        self._queue_panel.update_task_row(task)
+        if self.active_manager is None:
+            return
+        progress = self.active_manager.get_progress()
+        self._queue_panel.update_progress(progress)
+        self._win.set_status(
+            f"编码中：{progress['completed'] + progress['failed']}/{progress['total']}"
+        )
+
+    def on_encoding_done(self):
+        """所有编码任务完成后由后台线程触发。"""
+        with self._encode_lock:
+            self.encoding_in_progress = False
+        if self.active_manager is None:
+            return
+        results = self.active_manager.get_results()
+        done, failed = compute_encode_summary(results)
+        self._win.set_status(
+            f"编码完成：成功 {done}/{len(results)}"
+            + (f"，失败 {failed}" if failed else "")
+        )
+
+
 class Application:
     """LeanReel 应用控制器 — 管理生命周期、服务初始化和信号路由"""
 
@@ -100,6 +223,7 @@ class Application:
         self._init_notifier()
         self._init_ui()
         self._setup_ui()
+        self._init_encoding_controller()
         self._wire_signals()
         self._refresh_libraries()
 
@@ -112,20 +236,22 @@ class Application:
 
     def _init_services(self):
         db_path = str(get_data_dir() / "leanreel.db")
-        self.db = Database(db_path)
-        self.lib_mgr = LibraryManager(self.db)
-        self.strategies = load_strategies(str(get_strategies_dir()))
-        self.matcher = Matcher(self.strategies)
-        self.scanner = Scanner(self.db)
+        db = Database(db_path)
+        lib_mgr = LibraryManager(db)
+        strategies = load_strategies(str(get_strategies_dir()))
+        self.services = Services(
+            db=db,
+            lib_mgr=lib_mgr,
+            strategies=strategies,
+            matcher=Matcher(strategies),
+            scanner=Scanner(db),
+        )
 
     def _init_state(self):
         self.current_snapshots: list = []
         self.current_folder_paths: dict[int, str] = {}
         self.strategy_overrides: dict[str, Strategy] = {}
         self.active_custom_path: str | None = None
-        self.active_manager: WorkerManager | None = None
-        self.encoding_in_progress = False
-        self._encode_lock = threading.Lock()
 
     def _init_notifier(self):
         self.notifier = ProbeNotifier()
@@ -142,7 +268,15 @@ class Application:
         self.win.set_file_list_panel(self.file_panel)
         self.win.set_strategy_widget(self.strategy_panel)
         self.win.set_queue_panel(self.queue_panel)
-        self.strategy_panel.set_strategies(self.strategies)
+        self.strategy_panel.set_strategies(self.services.strategies)
+
+    def _init_encoding_controller(self):
+        self.encoding_ctrl = EncodingController(
+            strategy_panel=self.strategy_panel,
+            win=self.win,
+            queue_panel=self.queue_panel,
+            notifier=self.notifier,
+        )
 
     # ── 信号连接 ──
 
@@ -150,8 +284,8 @@ class Application:
         self.lib_panel.library_added.connect(self._on_library_added)
         self.lib_panel.folder_added.connect(self._on_folder_added)
         self.lib_panel.library_selected.connect(self._on_library_selected)
-        self.lib_panel.library_deleted.connect(self.lib_mgr.delete_library)
-        self.lib_panel.folder_removed.connect(self.lib_mgr.remove_folder)
+        self.lib_panel.library_deleted.connect(self.services.lib_mgr.delete_library)
+        self.lib_panel.folder_removed.connect(self.services.lib_mgr.remove_folder)
         self.file_panel.strategy_override_changed.connect(self._on_strategy_override_changed)
         self.file_panel.custom_strategy_requested.connect(self._on_custom_strategy_requested)
         self.strategy_panel.custom_strategy_changed.connect(self._on_custom_strategy_changed)
@@ -159,8 +293,8 @@ class Application:
         self.win.set_toggle_queue_action(
             lambda: self.win.show_queue() if self.win.queue_dock.isHidden() else self.win.hide_queue()
         )
-        self.queue_panel.pause_requested.connect(self._on_pause_requested)
-        self.queue_panel.cancel_requested.connect(self._on_cancel_requested)
+        self.queue_panel.pause_requested.connect(self.encoding_ctrl.toggle_pause)
+        self.queue_panel.cancel_requested.connect(self.encoding_ctrl.cancel)
 
         self.notifier.probed.connect(self.file_panel.update_snapshot_row)
         self.notifier.progress.connect(
@@ -169,43 +303,43 @@ class Application:
         self.notifier.all_done.connect(
             lambda: self.win.set_status("编码信息探测完成")
         )
-        self.notifier.task_updated.connect(self._on_task_updated)
-        self.notifier.encoding_done.connect(self._on_encoding_done)
+        self.notifier.task_updated.connect(self.encoding_ctrl.on_task_updated)
+        self.notifier.encoding_done.connect(self.encoding_ctrl.on_encoding_done)
 
     # ── 文件列表填充 ──
 
-    def _populate_file_list(self, snapshots) -> dict:
-        matched = {}
+    def _populate_file_list(self, snapshots) -> dict[str, MatchResult]:
+        matched: dict[str, MatchResult] = {}
         for s in snapshots:
-            strategy = self.matcher.match(s)
-            matched[s.relative_path] = {
-                "strategy": strategy,
-                "estimate": estimate_savings(s, strategy),
-            }
-        self.file_panel.populate(snapshots, matched, self.strategies)
+            strategy = self.services.matcher.match(s)
+            matched[s.relative_path] = MatchResult(
+                strategy=strategy,
+                estimate=estimate_savings(s, strategy),
+            )
+        self.file_panel.populate(snapshots, matched, self.services.strategies)
         return matched
 
     # ── 库信号处理 ──
 
     def _on_library_added(self, name):
         try:
-            self.lib_mgr.create_library(name)
+            self.services.lib_mgr.create_library(name)
             self._refresh_libraries()
         except ValueError as e:
             self.win.set_status(str(e))
 
     def _on_folder_added(self, lib_id, path):
-        folder = self.lib_mgr.add_folder(lib_id, path)
+        folder = self.services.lib_mgr.add_folder(lib_id, path)
         self._refresh_libraries()
         self.win.set_status(f"扫描 {path}...")
 
-        snapshots = self.scanner.scan_folder_fast(folder.id, path)
+        snapshots = self.services.scanner.scan_folder_fast(folder.id, path)
         self.current_snapshots = snapshots
         self.current_folder_paths[folder.id] = path
         self.strategy_overrides = {}
 
         self._populate_file_list(snapshots)
-        pending = self.scanner.pending_count
+        pending = self.services.scanner.pending_count
         if pending > 0:
             self.win.set_status(f"扫描中：0/{pending} 个文件已探测...")
 
@@ -223,17 +357,17 @@ class Application:
             def on_finished():
                 self.notifier.all_done.emit()
 
-            self.scanner.start_background_probe(on_probed, on_finished, on_progress)
+            self.services.scanner.start_background_probe(on_probed, on_finished, on_progress)
         else:
             self.win.set_status(f"扫描完成：{len(snapshots)} 个文件")
 
     def _on_library_selected(self, lib_id):
-        folders = self.db.get_folders_for_library(lib_id)
+        folders = self.services.db.get_folders_for_library(lib_id)
         snapshots: list = []
         folder_paths: dict[int, str] = {}
         for folder in folders:
             folder_paths[folder.id] = folder.path
-            snapshots.extend(self.scanner.load_cached(folder.id, folder.path))
+            snapshots.extend(self.services.scanner.load_cached(folder.id, folder.path))
         self.current_folder_paths = folder_paths
         self.strategy_overrides = {}
         self.current_snapshots = snapshots
@@ -248,7 +382,7 @@ class Application:
             return
         self.strategy_panel.show_preset_strategy()
         self.active_custom_path = None
-        strategy = next((s for s in self.strategies if s.name == strategy_name), None)
+        strategy = next((s for s in self.services.strategies if s.name == strategy_name), None)
         if strategy is None:
             self.strategy_overrides.pop(relative_path, None)
         else:
@@ -267,96 +401,19 @@ class Application:
     # ── 编码控制 ──
 
     def _on_start_requested(self):
-        with self._encode_lock:
-            if self.encoding_in_progress:
-                self.win.set_status("编码正在进行中，请等待完成")
-                return
-            self.encoding_in_progress = True
-        try:
-            default_strategy = self.strategy_panel.current_preset_strategy or self.strategy_panel.current_strategy
-            if default_strategy is None:
-                self.win.set_status("没有可用策略")
-                return
-            tasks = build_encode_tasks(
-                self.current_snapshots,
-                self.current_folder_paths,
-                default_strategy,
-                self.strategy_overrides,
-            )
-            if not tasks:
-                self.win.set_status("没有可压缩文件")
-                return
-            self.queue_panel.clear_tasks()
-            for task in tasks:
-                self.queue_panel.add_task_row(task)
-
-            self.win.show_queue()
-            self.active_manager = WorkerManager(
-                FFmpegExecutor(temp_dir=self.strategy_panel.temp_dir),
-                self.strategy_panel.worker_count,
-                progress_callback=lambda t: self.notifier.task_updated.emit(t),
-            )
-
-            def _run_encode():
-                try:
-                    self.active_manager.start(tasks)
-                finally:
-                    self.notifier.encoding_done.emit()
-
-            t = threading.Thread(target=_run_encode, daemon=True)
-            t.start()
-        except Exception as e:
-            with self._encode_lock:
-                self.encoding_in_progress = False
-            self.win.set_status(f"错误：{e}")
-
-    def _on_pause_requested(self):
-        if self.active_manager is None:
-            return
-        if self.active_manager.is_paused:
-            self.active_manager.resume()
-            self.win.set_status("编码已恢复")
-            self.queue_panel.pause_btn.setText("暂停")
-        else:
-            self.active_manager.pause()
-            self.win.set_status("编码已暂停（等待当前任务完成）")
-            self.queue_panel.pause_btn.setText("继续")
-
-    def _on_cancel_requested(self, _idx):
-        if self.active_manager is None:
-            return
-        self.active_manager.cancel()
-        self.win.set_status("正在取消编码...")
-
-    def _on_task_updated(self, task):
-        self.queue_panel.update_task_row(task)
-        if self.active_manager is None:
-            return
-        progress = self.active_manager.get_progress()
-        self.queue_panel.update_progress(progress)
-        self.win.set_status(
-            f"编码中：{progress['completed'] + progress['failed']}/{progress['total']}"
-        )
-
-    def _on_encoding_done(self):
-        with self._encode_lock:
-            self.encoding_in_progress = False
-        if self.active_manager is None:
-            return
-        results = self.active_manager.get_results()
-        done, failed = compute_encode_summary(results)
-        self.win.set_status(
-            f"编码完成：成功 {done}/{len(results)}"
-            + (f"，失败 {failed}" if failed else "")
+        self.encoding_ctrl.start(
+            self.current_snapshots,
+            self.current_folder_paths,
+            self.strategy_overrides,
         )
 
     # ── 库刷新 ──
 
     def _refresh_libraries(self):
-        libs = self.lib_mgr.get_all_libraries()
+        libs = self.services.lib_mgr.get_all_libraries()
         folders_map = {}
         for lib in libs:
-            folders_map[lib.id] = self.lib_mgr.get_folders(lib.id)
+            folders_map[lib.id] = self.services.lib_mgr.get_folders(lib.id)
         self.lib_panel.populate(libs, folders_map)
 
     # ── 入口 ──

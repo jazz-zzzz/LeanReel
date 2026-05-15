@@ -3,7 +3,8 @@ from pathlib import Path
 
 from leanreel.core.strategy import Strategy
 from leanreel.data.models import FileSnapshot
-from leanreel.executor.worker import EncodeTask, TaskStatus
+from leanreel.executor.worker import EncodeTask
+from leanreel.data.models import TaskStatus
 from leanreel.main import build_encode_tasks, make_output_path, compute_encode_summary
 
 
