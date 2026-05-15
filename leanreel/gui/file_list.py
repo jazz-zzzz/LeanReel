@@ -390,6 +390,7 @@ class FileListPanel(QWidget):
             return
         self.current_view_mode = mode
         if mode == "tree":
+            self._populate_tree(list(self._snapshots_by_path.values()), self._last_matches)
             self.stack.setCurrentWidget(self.tree)
             self.table.hide()
             self.tree.show()
