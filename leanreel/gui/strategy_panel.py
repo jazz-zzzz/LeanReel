@@ -275,7 +275,7 @@ class StrategyPanel(QWidget):
         self.custom_audio_combo.addItems(["keep_original", "strip_commentary"])
         self.custom_subtitle_combo = QComboBox()
         self.custom_subtitle_combo.addItems(
-            ["keep_chinese", "keep_chinese_english", "keep_all", "remove_all"]
+            ["keep_all", "keep_chinese", "keep_chinese_english", "remove_all"]
         )
         self.custom_savings_label = QLabel("预计节省：35-50%")
 
