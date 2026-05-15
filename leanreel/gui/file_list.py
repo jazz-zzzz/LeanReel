@@ -18,6 +18,7 @@ _HEADERS = ["", "文件名", "体积", "编码信息", "HDR", "匹配策略", "�
 # ── 列配色 ──
 _COLOR_CODEC_OK = QColor("#8db87c")
 _COLOR_CODEC_MISSING = QColor("#6b6560")
+_COLOR_PROBE_FAILED = QColor("#c8675e")
 _COLOR_HDR_DV = QColor("#6ba8d6")
 _COLOR_HDR_HDR10 = QColor("#d4a853")
 _COLOR_HDR_SDR = QColor("#6b6560")
@@ -135,7 +136,7 @@ class FileListPanel(QWidget):
         header.setSectionResizeMode(1, QHeaderView.Interactive)
         for i in range(2, len(_HEADERS)):
             header.setSectionResizeMode(i, QHeaderView.Interactive)
-        self.table.verticalHeader().setDefaultSectionSize(28)
+        self.table.verticalHeader().setDefaultSectionSize(32)
         self.table.verticalHeader().setVisible(False)
         self.table.setColumnWidth(0, 30)
         self.table.setColumnWidth(1, 260)
@@ -222,9 +223,12 @@ class FileListPanel(QWidget):
             )
             # 列3：编码信息
             codec_item = QTableWidgetItem(self._format_codec(snap))
-            codec_item.setForeground(
-                _COLOR_CODEC_OK if getattr(snap, "video_codec", "") else _COLOR_CODEC_MISSING
-            )
+            if getattr(snap, "video_codec", ""):
+                codec_item.setForeground(_COLOR_CODEC_OK)
+            elif getattr(snap, "probe_ok", None) is False:
+                codec_item.setForeground(_COLOR_PROBE_FAILED)
+            else:
+                codec_item.setForeground(_COLOR_CODEC_MISSING)
             self.table.setItem(row, 3, codec_item)
             # 列4：HDR
             hdr_item = QTableWidgetItem(self._format_hdr(snap.hdr_type))
@@ -269,6 +273,8 @@ class FileListPanel(QWidget):
     def _format_codec(snap: Any) -> str:
         codec = getattr(snap, "video_codec", "") or ""
         if not codec:
+            if getattr(snap, "probe_ok", None) is False:
+                return "探测失败"
             return "未识别"
         parts = [codec]
         w = getattr(snap, "video_width", 0) or 0
@@ -304,6 +310,8 @@ class FileListPanel(QWidget):
     def _create_strategy_combo(self, relative_path: str, selected_name: str) -> QComboBox:
         combo = QComboBox()
         combo.setMinimumWidth(140)
+        combo.setMaximumHeight(28)
+        combo.setStyleSheet("QComboBox { padding: 1px 4px; }")
         names = list(self._strategy_lookup)
         if selected_name and selected_name != "未匹配" and selected_name not in names:
             names.insert(0, selected_name)
@@ -407,10 +415,17 @@ class FileListPanel(QWidget):
         self._snapshots_by_path[relative_path] = snap
         row = self._find_row_by_relative_path(relative_path)
         if row is not None:
-            codec_item = QTableWidgetItem(self._format_codec(snap))
-            codec_item.setForeground(
-                _COLOR_CODEC_OK if getattr(snap, "video_codec", "") else _COLOR_CODEC_MISSING
+            probe_failed = getattr(snap, "probe_ok", None) is False and not getattr(
+                snap, "video_codec", ""
             )
+            if probe_failed:
+                codec_item = QTableWidgetItem("探测失败")
+                codec_item.setForeground(_COLOR_PROBE_FAILED)
+            else:
+                codec_item = QTableWidgetItem(self._format_codec(snap))
+                codec_item.setForeground(
+                    _COLOR_CODEC_OK if getattr(snap, "video_codec", "") else _COLOR_CODEC_MISSING
+                )
             self.table.setItem(row, 3, codec_item)
             hdr_item = QTableWidgetItem(self._format_hdr(snap.hdr_type))
             hdr_item.setForeground(self._hdr_color(getattr(snap, "hdr_type", None)))

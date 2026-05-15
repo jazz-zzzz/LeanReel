@@ -127,7 +127,10 @@ class FFprobeRunner:
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         if result.returncode != 0:
-            raise RuntimeError(f"FFprobe 失败: {result.stderr.strip()}")
+            stderr_snippet = (result.stderr or "").strip()[:200]
+            raise RuntimeError(
+                f"FFprobe 失败 (exit={result.returncode}): {stderr_snippet}"
+            )
 
         data = json.loads(result.stdout)
         return parse_ffprobe_output(data, library_folder_id)

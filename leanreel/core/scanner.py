@@ -390,7 +390,13 @@ class Scanner:
                 snap.relative_path = rel_path
                 snap.file_mtime = fmtime
                 snap.probe_ok = True
-            except Exception:
+            except Exception as e:
+                import sys
+                print(
+                    f"[LeanReel] FFprobe 探测失败: {abs_path}\n  {e}",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 snap = FileSnapshot(
                     library_folder_id=folder_id,
                     relative_path=rel_path,

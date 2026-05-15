@@ -50,7 +50,6 @@ class PresetCardPanel(QWidget):
         super().__init__()
         self._strategies = []
         self._active_preset_index = 0
-        self._resizing = False
         self.setup_ui()
 
     def setup_ui(self):
@@ -72,7 +71,7 @@ class PresetCardPanel(QWidget):
         self.card_layout.setSpacing(4)
         self.card_layout.addStretch()
         self.card_area.setWidget(self.card_container)
-        layout.addWidget(self.card_area)
+        layout.addWidget(self.card_area, 1)  # stretch factor 1: 占满可用空间
 
         self.card_group = QButtonGroup(self)
         self.card_group.setExclusive(True)
@@ -113,19 +112,6 @@ class PresetCardPanel(QWidget):
         if strategies:
             self.card_group.buttons()[0].setChecked(True)
             self._active_preset_index = 0
-
-        self._update_card_heights()
-
-    def _update_card_heights(self):
-        h = max(120, self.height() - 400)
-        self.card_area.setMaximumHeight(h)
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if not self._resizing:
-            self._resizing = True
-            self._update_card_heights()
-            self._resizing = False
 
     def _on_card_clicked(self, index: int):
         self._active_preset_index = index
@@ -175,7 +161,7 @@ class StrategyPanel(QWidget):
         # ── 预设卡片 ──
         self.preset_panel = PresetCardPanel()
         self.preset_panel.strategy_changed.connect(self.strategy_changed.emit)
-        layout.addWidget(self.preset_panel)
+        layout.addWidget(self.preset_panel, 1)  # stretch factor 1: 卡片区域占满可用空间
 
         # ── 自定义区域 ──
         self.custom_group = QGroupBox("自定义参数")
@@ -240,34 +226,28 @@ class StrategyPanel(QWidget):
             else:
                 widget.valueChanged.connect(self._emit_custom_strategy)
 
-        # ── 并行 ──
-        parallel_group = QGroupBox("并行设置")
-        parallel_layout = QFormLayout(parallel_group)
-        parallel_layout.setContentsMargins(8, 4, 8, 4)
+        # ── 编码设置 ──
+        encode_group = QGroupBox("编码设置")
+        encode_layout = QFormLayout(encode_group)
+        encode_layout.setContentsMargins(8, 4, 8, 4)
+        encode_layout.setVerticalSpacing(6)
+
         self.workers_spin = QSpinBox()
         self.workers_spin.setRange(1, 16)
         self.workers_spin.setValue(4)
         self.workers_spin.setSuffix(" 个")
-        parallel_layout.addRow("同时编码", self.workers_spin)
-        layout.addWidget(parallel_group)
+        encode_layout.addRow("同时编码", self.workers_spin)
 
-        # ── 输出 ──
-        output_group = QGroupBox("输出设置")
-        output_layout = QVBoxLayout(output_group)
-        output_layout.setContentsMargins(8, 4, 8, 4)
-        output_layout.setSpacing(4)
-
-        temp_layout = QHBoxLayout()
+        temp_row = QHBoxLayout()
         self.temp_dir_edit = QLineEdit(self._temp_dir)
         self.temp_dir_edit.setPlaceholderText("编码临时目录（本地 SSD 路径）")
         self.browse_btn = QToolButton()
         self.browse_btn.setText("...")
         self.browse_btn.clicked.connect(self._browse_temp_dir)
-        temp_layout.addWidget(self.temp_dir_edit)
-        temp_layout.addWidget(self.browse_btn)
-        output_layout.addLayout(temp_layout)
-        output_layout.addWidget(QLabel("临时目录用于 I/O 分离加速"))
-        layout.addWidget(output_group)
+        temp_row.addWidget(self.temp_dir_edit)
+        temp_row.addWidget(self.browse_btn)
+        encode_layout.addRow("临时目录", temp_row)
+        layout.addWidget(encode_group)
 
         # ── 开始 ──
         self.start_btn = QPushButton("开始压缩")
