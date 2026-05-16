@@ -121,6 +121,7 @@ class FileListPanel(QWidget):
         self._checked_keys: set[tuple[int, str]] = set()
         self._tree_item_by_key: dict[tuple[int, str], QTreeWidgetItem] = {}
         self._populate_gen = 0
+        self._render_gen = 0
         self._path_gen: dict[str, int] = {}
         self.current_view_mode = "flat"
         self.setup_ui()
@@ -298,10 +299,13 @@ class FileListPanel(QWidget):
         self._batch_strategies = strategies
         self._batch_total_size = 0
         self._batch_row_index = 0
-        self._render_row_batch()  # 首屏立即渲染
+        self._render_gen += 1
+        self._render_row_batch(self._render_gen)  # 首屏立即渲染
 
-    def _render_row_batch(self):
+    def _render_row_batch(self, gen: int = 0):
         """每批渲染最多 100 行，剩余用 QTimer 调度以保持 UI 响应。"""
+        if gen != self._render_gen:
+            return  # 旧代际的回调，丢弃
         batch_size = 100
         snapshots = self._batch_snapshots
         matched_strategies = self._batch_matches
@@ -376,7 +380,7 @@ class FileListPanel(QWidget):
 
         # 还有剩余行，调度下一批
         from PySide6.QtCore import QTimer
-        QTimer.singleShot(0, self._render_row_batch)
+        QTimer.singleShot(0, lambda g=gen: self._render_row_batch(g))
 
     def _finish_populate(self):
         """分批渲染完成后的收尾工作。"""
