@@ -363,6 +363,7 @@ class Application:
         self.queue_panel.pause_requested.connect(self.encoding_ctrl.toggle_pause)
         self.queue_panel.cancel_requested.connect(self.encoding_ctrl.cancel)
 
+        self.notifier.scan_ready.connect(self._on_scan_ready)
         self.notifier.probed.connect(self.file_panel.update_snapshot_row)
         self.notifier.progress.connect(
             lambda done, total: self.win.set_status(f"探测中：{done}/{total} ...")
@@ -517,7 +518,7 @@ class Application:
         self.win.set_status("文件夹已移除")
 
     def _on_refresh_requested(self):
-        """重建缓存：重新扫描所有文件夹（合并 stat+ffprobe 为一次 I/O）。"""
+        """重建缓存：后台遍历文件 + 主线程即时展示占位 + 共享线程池探测。"""
         if not self.current_folder_paths:
             self.win.set_status("没有已添加的文件夹，请先添加文件夹")
             return
@@ -526,37 +527,43 @@ class Application:
             self.win.set_status("扫描已在进行中，请等待完成")
             return
 
-        from leanreel.core.file_discovery import find_video_files
-
         self._refresh_running = True
+        self.win.set_status("扫描中...")
         self._scan_token += 1
         my_token = self._scan_token
         folders_at_call = list(self.current_folder_paths.items())
 
-        # 第一步：预先收集所有文件，创建占位快照（主线程，很快 <1s）
-        self.current_snapshots = []
-        for folder_id, path in folders_at_call:
-            self.current_folder_paths[folder_id] = path
-            for rel_path, abs_path in find_video_files(path):
-                self.current_snapshots.append(FileSnapshot(
-                    library_folder_id=folder_id,
-                    relative_path=rel_path,
-                    file_name=os.path.basename(abs_path),
-                    size_bytes=0,
-                    probe_ok=False,
-                ))
+        def _scan_in_background():
+            """后台线程：遍历目录 + 创建占位快照 + 准备探测输入（I/O 不阻塞主线程）"""
+            from leanreel.core.file_discovery import find_video_files
+            placeholders = []
+            folder_inputs = []
+            for folder_id, path in folders_at_call:
+                files = find_video_files(path)
+                folder_inputs.append((folder_id, path, files))
+                for rel_path, abs_path in files:
+                    placeholders.append(FileSnapshot(
+                        library_folder_id=folder_id, relative_path=rel_path,
+                        file_name=os.path.basename(abs_path), size_bytes=0, probe_ok=False))
+            self.notifier.scan_ready.emit(placeholders, folder_inputs, my_token)
 
-        total = len(self.current_snapshots)
+        threading.Thread(target=_scan_in_background, daemon=True).start()
+
+    def _on_scan_ready(self, placeholders, folder_inputs, my_token):
+        """主线程：展示占位符 + 启动探测（scan_ready 信号自动队列分发）"""
+        if self._scan_token != my_token:
+            return  # 旧扫描，丢弃
+        self.current_snapshots = placeholders
+        total = len(placeholders)
+
         if total == 0:
             self._refresh_running = False
             self.win.set_status("未找到视频文件")
             return
 
-        # 第二步：一次性展示所有占位行
         self._populate_file_list(self.current_snapshots)
         self.win.set_status(f"探测中：0/{total} ...")
 
-        # 第三步：合并所有文件夹到一个共享线程池探测
         done = [0]
         lock = threading.Lock()
 
@@ -582,11 +589,7 @@ class Application:
                     self._refresh_running = False
                     self.notifier.all_done.emit()
 
-        folders_input = []
-        for folder_id, path in folders_at_call:
-            folders_input.append((folder_id, path, find_video_files(path)))
-
-        self.services.scanner.probe_multi(folders_input, _on_result, on_finished=None)
+        self.services.scanner.probe_multi(folder_inputs, _on_result, on_finished=None)
 
     def _on_single_folder_refresh(self, folder_id):
         """流式刷新单个文件夹（库面板或树视图右键触发）。"""

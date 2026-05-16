@@ -19,6 +19,11 @@ class AppSignals(QObject):
     progress = Signal(int, int)
     """探测进度 — (done: int, total: int)"""
 
+    # ── 预扫描信号 ──
+
+    scan_ready = Signal(object, object, int)
+    """文件遍历完成 — (placeholders: list[FileSnapshot], folder_inputs: list, token: int)"""
+
     # ── 编码信号 ──
 
     task_updated = Signal(object)
