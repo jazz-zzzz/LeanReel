@@ -401,7 +401,7 @@ class Application:
         keep_checked = not fast  # fast=True 表示切库，应清空勾选
         self.store.rebuild(rows, strategies=self.services.strategies, keep_checked=keep_checked)
         self.file_panel._strategy_lookup = self.file_panel._build_strategy_lookup(self.services.strategies)
-        self.file_panel.stack.setCurrentWidget(self.file_panel.table)
+        self.file_panel._show_table()
         return matched
 
     # ── 库信号处理 ──

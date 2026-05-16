@@ -121,6 +121,18 @@ class FileListPanel(QWidget):
         key = self._file_key(snap)
         return matches.get(key, matches.get(snap.relative_path))
 
+    # ── Stack 视图切换（唯一入口，集中管理） ──
+
+    def _show_table(self):
+        self.stack.setCurrentWidget(self.table)
+
+    def _show_tree(self):
+        self.stack.setCurrentWidget(self.tree)
+
+    def _show_empty(self, message="未扫描"):
+        self.summary_label.setText(message)
+        self.stack.setCurrentWidget(self.empty_label)
+
     def enable_sorting(self):
         """探测完成后启用表格排序（探测期间禁用避免 setItem 触发频繁重排）。"""
         self.table.setSortingEnabled(True)
@@ -271,8 +283,7 @@ class FileListPanel(QWidget):
         self._strategy_lookup = self._build_strategy_lookup(strategies)
 
         if not snapshots:
-            self.stack.setCurrentWidget(self.empty_label)
-            self.summary_label.setText("未扫描")
+            self._show_empty()
             if self._store:
                 self._store.rebuild([], strategies=strategies, keep_checked=False)
             self._update_selection_count()
@@ -290,9 +301,8 @@ class FileListPanel(QWidget):
             rows.append(FileRow(snap=s, match=m, decision=d))
         self._store.rebuild(rows, strategies=strategies, keep_checked=not fast)
 
-        # Store.rebuild 会通过信号驱动 Adapter 更新 UI
-        # 显式调用确保即时刷新（信号在某些测试场景下可能尚未连接）
-        self.stack.setCurrentWidget(self.table)
+        # Store.rebuild 通过信号驱动 Adapter 更新 UI
+        self._show_table()
         if self._flat_adapter:
             self._flat_adapter._on_rebuild()
         if self._tree_adapter:
@@ -394,14 +404,13 @@ class FileListPanel(QWidget):
             # 这里只需确保树视图已构建并切换显示
             if self._tree_adapter:
                 self._tree_adapter._on_rebuild()
-            self.stack.setCurrentWidget(self.tree)
+            self._show_tree()
             self.table.hide()
             self.tree.show()
         else:
-            # 切回平铺，FlatAdapter 已自动维护表格
             if self._flat_adapter:
                 self._flat_adapter._on_rebuild()
-            self.stack.setCurrentWidget(self.table)
+            self._show_table()
             self.tree.hide()
             self.table.show()
 
