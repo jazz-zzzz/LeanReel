@@ -213,11 +213,7 @@ class FileListPanel(QWidget):
         self.tree.itemSelectionChanged.connect(self._on_tree_selection_changed)
 
     def populate(self, snapshots: list, matched_strategies: dict[str, MatchResult | None], strategies: list | None = None):
-        """填充文件表格行。
-
-        ``matched_strategies`` 将 ``relative_path`` 映射到 ``MatchResult``，
-        或 ``None``（表示未匹配）。
-        """
+        """分批填充文件表格行，避免一次性创建大量控件导致主线程冻结。"""
         self._populate_gen += 1
         self._last_snapshots = list(snapshots)
         self._last_matches = dict(matched_strategies)
@@ -240,9 +236,28 @@ class FileListPanel(QWidget):
         self.table.blockSignals(True)
         self.table.clearContents()
         self.table.setRowCount(len(snapshots))
-        total_size = 0
-        for row, snap in enumerate(snapshots):
-            # 列0：勾选框
+
+        # 存储分批渲染状态，首屏同步渲染让测试通过，后续分批
+        self._batch_snapshots = list(snapshots)
+        self._batch_matches = dict(matched_strategies)
+        self._batch_strategies = strategies
+        self._batch_total_size = 0
+        self._batch_row_index = 0
+        self._render_row_batch()  # 首屏立即渲染
+
+    def _render_row_batch(self):
+        """每批渲染最多 100 行，剩余用 QTimer 调度以保持 UI 响应。"""
+        batch_size = 100
+        snapshots = self._batch_snapshots
+        matched_strategies = self._batch_matches
+        strategies = self._batch_strategies
+        for _ in range(batch_size):
+            row = self._batch_row_index
+            if row >= len(snapshots):
+                # 全部分批完成
+                self._finish_populate()
+                return
+            snap = snapshots[row]
             self._row_by_path[snap.relative_path] = row
             check_item = QTableWidgetItem()
             skip_reason = get_skip_reason(snap)
@@ -253,16 +268,13 @@ class FileListPanel(QWidget):
                 check_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
             check_item.setCheckState(Qt.Unchecked)
             self.table.setItem(row, 0, check_item)
-            # 列1：文件名
             file_item = QTableWidgetItem(snap.file_name)
             file_item.setData(Qt.UserRole, snap.relative_path)
             self.table.setItem(row, 1, file_item)
-            # 列2：体积
             self.table.setItem(
                 row, 2,
                 SortableTableWidgetItem(_format_bytes(snap.size_bytes), snap.size_bytes),
             )
-            # 列3：编码信息
             codec_item = QTableWidgetItem(self._format_codec(snap))
             if getattr(snap, "video_codec", ""):
                 codec_item.setForeground(_COLOR_CODEC_OK)
@@ -274,7 +286,6 @@ class FileListPanel(QWidget):
             else:
                 codec_item.setForeground(_COLOR_CODEC_MISSING)
             self.table.setItem(row, 3, codec_item)
-            # 列4：HDR
             hdr_item = QTableWidgetItem(self._format_hdr(snap.hdr_type))
             hdr_item.setForeground(self._hdr_color(getattr(snap, "hdr_type", None)))
             self.table.setItem(row, 4, hdr_item)
@@ -300,10 +311,18 @@ class FileListPanel(QWidget):
                 elif decision.status_key == "probe_failed":
                     strategy_item.setForeground(_COLOR_PROBE_FAILED)
                 self.table.setItem(row, 5, strategy_item)
-            total_size += snap.size_bytes
+            self._batch_total_size += snap.size_bytes
+            self._batch_row_index += 1
 
+        # 还有剩余行，调度下一批
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, self._render_row_batch)
+
+    def _finish_populate(self):
+        """分批渲染完成后的收尾工作。"""
+        snapshots = self._batch_snapshots
         self.table.blockSignals(False)
-        total_tb = total_size / (1024**4)
+        total_tb = self._batch_total_size / (1024**4)
         processable_count = sum(1 for value in self._row_processable.values() if value)
         protected_count = sum(1 for value in self._row_status_keys.values() if value == "protected")
         self.summary_label.setText(
@@ -312,7 +331,7 @@ class FileListPanel(QWidget):
         )
         self._update_selection_count()
         self.table.setSortingEnabled(True)
-        self._populate_tree(snapshots, matched_strategies)
+        self._populate_tree(snapshots, self._batch_matches)
         self._apply_filter()
 
     def _format_hdr(self, hdr_type: Any) -> str:
@@ -428,6 +447,18 @@ class FileListPanel(QWidget):
             child.setData(0, Qt.UserRole, snap.relative_path)
             child.setToolTip(0, decision.tooltip or snap.file_name)
             child.setToolTip(4, decision.tooltip)
+            # 颜色标记 — 与平铺表格一致
+            if getattr(snap, "video_codec", ""):
+                child.setForeground(2, _COLOR_CODEC_OK)
+            elif getattr(snap, "probe_ok", None) is False and getattr(snap, "probe_error", ""):
+                child.setForeground(2, _COLOR_PROBE_FAILED)
+            else:
+                child.setForeground(2, _COLOR_CODEC_MISSING)
+            child.setForeground(3, self._hdr_color(getattr(snap, "hdr_type", None)))
+            if decision.status_key == "protected":
+                child.setForeground(4, _COLOR_HDR_DV)
+            elif decision.status_key == "probe_failed":
+                child.setForeground(4, _COLOR_PROBE_FAILED)
             if decision.processable:
                 child.setFlags(child.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
                 child.setCheckState(0, Qt.Unchecked)
