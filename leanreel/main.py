@@ -364,7 +364,6 @@ class Application:
         self.queue_panel.cancel_requested.connect(self.encoding_ctrl.cancel)
 
         self.notifier.scan_ready.connect(self._on_scan_ready)
-        self.notifier.probed.connect(self.file_panel.update_snapshot_row)
         self.notifier.progress.connect(
             lambda done, total: self.win.set_status(f"探测中：{done}/{total} ...")
         )
