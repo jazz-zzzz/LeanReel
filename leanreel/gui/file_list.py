@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from typing import Any
 
 from PySide6.QtWidgets import (
@@ -25,26 +24,7 @@ _COLOR_HDR_HDR10 = QColor("#d4a853")
 _COLOR_HDR_SDR = QColor("#6b6560")
 
 
-@dataclass
-class MatchResult:
-    """匹配结果 — 包含策略及其估算节省空间
-
-    ``strategy`` 可以是 Strategy 对象、策略名称字符串，或 None。
-    ``estimate`` 是 ``estimate_savings()`` 返回的字典，
-    包含 ``percentage``、``estimated_min_bytes``、``estimated_max_bytes`` 等键。
-    """
-    strategy: "Strategy | str | None" = None
-    estimate: dict | None = None
-
-
-@dataclass(frozen=True)
-class FileDecisionDisplay:
-    status_key: str
-    strategy_text: str
-    result_text: str
-    result_sort: int | float
-    processable: bool
-    tooltip: str
+from leanreel.data.file_store import MatchResult, FileDecisionDisplay  # 数据类移入 data 层，此处重导出保持兼容
 
 
 class SortableTableWidgetItem(QTableWidgetItem):

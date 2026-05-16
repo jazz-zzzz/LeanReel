@@ -1,10 +1,28 @@
-"""文件列表唯一数据源 — FileRow 和 FileTableStore"""
+"""文件列表唯一数据源 — 数据类 + FileTableStore"""
 from dataclasses import dataclass, field
+from typing import Any
 
 from PySide6.QtCore import QObject, Signal
 
 from leanreel.data.models import FileSnapshot
-from leanreel.gui.file_list import MatchResult, FileDecisionDisplay
+
+
+@dataclass
+class MatchResult:
+    """匹配结果 — 策略及其估算节省空间"""
+    strategy: Any = None          # Strategy | str | None
+    estimate: dict | None = None
+
+
+@dataclass(frozen=True)
+class FileDecisionDisplay:
+    """预计算的单行显示状态"""
+    status_key: str
+    strategy_text: str
+    result_text: str
+    result_sort: int | float
+    processable: bool
+    tooltip: str
 
 
 @dataclass
