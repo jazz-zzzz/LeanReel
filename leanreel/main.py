@@ -368,7 +368,6 @@ class Application:
         self.notifier.all_done.connect(
             lambda: self.win.set_status("编码信息探测完成")
         )
-        self.notifier.scan_finished.connect(self._on_scan_finished)
         self.notifier.task_updated.connect(self.encoding_ctrl.on_task_updated)
         self.notifier.encoding_done.connect(self.encoding_ctrl.on_encoding_done)
 
@@ -468,64 +467,6 @@ class Application:
 
         self.services.scanner.probe_stream(folder_id, path, _on_result, _on_finished, files=files)
         self.win.set_status(f"探测中：0/{total} ...")
-
-    def _on_scan_finished(self, snapshots, folder_id, folder_path, pending_jobs):
-        """扫描后台线程完成后的回调（保留兼容旧路径，实际已不用两阶段）。"""
-        self._scan_token += 1
-        my_token = self._scan_token
-
-        if folder_id is not None:
-            self.current_folder_paths[folder_id] = folder_path
-            self.current_snapshots = [
-                s for s in self.current_snapshots
-                if s.library_folder_id != folder_id
-            ] + list(snapshots)
-        else:
-            self.current_snapshots = list(snapshots)
-        self.strategy_overrides = {
-            path: strategy for path, strategy in self.strategy_overrides.items()
-            if any(s.relative_path == path for s in self.current_snapshots)
-        }
-
-        self._populate_file_list(self.current_snapshots)
-
-        if len(snapshots) == 0:
-            self.win.set_status(f"未找到视频文件：{folder_path}")
-            return
-
-        pending = len(pending_jobs)
-        if pending > 0:
-            self.win.set_status(f"扫描中：0/{pending} 个文件已探测...")
-            done_count = [0]
-            lock = threading.Lock()
-
-            def on_probed(snap):
-                if self._scan_token != my_token:
-                    return
-                if snap.probe_ok:
-                    strategy = self.services.matcher.match(snap)
-                    match = MatchResult(strategy=strategy, estimate=estimate_savings(snap, strategy) if strategy else None) if strategy else None
-                else:
-                    match = None
-                self.notifier.probed.emit(snap, match)
-
-            def on_progress():
-                if self._scan_token != my_token:
-                    return
-                with lock:
-                    done_count[0] += 1
-                    self.notifier.progress.emit(done_count[0], pending)
-
-            def on_finished():
-                if self._scan_token != my_token:
-                    return
-                self.notifier.all_done.emit()
-
-            self.services.scanner.start_background_probe_jobs(
-                list(pending_jobs), on_probed, on_finished, on_progress
-            )
-        else:
-            self.win.set_status(f"扫描完成：{len(snapshots)} 个文件")
 
     def _on_library_selected(self, lib_id):
         folders = self.services.db.get_folders_for_library(lib_id)

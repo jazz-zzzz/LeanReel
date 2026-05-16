@@ -27,6 +27,15 @@ class ConnectionPool:
             self._local.conn = conn
         return conn
 
+    def get_explicit(self):
+        return getattr(self._local, "explicit_conn", None)
+
+    def set_explicit(self, conn):
+        self._local.explicit_conn = conn
+
+    def clear_explicit(self):
+        self._local.explicit_conn = None
+
     def close_all(self):
         conn = getattr(self._local, "conn", None)
         if conn is not None:
@@ -40,7 +49,6 @@ class ConnectionPool:
 class Database:
     def __init__(self, db_path: str = ":memory:"):
         self._pool = ConnectionPool(db_path)
-        self._explicit_conn = None
         conn = self._pool.get()  # 只在初始化线程用一次
         self._create_tables(conn)
 
@@ -105,11 +113,11 @@ class Database:
         try:
             cur = conn.execute(sql, params or [])
             rows = [dict(row) for row in cur.fetchall()] if cur.description else []
-            if conn.in_transaction and self._explicit_conn is None:
+            if self._pool.get_explicit() is None:
                 conn.commit()
             return rows
         except Exception:
-            if conn.in_transaction:
+            if self._pool.get_explicit() is None:
                 conn.rollback()
             raise
 
@@ -128,19 +136,21 @@ class Database:
         """
         conn = self._pool.get()
         conn.execute("BEGIN IMMEDIATE")
-        self._explicit_conn = conn
+        self._pool.set_explicit(conn)
 
     def commit(self):
         """提交当前事务。"""
-        if self._explicit_conn is not None:
-            self._explicit_conn.commit()
-            self._explicit_conn = None
+        conn = self._pool.get_explicit()
+        if conn is not None:
+            conn.commit()
+            self._pool.clear_explicit()
 
     def rollback(self):
         """回滚当前事务。"""
-        if self._explicit_conn is not None:
-            self._explicit_conn.rollback()
-            self._explicit_conn = None
+        conn = self._pool.get_explicit()
+        if conn is not None:
+            conn.rollback()
+            self._pool.clear_explicit()
 
     @property
     def last_insert_id(self) -> int:
