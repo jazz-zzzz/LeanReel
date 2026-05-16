@@ -264,7 +264,7 @@ def test_file_list_updates_correct_row_after_sorting():
     panel.update_snapshot_row(large)
 
     visible = {
-        panel.table.item(row, 1).data(Qt.UserRole): panel.table.item(row, 3).text()
+        (panel.table.item(row, 1).data(Qt.UserRole) or [None, ""])[1]: panel.table.item(row, 3).text()
         for row in range(panel.table.rowCount())
     }
     assert visible["large.mkv"].startswith("hevc")
@@ -372,6 +372,87 @@ def test_file_list_does_not_select_skipped_sources_with_select_all():
     assert not (panel.table.item(1, 0).flags() & Qt.ItemIsEnabled)
     assert not (panel.table.item(2, 0).flags() & Qt.ItemIsEnabled)
     assert panel.selection_label.text() == "已选中 1/1 个可处理文件"
+    panel.close()
+
+
+def test_file_list_checked_state_survives_flat_to_tree_switch():
+    from leanreel.data.models import FileSnapshot
+    from leanreel.gui.file_list import FileListPanel, MatchResult
+
+    app = get_app()
+    panel = FileListPanel()
+    snap = FileSnapshot(library_folder_id=1, relative_path="Season/a.mkv", file_name="a.mkv", video_codec="h264")
+
+    panel.populate([snap], {"Season/a.mkv": MatchResult(strategy="A", estimate={"percentage": "10%"})})
+    panel.table.item(0, 0).setCheckState(Qt.Checked)
+
+    panel.set_view_mode("tree")
+
+    child = panel.tree.topLevelItem(0).child(0)
+    assert child.checkState(0) == Qt.Checked
+    assert panel.get_checked_file_keys() == [(1, "Season/a.mkv")]
+    panel.close()
+
+
+def test_file_list_checked_state_survives_tree_to_flat_switch():
+    from leanreel.data.models import FileSnapshot
+    from leanreel.gui.file_list import FileListPanel, MatchResult
+
+    app = get_app()
+    panel = FileListPanel()
+    snap = FileSnapshot(library_folder_id=1, relative_path="Season/a.mkv", file_name="a.mkv", video_codec="h264")
+
+    panel.populate([snap], {"Season/a.mkv": MatchResult(strategy="A", estimate={"percentage": "10%"})})
+    panel.set_view_mode("tree")
+    child = panel.tree.topLevelItem(0).child(0)
+    child.setCheckState(0, Qt.Checked)
+
+    panel.set_view_mode("flat")
+
+    assert panel.table.item(0, 0).checkState() == Qt.Checked
+    assert panel.get_checked_file_keys() == [(1, "Season/a.mkv")]
+    panel.close()
+
+
+def test_file_list_tree_checked_filter_hides_unchecked_files_and_empty_folders():
+    from leanreel.data.models import FileSnapshot
+    from leanreel.gui.file_list import FileListPanel, MatchResult
+
+    app = get_app()
+    panel = FileListPanel()
+    snapshots = [
+        FileSnapshot(library_folder_id=1, relative_path="A/checked.mkv", file_name="checked.mkv", video_codec="h264"),
+        FileSnapshot(library_folder_id=1, relative_path="B/unchecked.mkv", file_name="unchecked.mkv", video_codec="h264"),
+    ]
+    matches = {s.relative_path: MatchResult(strategy="A", estimate={"percentage": "10%"}) for s in snapshots}
+
+    panel.populate(snapshots, matches)
+    panel.set_view_mode("tree")
+    panel.tree.topLevelItem(0).child(0).setCheckState(0, Qt.Checked)
+    panel.filter_combo.setCurrentText("已选择")
+
+    assert not panel.tree.topLevelItem(0).isHidden()
+    assert panel.tree.topLevelItem(1).isHidden()
+    panel.close()
+
+
+def test_file_list_distinguishes_duplicate_relative_paths_by_folder_id():
+    from leanreel.data.models import FileSnapshot
+    from leanreel.gui.file_list import FileListPanel, MatchResult
+
+    app = get_app()
+    panel = FileListPanel()
+    snapshots = [
+        FileSnapshot(library_folder_id=1, relative_path="movie.mkv", file_name="movie.mkv", video_codec="h264"),
+        FileSnapshot(library_folder_id=2, relative_path="movie.mkv", file_name="movie.mkv", video_codec="h264"),
+    ]
+    matches = {"movie.mkv": MatchResult(strategy="A", estimate={"percentage": "10%"})}
+
+    panel.populate(snapshots, matches)
+    panel.table.item(0, 0).setCheckState(Qt.Checked)
+
+    assert panel.get_checked_file_keys() == [(1, "movie.mkv")]
+    assert panel.get_checked_relative_paths() == ["movie.mkv"]
     panel.close()
 
 

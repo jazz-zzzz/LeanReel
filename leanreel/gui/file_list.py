@@ -106,17 +106,62 @@ class FileListPanel(QWidget):
     def __init__(self):
         super().__init__()
         self._snapshots_by_path: dict[str, Any] = {}
+        self._snapshots_by_key: dict[tuple[int, str], Any] = {}
         self._strategy_lookup: dict[str, Any] = {}
         self._last_snapshots: list[Any] = []
         self._last_matches: dict[str, Any] = {}
         self._last_strategies: list[Any] | None = None
         self._row_by_path: dict[str, int] = {}
+        self._row_by_key: dict[tuple[int, str], int] = {}
         self._row_status_keys: dict[int, str] = {}
         self._row_processable: dict[int, bool] = {}
+        self._status_by_key: dict[tuple[int, str], str] = {}
+        self._processable_by_key: dict[tuple[int, str], bool] = {}
+        self._checked_keys: set[tuple[int, str]] = set()
+        self._tree_item_by_key: dict[tuple[int, str], QTreeWidgetItem] = {}
         self._populate_gen = 0
         self._path_gen: dict[str, int] = {}
         self.current_view_mode = "flat"
         self.setup_ui()
+
+    @staticmethod
+    def _file_key(snap: Any) -> tuple[int, str]:
+        return (int(getattr(snap, "library_folder_id", 0) or 0), str(getattr(snap, "relative_path", "")))
+
+    @staticmethod
+    def _coerce_key(value: Any) -> tuple[int, str] | None:
+        if isinstance(value, tuple) and len(value) == 2:
+            return (int(value[0] or 0), str(value[1]))
+        if isinstance(value, str) and value:
+            return (0, value)
+        return None
+
+    def _match_for_snap(self, snap: Any, matches: dict):
+        key = self._file_key(snap)
+        return matches.get(key, matches.get(snap.relative_path))
+
+    def get_checked_file_keys(self) -> list[tuple[int, str]]:
+        """返回所有勾中文件的 (library_folder_id, relative_path) key 列表（已排序）。"""
+        return sorted(self._checked_keys)
+
+    def _sync_checked_from_view(self):
+        """将当前视图的勾选状态同步回 _checked_keys。"""
+        if self.current_view_mode == "tree":
+            for key, item in list(self._tree_item_by_key.items()):
+                if item.flags() & Qt.ItemIsEnabled and item.checkState(0) == Qt.Checked:
+                    self._checked_keys.add(key)
+                else:
+                    self._checked_keys.discard(key)
+        else:
+            for row in range(self.table.rowCount()):
+                check_item = self.table.item(row, 0)
+                if check_item is not None:
+                    key = self._coerce_key(check_item.data(Qt.UserRole))
+                    if key is not None:
+                        if check_item.checkState() == Qt.Checked and check_item.flags() & Qt.ItemIsEnabled:
+                            self._checked_keys.add(key)
+                        else:
+                            self._checked_keys.discard(key)
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
@@ -219,9 +264,16 @@ class FileListPanel(QWidget):
         self._last_matches = dict(matched_strategies)
         self._last_strategies = strategies
         self._snapshots_by_path = {snap.relative_path: snap for snap in snapshots}
+        self._snapshots_by_key = {self._file_key(snap): snap for snap in snapshots}
         self._row_by_path = {}
+        self._row_by_key = {}
         self._row_status_keys = {}
         self._row_processable = {}
+        self._status_by_key = {}
+        self._processable_by_key = {}
+        self._tree_item_by_key = {}
+        valid_keys = set(self._snapshots_by_key)
+        self._checked_keys = {key for key in self._checked_keys if key in valid_keys}
         self._path_gen = {snap.relative_path: self._populate_gen for snap in snapshots}
         self._strategy_lookup = self._build_strategy_lookup(strategies)
 
@@ -258,7 +310,9 @@ class FileListPanel(QWidget):
                 self._finish_populate()
                 return
             snap = snapshots[row]
+            file_key = self._file_key(snap)
             self._row_by_path[snap.relative_path] = row
+            self._row_by_key[file_key] = row
             check_item = QTableWidgetItem()
             skip_reason = get_skip_reason(snap)
             if skip_reason:
@@ -266,10 +320,11 @@ class FileListPanel(QWidget):
                 check_item.setToolTip(skip_reason)
             else:
                 check_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-            check_item.setCheckState(Qt.Unchecked)
+            check_item.setData(Qt.UserRole, file_key)
+            check_item.setCheckState(Qt.Checked if file_key in self._checked_keys else Qt.Unchecked)
             self.table.setItem(row, 0, check_item)
             file_item = QTableWidgetItem(snap.file_name)
-            file_item.setData(Qt.UserRole, snap.relative_path)
+            file_item.setData(Qt.UserRole, file_key)
             self.table.setItem(row, 1, file_item)
             self.table.setItem(
                 row, 2,
@@ -290,10 +345,12 @@ class FileListPanel(QWidget):
             hdr_item.setForeground(self._hdr_color(getattr(snap, "hdr_type", None)))
             self.table.setItem(row, 4, hdr_item)
             decision = self._decision_display(
-                snap, matched_strategies.get(snap.relative_path)
+                snap, self._match_for_snap(snap, matched_strategies)
             )
             self._row_status_keys[row] = decision.status_key
             self._row_processable[row] = decision.processable
+            self._status_by_key[file_key] = decision.status_key
+            self._processable_by_key[file_key] = decision.processable
             self.table.setItem(
                 row, 6,
                 SortableTableWidgetItem(decision.result_text, decision.result_sort),
@@ -409,6 +466,8 @@ class FileListPanel(QWidget):
     def set_view_mode(self, mode: str):
         if mode not in {"flat", "tree"}:
             return
+        # 切换前将当前视图勾选状态同步到 _checked_keys
+        self._sync_checked_from_view()
         self.current_view_mode = mode
         if mode == "tree":
             self._populate_tree(list(self._snapshots_by_path.values()), self._last_matches)
@@ -416,6 +475,18 @@ class FileListPanel(QWidget):
             self.table.hide()
             self.tree.show()
         else:
+            # 切回平铺时从 _checked_keys 同步表格勾选状态
+            self.table.blockSignals(True)
+            for row in range(self.table.rowCount()):
+                check_item = self.table.item(row, 0)
+                if check_item is not None:
+                    key = self._coerce_key(check_item.data(Qt.UserRole))
+                    if key is not None:
+                        if key in self._checked_keys and check_item.flags() & Qt.ItemIsEnabled:
+                            check_item.setCheckState(Qt.Checked)
+                        else:
+                            check_item.setCheckState(Qt.Unchecked)
+            self.table.blockSignals(False)
             self.stack.setCurrentWidget(self.table)
             self.tree.hide()
             self.table.show()
@@ -423,6 +494,7 @@ class FileListPanel(QWidget):
     def _populate_tree(self, snapshots: list, matched_strategies: dict):
         self.tree.clear()
         self.tree.blockSignals(True)
+        self._tree_item_by_key.clear()
         folders: dict[str, QTreeWidgetItem] = {}
         for snap in snapshots:
             folder_name = str(snap.relative_path).replace("\\", "/").rsplit("/", 1)[0]
@@ -436,6 +508,7 @@ class FileListPanel(QWidget):
             decision = self._decision_display(
                 snap, matched_strategies.get(snap.relative_path)
             )
+            file_key = self._file_key(snap)
             child = QTreeWidgetItem([
                 snap.file_name,
                 _format_bytes(snap.size_bytes),
@@ -444,7 +517,7 @@ class FileListPanel(QWidget):
                 decision.strategy_text,
                 decision.result_text,
             ])
-            child.setData(0, Qt.UserRole, snap.relative_path)
+            child.setData(0, Qt.UserRole, file_key)
             child.setToolTip(0, decision.tooltip or snap.file_name)
             child.setToolTip(4, decision.tooltip)
             # 颜色标记 — 与平铺表格一致
@@ -461,30 +534,20 @@ class FileListPanel(QWidget):
                 child.setForeground(4, _COLOR_PROBE_FAILED)
             if decision.processable:
                 child.setFlags(child.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-                child.setCheckState(0, Qt.Unchecked)
+                child.setCheckState(0, Qt.Checked if file_key in self._checked_keys else Qt.Unchecked)
             else:
                 child.setFlags((child.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEnabled)
                 child.setToolTip(0, decision.tooltip)
+            self._tree_item_by_key[file_key] = child
             folder_item.addChild(child)
         self.tree.blockSignals(False)
         # 默认折叠，用户按需展开目录
 
     def _find_tree_child(self, relative_path: str) -> QTreeWidgetItem | None:
-        """在树视图中按 relative_path 查找叶子节点。"""
-        def _walk(item):
-            for i in range(item.childCount()):
-                child = item.child(i)
-                if child.childCount() > 0:
-                    result = _walk(child)
-                    if result is not None:
-                        return result
-                elif child.data(0, Qt.UserRole) == relative_path:
-                    return child
-            return None
-        for i in range(self.tree.topLevelItemCount()):
-            result = _walk(self.tree.topLevelItem(i))
-            if result is not None:
-                return result
+        """在树视图中按 relative_path 查找叶子节点（通过 _tree_item_by_key 定位）。"""
+        for (folder_id, path), item in self._tree_item_by_key.items():
+            if path == relative_path:
+                return item
         return None
 
     def _update_tree_child(self, relative_path: str, snap: Any, decision: FileDecisionDisplay):
@@ -581,8 +644,12 @@ class FileListPanel(QWidget):
         if row is not None:
             # 验证缓存行号未因排序而失效
             item = self.table.item(row, 1)
-            if item is None or item.data(Qt.UserRole) != relative_path:
+            if item is None:
                 row = None
+            else:
+                key = self._coerce_key(item.data(Qt.UserRole))
+                if key is None or key[1] != relative_path:
+                    row = None
         if row is None:
             # 缓存失效（例如排序后），回退到线性扫描并重建缓存
             row = self._find_row_by_relative_path(relative_path)
@@ -643,41 +710,26 @@ class FileListPanel(QWidget):
     def _find_row_by_relative_path(self, relative_path: str) -> int | None:
         for row in range(self.table.rowCount()):
             item = self.table.item(row, 1)
-            if item is not None and item.data(Qt.UserRole) == relative_path:
-                return row
+            if item is not None:
+                key = self._coerce_key(item.data(Qt.UserRole))
+                if key is not None and key[1] == relative_path:
+                    return row
         return None
 
     def get_checked_relative_paths(self) -> list[str]:
-        """返回所有勾中文件的 relative_path 列表（表格和树视图均支持）。"""
-        if self.current_view_mode == "tree":
-            return self._get_checked_tree_paths()
-        checked: list[str] = []
-        for row in range(self.table.rowCount()):
-            check_item = self.table.item(row, 0)
-            if check_item and check_item.checkState() == Qt.Checked and check_item.flags() & Qt.ItemIsEnabled:
-                name_item = self.table.item(row, 1)
-                if name_item:
-                    path = name_item.data(Qt.UserRole)
-                    if path:
-                        checked.append(path)
-        return checked
+        """返回所有勾中文件的 relative_path 列表（基于 _checked_keys，与视图无关）。"""
+        return sorted({key[1] for key in self._checked_keys})
 
     def _get_checked_tree_paths(self) -> list[str]:
-        checked: list[str] = []
-        def _walk(item):
-            for i in range(item.childCount()):
-                child = item.child(i)
-                if child.childCount() > 0:
-                    _walk(child)
-                else:
-                    data = child.data(0, Qt.UserRole)
-                    if data and child.flags() & Qt.ItemIsEnabled and child.checkState(0) == Qt.Checked:
-                        checked.append(data)
-        for i in range(self.tree.topLevelItemCount()):
-            _walk(self.tree.topLevelItem(i))
-        return checked
+        """兼容旧调用方：基于 _checked_keys 返回已勾选路径列表。"""
+        return self.get_checked_relative_paths()
 
     def select_all(self):
+        # 更新共享状态
+        for key in self._snapshots_by_key:
+            if self._processable_by_key.get(key, False):
+                self._checked_keys.add(key)
+        # 更新 UI
         if self.current_view_mode == "tree":
             self._set_tree_checked(True)
         else:
@@ -690,6 +742,7 @@ class FileListPanel(QWidget):
         self._update_selection_count()
 
     def deselect_all(self):
+        self._checked_keys.clear()
         if self.current_view_mode == "tree":
             self._set_tree_checked(False)
         else:
@@ -716,6 +769,12 @@ class FileListPanel(QWidget):
 
     def _on_item_changed(self, item: QTableWidgetItem):
         if item.column() == 0:
+            key = self._coerce_key(item.data(Qt.UserRole))
+            if key is not None:
+                if item.checkState() == Qt.Checked and item.flags() & Qt.ItemIsEnabled:
+                    self._checked_keys.add(key)
+                else:
+                    self._checked_keys.discard(key)
             self._apply_filter()
 
     def _on_selection_changed(self):
@@ -723,50 +782,86 @@ class FileListPanel(QWidget):
         if len(rows) == 1:
             row = next(iter(rows))
             item = self.table.item(row, 1)
-            rel = item.data(Qt.UserRole) if item else ""
+            data = item.data(Qt.UserRole) if item else None
+            key = self._coerce_key(data) if data else None
+            rel = key[1] if key else ""
             self.row_selected.emit(rel or "")
         else:
             self.row_selected.emit("")  # 多选或取消选中 → 清空右面板绑定
 
     def _on_tree_item_changed(self, item: QTreeWidgetItem, column: int):
         if column == 0:
-            self._update_selection_count()
+            key = self._coerce_key(item.data(0, Qt.UserRole))
+            if key is not None:
+                if item.checkState(0) == Qt.Checked and item.flags() & Qt.ItemIsEnabled:
+                    self._checked_keys.add(key)
+                else:
+                    self._checked_keys.discard(key)
+            self._apply_filter()
 
     def _on_tree_selection_changed(self):
         items = self.tree.selectedItems()
         if len(items) == 1 and items[0].childCount() == 0:
-            rel = items[0].data(0, Qt.UserRole) or ""
+            data = items[0].data(0, Qt.UserRole)
+            key = self._coerce_key(data) if data else None
+            rel = key[1] if key else ""
             self.row_selected.emit(rel)
         else:
             self.row_selected.emit("")
 
     def _apply_filter(self):
         filter_key = self.filter_combo.currentData() if hasattr(self, "filter_combo") else "all"
-        for row in range(self.table.rowCount()):
-            status_key = self._row_status_keys.get(row, "unmatched")
-            check_item = self.table.item(row, 0)
-            checked = check_item is not None and check_item.checkState() == Qt.Checked
+        if self.current_view_mode == "tree":
+            self._apply_tree_filter(filter_key)
+        else:
+            for row in range(self.table.rowCount()):
+                status_key = self._row_status_keys.get(row, "unmatched")
+                check_item = self.table.item(row, 0)
+                checked = check_item is not None and check_item.checkState() == Qt.Checked
+                hide = False
+                if filter_key == "processable":
+                    hide = not self._row_processable.get(row, False)
+                elif filter_key == "protected":
+                    hide = status_key != "protected"
+                elif filter_key == "probe_failed":
+                    hide = status_key != "probe_failed"
+                elif filter_key == "checked":
+                    hide = not checked
+                self.table.setRowHidden(row, hide)
+        self._update_selection_count()
+
+    def _apply_tree_filter(self, filter_key: str):
+        """树视图过滤：隐藏不匹配的叶子节点，并隐藏空文件夹。"""
+        # 先对每个叶子项决定可见性
+        for key, child in self._tree_item_by_key.items():
+            status_key = self._status_by_key.get(key, "unmatched")
+            checked = (
+                child.flags() & Qt.ItemIsEnabled
+                and child.checkState(0) == Qt.Checked
+            )
             hide = False
             if filter_key == "processable":
-                hide = not self._row_processable.get(row, False)
+                hide = not self._processable_by_key.get(key, False)
             elif filter_key == "protected":
                 hide = status_key != "protected"
             elif filter_key == "probe_failed":
                 hide = status_key != "probe_failed"
             elif filter_key == "checked":
                 hide = not checked
-            self.table.setRowHidden(row, hide)
-        self._update_selection_count()
+            child.setHidden(hide)
+        # 遍历顶层文件夹：有可见子项的保持可见，否则隐藏
+        for i in range(self.tree.topLevelItemCount()):
+            folder_item = self.tree.topLevelItem(i)
+            has_visible = False
+            for j in range(folder_item.childCount()):
+                if not folder_item.child(j).isHidden():
+                    has_visible = True
+                    break
+            folder_item.setHidden(not has_visible)
 
     def _update_selection_count(self):
-        checked = 0
-        processable_total = 0
-        for row in range(self.table.rowCount()):
-            if self._row_processable.get(row, False):
-                processable_total += 1
-            item = self.table.item(row, 0)
-            if item and item.checkState() == Qt.Checked and item.flags() & Qt.ItemIsEnabled:
-                checked += 1
+        checked = len([k for k in self._checked_keys if self._processable_by_key.get(k, False)])
+        processable_total = sum(1 for v in self._processable_by_key.values() if v)
         self.selection_label.setText(f"已选中 {checked}/{processable_total} 个可处理文件")
 
     def _decision_display(self, snap: Any, match: MatchResult | None) -> FileDecisionDisplay:

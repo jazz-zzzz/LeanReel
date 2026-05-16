@@ -115,7 +115,8 @@ def build_encode_tasks(
         folder_path = folder_paths.get(snap.library_folder_id)
         if not folder_path:
             continue
-        selected_strategy = strategy_overrides.get(snap.relative_path, strategy)
+        file_key = (int(snap.library_folder_id or 0), str(snap.relative_path))
+        selected_strategy = strategy_overrides.get(file_key, strategy_overrides.get(snap.relative_path, strategy))
         input_path = Path(folder_path) / snap.relative_path
         tasks.append(EncodeTask(
             file_name=snap.file_name,
@@ -398,7 +399,11 @@ class Application:
             self.win.set_status(str(e))
 
     def _on_folder_added(self, lib_id, path):
-        folder = self.services.lib_mgr.add_folder(lib_id, path)
+        try:
+            folder = self.services.lib_mgr.add_folder(lib_id, path)
+        except ValueError as e:
+            self.win.set_status(str(e))
+            return
         self._refresh_libraries()
         self.win.set_status(f"扫描 {path}...")
 
