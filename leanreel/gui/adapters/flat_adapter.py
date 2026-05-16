@@ -24,7 +24,7 @@ class FlatAdapter(QObject):
 
     # ── rebuild (分批渲染，避免主线程阻塞) ──
 
-    _BATCH = 50
+    _BATCH = 20
 
     def _on_rebuild(self):
         store = self._store
@@ -47,8 +47,10 @@ class FlatAdapter(QObject):
             self._render_row(i, row)
         self._rebuild_idx = end
         if self._rebuild_idx < store.count():
+            from PySide6.QtWidgets import QApplication
+            QApplication.processEvents()
             from PySide6.QtCore import QTimer
-            QTimer.singleShot(10, self._render_batch)
+            QTimer.singleShot(5, self._render_batch)
         else:
             self._table.blockSignals(False)
 
@@ -180,5 +182,7 @@ class FlatAdapter(QObject):
             self._table.setCellWidget(i, 5, combo)
         self._combo_idx = end
         if self._combo_idx < self._table.rowCount():
+            from PySide6.QtWidgets import QApplication
+            QApplication.processEvents()
             from PySide6.QtCore import QTimer
-            QTimer.singleShot(10, self._render_combo_batch)
+            QTimer.singleShot(5, self._render_combo_batch)
