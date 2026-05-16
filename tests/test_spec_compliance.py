@@ -254,3 +254,119 @@ def test_f1_main_thread_stays_responsive_after_rebuild(qtbot):
     QApplication.processEvents()  # 不应崩溃
     assert panel.table.model().rowCount() == 100
     panel.close()
+
+
+# ── C2: 树视图文件夹总大小 ──
+
+def test_c2_tree_folder_totals(qtbot):
+    """树视图文件夹节点显示累计大小"""
+    _qapp()
+    panel = FileListPanel()
+    qtbot.addWidget(panel)
+    s1 = _snap(relative_path="Season 1/a.mkv", size_bytes=1000)
+    s2 = _snap(relative_path="Season 1/b.mkv", size_bytes=2000)
+    s3 = _snap(relative_path="Season 2/c.mkv", size_bytes=500)
+    panel.populate([s1, s2, s3], {})
+    panel.set_view_mode("tree")
+    root = panel.tree.invisibleRootItem()
+    assert root.childCount() == 2
+    folder1 = root.child(0)
+    assert folder1.childCount() == 2
+    assert "KB" in folder1.text(1)
+    assert folder1.data(1, Qt.UserRole) == 3000
+    panel.close()
+
+
+def test_c2_tree_view_colors_match_flat(qtbot):
+    """树视图和平铺视图颜色一致"""
+    _qapp()
+    panel = FileListPanel()
+    qtbot.addWidget(panel)
+    snap = _snap(video_codec="h264")
+    panel.populate([snap], {"a.mkv": MatchResult(strategy="均衡压缩")})
+    panel.set_view_mode("tree")
+    folder = panel.tree.topLevelItem(0)
+    child = folder.child(0)
+    assert child.foreground(2).color().name() == "#8db87c"
+    assert child.foreground(3).color().name() == "#6b6560"
+    panel.close()
+
+
+def test_e1_batch_strategy_apply(qtbot):
+    """多选文件后切换策略 -> 全部选中文件应用"""
+    _qapp()
+    from leanreel.core.strategy import Strategy
+    panel = FileListPanel()
+    qtbot.addWidget(panel)
+    s1 = _snap(relative_path="a.mkv")
+    s2 = _snap(relative_path="b.mkv")
+    strategy = Strategy(name="均衡压缩", estimated_savings="35-50%")
+    new_strategy = Strategy(name="轻量压缩", estimated_savings="10-15%")
+    panel.populate([s1, s2], {"a.mkv": MatchResult(strategy=strategy), "b.mkv": MatchResult(strategy=strategy)}, strategies=[strategy, new_strategy])
+    m = panel.table.model()
+    m.setData(m.index(0, 0), Qt.Checked, Qt.CheckStateRole)
+    m.setData(m.index(1, 0), Qt.Checked, Qt.CheckStateRole)
+    changes = []
+    panel.strategy_override_changed.connect(lambda p, n: changes.append((p, n)))
+    delegate = panel.table.itemDelegateForColumn(5)
+    combo0 = panel.table.indexWidget(m.index(0, 5))
+    combo1 = panel.table.indexWidget(m.index(1, 5))
+    if combo0:
+        combo0.setCurrentText("轻量压缩")
+        delegate.setModelData(combo0, m, m.index(0, 5))
+    if combo1:
+        combo1.setCurrentText("轻量压缩")
+        delegate.setModelData(combo1, m, m.index(1, 5))
+    assert len(changes) >= 2
+    panel.close()
+
+
+def test_d1_existing_data_preserved_on_rebuild():
+    """重建缓存时 is_probe_complete 的旧条目保留"""
+    from leanreel.data.file_store import FileTableStore, FileRow
+    store = FileTableStore()
+    old_snap = _snap(video_codec="h264", size_bytes=1024, video_width=1920, video_height=1080)
+    row = FileRow(snap=old_snap, decision=_decision())
+    store.rebuild([row])
+    from leanreel.core.scanner import is_probe_complete
+    assert is_probe_complete(row.snap) is True
+
+
+def test_f1_probe_update_does_not_block_main_thread(qtbot):
+    """探测更新后主线程仍响应"""
+    _qapp()
+    from leanreel.data.file_store import FileTableStore, FileRow
+    from leanreel.gui.adapters.file_table_model import FileTableModel
+    store = FileTableStore()
+    view = QTableView()
+    model = FileTableModel(store, view)
+    view.setModel(model)
+    rows = [FileRow(snap=_snap(relative_path=f"f{i}.mkv"), decision=_decision()) for i in range(100)]
+    store.rebuild(rows)
+    for i in range(80):
+        new_snap = _snap(relative_path=f"f{i % 100}.mkv", video_codec="h264", size_bytes=i * 100)
+        store.update_row((7, f"f{i % 100}.mkv"), new_snap)
+        if i % 20 == 0:
+            QApplication.processEvents()
+    assert model.rowCount() == 100
+
+
+def test_c1_tree_to_flat_checked_persists(qtbot):
+    """树视图勾选 -> 切回平铺 -> 勾选保持"""
+    _qapp()
+    panel = FileListPanel()
+    qtbot.addWidget(panel)
+    from leanreel.core.strategy import Strategy
+    s = Strategy(name="x265", estimated_savings="35-50%")
+    s1 = _snap(relative_path="S1/a.mkv", video_codec="h264")
+    s2 = _snap(relative_path="S1/b.mkv", video_codec="h264")
+    panel.populate([s1, s2], {"S1/a.mkv": MatchResult(strategy=s), "S1/b.mkv": MatchResult(strategy=s)}, strategies=[s])
+    panel.set_view_mode("tree")
+    folder = panel.tree.topLevelItem(0)
+    child0 = folder.child(0)
+    child0.setCheckState(0, Qt.Checked)
+    panel.set_view_mode("flat")
+    m = panel.table.model()
+    assert m.data(m.index(0, 0), Qt.CheckStateRole) == Qt.Checked
+    assert m.data(m.index(1, 0), Qt.CheckStateRole) == Qt.Unchecked
+    panel.close()
