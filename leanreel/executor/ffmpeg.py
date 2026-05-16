@@ -1,5 +1,6 @@
 """FFmpeg 执行器 — 编码编排，I/O 分离、临时文件管理、Dolby Vision 流程"""
 import hashlib
+import os as _os
 import shutil
 import tempfile
 import threading
@@ -24,6 +25,22 @@ __all__ = [
     "run_ffmpeg",
     "set_ffmpeg_path",
 ]
+
+
+def _safe_replace_output(temp_output, final_output):
+    """原子替换输出文件，失败时保留已有文件。"""
+    staging = str(final_output) + ".staging"
+    try:
+        shutil.move(str(temp_output), staging)
+        if _os.path.exists(staging) and _os.path.getsize(staging) > 0:
+            _os.replace(staging, str(final_output))
+    except Exception:
+        # 清理 staging，保留已有的 final_output
+        try:
+            _os.unlink(staging)
+        except Exception:
+            pass
+        raise
 
 
 class CancelledError(Exception):
@@ -234,9 +251,7 @@ class FFmpegExecutor:
                                 task.compressed_size = final_output.stat().st_size
                         else:
                             final_output.parent.mkdir(parents=True, exist_ok=True)
-                            if final_output.exists():
-                                final_output.unlink()
-                            shutil.move(str(temp_output), str(final_output))
+                            _safe_replace_output(temp_output, final_output)
                             if final_output.exists():
                                 task.compressed_size = final_output.stat().st_size
                         # 压缩后体积变大 → 丢弃结果，保留原文件
@@ -248,9 +263,7 @@ class FFmpegExecutor:
                     else:
                         # 至少保留编码产物
                         final_output.parent.mkdir(parents=True, exist_ok=True)
-                        if final_output.exists():
-                            final_output.unlink()
-                        shutil.move(str(temp_output), str(final_output))
+                        _safe_replace_output(temp_output, final_output)
                         if final_output.exists():
                             task.compressed_size = final_output.stat().st_size
                     plan.mark_stage_completed(i)

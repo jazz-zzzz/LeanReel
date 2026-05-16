@@ -398,7 +398,11 @@ class Application:
             self.win.set_status(str(e))
 
     def _on_folder_added(self, lib_id, path):
-        folder = self.services.lib_mgr.add_folder(lib_id, path)
+        try:
+            folder = self.services.lib_mgr.add_folder(lib_id, path)
+        except ValueError as e:
+            self.win.set_status(str(e))
+            return
         self._refresh_libraries()
         self.win.set_status(f"扫描 {path}...")
 

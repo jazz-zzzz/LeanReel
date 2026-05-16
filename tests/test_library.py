@@ -1,4 +1,5 @@
 """库管理测试"""
+import os as _os
 import pytest
 from leanreel.data.database import Database
 from leanreel.core.library import LibraryManager
@@ -22,7 +23,7 @@ def test_add_folder_to_library(mgr: LibraryManager):
     lib = mgr.create_library("Film")
     folder = mgr.add_folder(lib.id, "/mnt/nas/Film")
     assert folder.id == 1
-    assert folder.path == "/mnt/nas/Film"
+    assert folder.path == _os.path.normpath("/mnt/nas/Film")
 
     folders = mgr.get_folders(lib.id)
     assert len(folders) == 1
