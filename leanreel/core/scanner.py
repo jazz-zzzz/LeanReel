@@ -36,6 +36,94 @@ class Scanner:
         """从数据库加载已缓存的快照列表，不走文件系统。毫秒级。"""
         return self._repo.load_all(library_folder_id)
 
+    def probe_multi(
+        self,
+        folders: list[tuple[int, str, list[tuple[str, str]]]],
+        on_result: Callable[[FileSnapshot], None],
+        on_finished: Callable[[], None] | None = None,
+    ) -> int:
+        """多文件夹合并探测 — 共享一个线程池，避免每个文件夹各自开池。
+
+        folders: [(folder_id, folder_path, files_list), ...]
+        files_list 可通过 find_video_files(path) 提前获取。
+        返回总文件数。
+        """
+        import concurrent.futures
+
+        total = 0
+        all_jobs: list[tuple[int, str, str]] = []  # (folder_id, rel_path, abs_path)
+        cache_by_folder: dict[int, dict[str, FileSnapshot]] = {}
+
+        for folder_id, folder_path, files in folders:
+            folder_path = os.path.normpath(folder_path)
+            cached_dict = {s.relative_path: s for s in self._repo.load_all(folder_id)}
+            cache_by_folder[folder_id] = cached_dict
+            for rel_path, abs_path in files:
+                all_jobs.append((folder_id, rel_path, abs_path))
+            total += len(files)
+
+        def _process(folder_id: int, rel_path: str, abs_path: str) -> FileSnapshot:
+            try:
+                st = os.stat(abs_path)
+                fsize, fmtime = st.st_size, st.st_mtime
+            except OSError:
+                fsize, fmtime = 0, 0.0
+
+            existing = cache_by_folder[folder_id].get(rel_path)
+            if existing and existing.size_bytes == fsize and existing.file_mtime == fmtime:
+                if is_probe_complete(existing):
+                    return existing
+
+            probe = self._get_probe()
+            last_error = None
+            for attempt in range(2):
+                try:
+                    snap = probe.probe(abs_path, folder_id)
+                    snap.relative_path = rel_path
+                    snap.file_mtime = fmtime
+                    snap.probe_ok = True
+                    try:
+                        self._repo.save(snap)
+                    except Exception as save_err:
+                        import sys
+                        print(f"[LeanReel] 保存快照失败: {abs_path}\n  {save_err}", file=sys.stderr, flush=True)
+                    return snap
+                except Exception as e:
+                    last_error = e
+                    if attempt == 0:
+                        import sys
+                        print(f"[LeanReel] 探测失败(重试中): {abs_path}", file=sys.stderr, flush=True)
+
+            snap = FileSnapshot(
+                library_folder_id=folder_id,
+                relative_path=rel_path,
+                file_name=os.path.basename(abs_path),
+                size_bytes=fsize,
+                file_mtime=fmtime,
+                probe_ok=False,
+                probe_error=str(last_error)[:200] if last_error else "探测失败",
+            )
+            try:
+                self._repo.save(snap)
+            except Exception:
+                pass
+            return snap
+
+        def _run():
+            workers = min(self.max_workers, max(1, total))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = [pool.submit(_process, fid, r, a) for fid, r, a in all_jobs]
+                for f in concurrent.futures.as_completed(futures):
+                    try:
+                        on_result(f.result())
+                    except Exception:
+                        pass
+            if on_finished:
+                on_finished()
+
+        threading.Thread(target=_run, daemon=True).start()
+        return total
+
     def probe_stream(
         self,
         library_folder_id: int,

@@ -540,39 +540,35 @@ class Application:
         self._populate_file_list(self.current_snapshots)
         self.win.set_status(f"探测中：0/{total} ...")
 
-        # 第三步：为每个文件夹启动 probe_stream，探测结果即时刷新行
+        # 第三步：合并所有文件夹到一个共享线程池探测
         done = [0]
         lock = threading.Lock()
 
-        for folder_id, path in folders_at_call:
-            def _make_handler(fid):
-                def _on_result(snap):
-                    if self._scan_token != my_token:
-                        return
-                    # 替换占位快照
-                    for i, s in enumerate(self.current_snapshots):
-                        if s.relative_path == snap.relative_path and s.library_folder_id == fid:
-                            self.current_snapshots[i] = snap
-                            break
-                    if snap.probe_ok:
-                        strategy = self.services.matcher.match(snap)
-                        match = MatchResult(strategy=strategy, estimate=estimate_savings(snap, strategy) if strategy else None) if strategy else None
-                    else:
-                        match = None
-                    self.notifier.probed.emit(snap, match)
-                    with lock:
-                        done[0] += 1
-                        self.notifier.progress.emit(done[0], total)
-                        if done[0] == total:
-                            self._refresh_running = False
-                            self.notifier.all_done.emit()
-                return _on_result
+        def _on_result(snap):
+            if self._scan_token != my_token:
+                return
+            for i, s in enumerate(self.current_snapshots):
+                if s.relative_path == snap.relative_path and s.library_folder_id == snap.library_folder_id:
+                    self.current_snapshots[i] = snap
+                    break
+            if snap.probe_ok:
+                strategy = self.services.matcher.match(snap)
+                match = MatchResult(strategy=strategy, estimate=estimate_savings(snap, strategy) if strategy else None) if strategy else None
+            else:
+                match = None
+            self.notifier.probed.emit(snap, match)
+            with lock:
+                done[0] += 1
+                self.notifier.progress.emit(done[0], total)
+                if done[0] == total:
+                    self._refresh_running = False
+                    self.notifier.all_done.emit()
 
-            self.services.scanner.probe_stream(
-                folder_id, path,
-                on_result=_make_handler(folder_id),
-                on_finished=None,
-            )
+        folders_input = []
+        for folder_id, path in folders_at_call:
+            folders_input.append((folder_id, path, find_video_files(path)))
+
+        self.services.scanner.probe_multi(folders_input, _on_result, on_finished=None)
 
     def _on_single_folder_refresh(self, folder_id):
         """流式刷新单个文件夹（库面板或树视图右键触发）。"""
