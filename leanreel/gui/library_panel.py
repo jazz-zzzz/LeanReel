@@ -131,7 +131,7 @@ class LibraryPanel(QWidget):
             menu.addAction("添加文件夹...", lambda: self._add_folder_dialog(obj_id))
             menu.addAction("从 LeanReel 删除库", lambda: self._delete_library(obj_id))
         elif kind == "folder":
-            menu.addAction("刷新文件夹", lambda: self.folder_refresh_requested.emit(obj_id))
+            menu.addAction("重建缓存", lambda: self.folder_refresh_requested.emit(obj_id))
             menu.addSeparator()
             menu.addAction("从片库移除文件夹", lambda: self._remove_folder(obj_id))
         menu.exec(self.tree.viewport().mapToGlobal(pos))

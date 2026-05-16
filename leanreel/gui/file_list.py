@@ -829,7 +829,7 @@ class FileListPanel(QWidget):
             return
         from PySide6.QtWidgets import QMenu
         menu = QMenu()
-        menu.addAction("刷新此文件夹", lambda: self.tree_folder_refresh_requested.emit(folder_id))
+        menu.addAction("重建此文件夹缓存", lambda: self.tree_folder_refresh_requested.emit(folder_id))
         menu.exec(self.tree.viewport().mapToGlobal(pos))
 
     def _on_tree_selection_changed(self):
