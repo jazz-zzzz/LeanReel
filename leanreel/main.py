@@ -402,6 +402,14 @@ class Application:
         self.store.rebuild(rows, strategies=self.services.strategies, keep_checked=keep_checked)
         self.file_panel._strategy_lookup = self.file_panel._build_strategy_lookup(self.services.strategies)
         self.file_panel._show_table()
+        # QComboBox 延后创建（fast=True 时同步，否则异步）
+        if self.services.strategies and self.file_panel._flat_adapter:
+            from PySide6.QtCore import QTimer
+            if fast:
+                self.file_panel._flat_adapter.create_combo_cells(self.file_panel._create_strategy_combo)
+            else:
+                QTimer.singleShot(50, lambda: self.file_panel._flat_adapter.create_combo_cells(
+                    self.file_panel._create_strategy_combo) if self.file_panel._flat_adapter else None)
         return matched
 
     # ── 库信号处理 ──
@@ -490,6 +498,10 @@ class Application:
 
         self._refresh_running = True
         self.win.set_status("扫描中...")
+        # 立即清除旧列表，展示"扫描中"空状态
+        self.current_snapshots = []
+        self.file_panel._show_empty("扫描中...")
+        self.store.rebuild([])
         self._scan_token += 1
         my_token = self._scan_token
         folders_at_call = list(self.current_folder_paths.items())

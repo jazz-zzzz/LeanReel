@@ -22,7 +22,9 @@ class FlatAdapter(QObject):
         store.row_updated.connect(self._on_row_updated)
         store.checked_changed.connect(self._on_checked_changed)
 
-    # ── rebuild ──
+    # ── rebuild (分批渲染，避免主线程阻塞) ──
+
+    _BATCH = 200
 
     def _on_rebuild(self):
         store = self._store
@@ -32,11 +34,23 @@ class FlatAdapter(QObject):
         self._table.setRowCount(store.count())
         self._row_key = []
         self._combo_created = False
-        for i in range(store.count()):
+        self._rebuild_idx = 0
+        self._render_batch()
+
+    def _render_batch(self):
+        """每批渲染 _BATCH 行，剩余用 QTimer 调度。"""
+        store = self._store
+        end = min(self._rebuild_idx + self._BATCH, store.count())
+        for i in range(self._rebuild_idx, end):
             row = store.row_at(i)
             self._row_key.append(row.key)
             self._render_row(i, row)
-        self._table.blockSignals(False)
+        self._rebuild_idx = end
+        if self._rebuild_idx < store.count():
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, self._render_batch)
+        else:
+            self._table.blockSignals(False)
 
     def _render_row(self, table_row: int, row):
         key = row.key
