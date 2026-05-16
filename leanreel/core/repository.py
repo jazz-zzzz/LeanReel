@@ -49,8 +49,8 @@ class SnapshotRepository:
                        (library_folder_id, relative_path, file_name, size_bytes,
                         video_codec, video_width, video_height, hdr_type,
                         audio_tracks, subtitle_tracks, duration_seconds, bitrate_bps,
-                        file_mtime, probe_ok)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        file_mtime, probe_ok, probe_error)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                        ON CONFLICT(library_folder_id, relative_path) DO UPDATE SET
                        file_name=excluded.file_name,
                        size_bytes=excluded.size_bytes, video_codec=excluded.video_codec,
@@ -59,6 +59,7 @@ class SnapshotRepository:
                        subtitle_tracks=excluded.subtitle_tracks,
                        duration_seconds=excluded.duration_seconds, bitrate_bps=excluded.bitrate_bps,
                        file_mtime=excluded.file_mtime, probe_ok=excluded.probe_ok,
+                       probe_error=excluded.probe_error,
                        scanned_at=datetime('now')""",
                     [
                         snap.library_folder_id,
@@ -75,6 +76,7 @@ class SnapshotRepository:
                         snap.bitrate_bps,
                         snap.file_mtime,
                         1 if snap.probe_ok else 0,
+                        snap.probe_error,
                     ],
                 )
                 return
@@ -107,6 +109,7 @@ class SnapshotRepository:
             bitrate_bps=row["bitrate_bps"],
             file_mtime=row.get("file_mtime", 0.0),
             probe_ok=bool(row.get("probe_ok", 0)),
+            probe_error=row.get("probe_error", ""),
         )
 
     # ── JSON 序列化 ──

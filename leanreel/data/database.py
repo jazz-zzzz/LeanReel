@@ -73,6 +73,7 @@ class Database:
             bitrate_bps INTEGER DEFAULT 0,
             file_mtime REAL DEFAULT 0,
             probe_ok INTEGER DEFAULT 0,
+            probe_error TEXT DEFAULT '',
             scanned_at TEXT DEFAULT (datetime('now')),
             UNIQUE(library_folder_id, relative_path)
         );
@@ -96,6 +97,8 @@ class Database:
             conn.execute("ALTER TABLE file_snapshot ADD COLUMN file_mtime REAL DEFAULT 0")
         if "probe_ok" not in existing:
             conn.execute("ALTER TABLE file_snapshot ADD COLUMN probe_ok INTEGER DEFAULT 0")
+        if "probe_error" not in existing:
+            conn.execute("ALTER TABLE file_snapshot ADD COLUMN probe_error TEXT DEFAULT ''")
 
     def execute(self, sql: str, params=None):
         conn = self._pool.get()

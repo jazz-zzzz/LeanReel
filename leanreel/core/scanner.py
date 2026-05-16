@@ -12,6 +12,11 @@ from leanreel.core.file_discovery import find_video_files
 from leanreel.core.repository import SnapshotRepository
 
 
+def is_probe_complete(snap: FileSnapshot) -> bool:
+    """缓存快照是否包含完整的探测信息"""
+    return bool(snap.probe_ok and snap.video_codec and snap.video_width and snap.video_height)
+
+
 @dataclass
 class ScanBatch:
     snapshots: list[FileSnapshot]
@@ -63,11 +68,9 @@ class Scanner:
 
             existing = cached_dict.get(rel_path)
             if existing and existing.size_bytes == file_size and existing.file_mtime == file_mtime:
-                results.append(existing)
-                continue
-            if existing and not existing.probe_ok and existing.file_mtime == file_mtime:
-                results.append(existing)
-                continue
+                if is_probe_complete(existing):
+                    results.append(existing)
+                    continue
 
             probe_jobs.append((library_folder_id, rel_path, abs_path, file_size, file_mtime))
 
@@ -131,10 +134,9 @@ class Scanner:
 
             existing = cached_dict.get(rel_path)
             if existing and existing.size_bytes == file_size and existing.file_mtime == file_mtime:
-                if existing.probe_ok:
+                if is_probe_complete(existing):
                     results.append(existing)
                     continue
-                # probe_ok=False 但文件未变：仍需重新探测（之前可能因临时问题失败）
 
             placeholder = FileSnapshot(
                 library_folder_id=library_folder_id,

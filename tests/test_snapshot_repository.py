@@ -475,6 +475,67 @@ def test_all_hdr_types_survive_roundtrip(repo, folder_id):
         assert isinstance(snap.hdr_type, HDRType)
 
 
+def test_save_roundtrips_probe_error(repo, folder_id):
+    """确保 probe_error 能正确持久化和加载"""
+    snap = FileSnapshot(
+        library_folder_id=folder_id,
+        relative_path="bad.mkv",
+        file_name="bad.mkv",
+        size_bytes=1024,
+        probe_ok=False,
+        probe_error="ffprobe timed out after 30s",
+    )
+    repo.save(snap)
+    loaded = repo.get_cached(folder_id, "bad.mkv")
+    assert loaded is not None
+    assert loaded.probe_ok is False
+    assert loaded.probe_error == "ffprobe timed out after 30s"
+
+
+def test_save_roundtrips_probe_error_with_probe_ok_true(repo, folder_id):
+    """确保 probe_error 即使 probe_ok=True 也能持久化"""
+    snap = make_snap(
+        folder_id,
+        rel_path="good.mkv",
+        probe_ok=True,
+    )
+    snap.probe_error = ""  # 正常情况无错误
+    repo.save(snap)
+    loaded = repo.get_cached(folder_id, "good.mkv")
+    assert loaded is not None
+    assert loaded.probe_ok is True
+    assert loaded.probe_error == ""
+
+
+def test_save_probe_error_upserts_on_conflict(repo, folder_id):
+    """upsert 时应更新 probe_error — 第二次探测可能产生不同错误"""
+    snap1 = FileSnapshot(
+        library_folder_id=folder_id,
+        relative_path="flaky.mkv",
+        file_name="flaky.mkv",
+        size_bytes=2048,
+        probe_ok=False,
+        probe_error="timeout",
+    )
+    repo.save(snap1)
+
+    snap2 = FileSnapshot(
+        library_folder_id=folder_id,
+        relative_path="flaky.mkv",
+        file_name="flaky.mkv",
+        size_bytes=4096,
+        probe_ok=True,
+        probe_error="",
+    )
+    repo.save(snap2)
+
+    loaded = repo.get_cached(folder_id, "flaky.mkv")
+    assert loaded is not None
+    assert loaded.probe_ok is True
+    assert loaded.probe_error == ""
+    assert loaded.size_bytes == 4096
+
+
 def test_single_track_survives_roundtrip(repo, folder_id):
     """单条音轨+单条字幕的往返：验证不产生多余条目。"""
     tracks = [
