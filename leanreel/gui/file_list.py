@@ -63,6 +63,18 @@ class SortableTableWidgetItem(QTableWidgetItem):
         return super().__lt__(other)
 
 
+class _SortableTreeItem(QTreeWidgetItem):
+    """QTreeWidgetItem that sorts by Qt.UserRole numeric value when present."""
+
+    def __lt__(self, other: QTreeWidgetItem) -> bool:
+        col = self.treeWidget().sortColumn() if self.treeWidget() else 0
+        left = self.data(col, Qt.UserRole)
+        right = other.data(col, Qt.UserRole)
+        if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+            return left < right
+        return super().__lt__(other)
+
+
 from leanreel.gui.utils import _format_bytes
 from leanreel.core.matcher import get_skip_reason
 
@@ -517,10 +529,13 @@ class FileListPanel(QWidget):
             folder_name = folder_name or "."
             folder_item = folders.get(folder_name)
             if folder_item is None:
-                total = _format_bytes(folder_sizes.get(folder_name, 0))
-                folder_item = QTreeWidgetItem([f"{folder_name}  [{total}]"])
-                folder_item.setFirstColumnSpanned(True)
+                folder_size = folder_sizes.get(folder_name, 0)
+                folder_item = _SortableTreeItem([folder_name, _format_bytes(folder_size), "", "", "", ""])
+                folder_item.setData(1, Qt.UserRole, folder_size)  # 按数值排序
                 folder_item.setData(0, Qt.UserRole, snap.library_folder_id)
+                font = folder_item.font(0)
+                font.setBold(True)
+                folder_item.setFont(0, font)
                 folders[folder_name] = folder_item
                 self.tree.addTopLevelItem(folder_item)
             decision = self._decision_display(
