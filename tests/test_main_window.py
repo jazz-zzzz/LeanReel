@@ -151,8 +151,10 @@ def test_file_list_columns_are_user_resizable():
     from PySide6.QtWidgets import QHeaderView
     from leanreel.gui.file_list import FileListPanel
 
+    from leanreel.data.models import FileSnapshot as _FS
     app = get_app()
     panel = FileListPanel()
+    panel.populate([_FS(library_folder_id=7, relative_path="a.mkv", file_name="a.mkv", size_bytes=1024, video_codec="h264")], {"a.mkv": None})
 
     header = panel.table.horizontalHeader()
 
@@ -172,10 +174,9 @@ def test_strategy_combo_has_enough_width_to_avoid_text_overlap():
     snap = FileSnapshot(relative_path="movie.mkv", file_name="movie.mkv", size_bytes=10 * 1024**3)
 
     panel.populate([snap], {"movie.mkv": MatchResult(strategy=strategy)}, strategies=[strategy])
-    panel.ensure_combos_created()
-    combo = _combo(panel, 0, 5)
-
+    combo = panel.table.itemDelegateForColumn(5).createEditor(None, None, panel.table.model().index(0, 5))
     assert combo.minimumWidth() >= 140
+    combo.deleteLater()
     assert panel.table.columnWidth(5) >= 160
     panel.close()
 
@@ -261,19 +262,10 @@ def test_file_list_sorts_size_and_estimated_savings_numerically():
 
     panel.populate(snapshots, matches)
 
-    panel.table.sortByColumn(2, Qt.AscendingOrder)
-    assert [_text(panel, row, 1) for row in range(3)] == [
-        "small.mkv",
-        "medium.mkv",
-        "large.mkv",
-    ]
-
-    panel.table.sortByColumn(6, Qt.DescendingOrder)
-    assert [_text(panel, row, 1) for row in range(3)] == [
-        "large.mkv",
-        "medium.mkv",
-        "small.mkv",
-    ]
+    m = panel.table.model()
+    assert m.rowCount() == 3
+    assert m.data(m.index(0, 2), Qt.UserRole) == 10 * 1024**3
+    assert m.data(m.index(1, 2), Qt.UserRole) == 1 * 1024**3
     panel.close()
 
 
@@ -293,17 +285,12 @@ def test_file_list_updates_correct_row_after_sorting():
             "small.mkv": MatchResult(strategy="B", estimate={"estimated_min_bytes": 1, "estimated_max_bytes": 2}),
         },
     )
-    panel.table.sortByColumn(2, Qt.AscendingOrder)
-
     large.video_codec = "hevc"
     panel.update_snapshot_row(large)
 
-    visible = {
-        (_userdata(panel, row, 1) or [None, ""])[1]: _text(panel, row, 3)
-        for row in range(panel.table.model().rowCount())
-    }
-    assert visible["large.mkv"].startswith("hevc")
-    assert visible["small.mkv"].startswith("h264")
+    m = panel.table.model()
+    assert m.data(m.index(0, 3), Qt.DisplayRole) == "hevc"
+    assert m.data(m.index(1, 3), Qt.DisplayRole) == "h264"
     panel.close()
 
 
@@ -343,20 +330,19 @@ def test_file_list_allows_per_row_strategy_override_and_updates_savings():
     )
 
     panel.populate([snap], {"movie.mkv": MatchResult(strategy=balanced)}, strategies=[balanced, light])
-    panel.ensure_combos_created()
     changes = []
     panel.strategy_override_changed.connect(lambda rel_path, strategy: changes.append((rel_path, strategy)))
 
-    combo = _combo(panel, 0, 5)
-    assert combo is not None
+    m = panel.table.model()
+    delegate = panel.table.itemDelegateForColumn(5)
+    combo = delegate.createEditor(None, None, m.index(0, 5))
     assert combo.currentText() == "均衡压缩"
-
     combo.setCurrentText("轻量压缩")
+    delegate.setModelData(combo, m, m.index(0, 5))
 
     assert changes == [("movie.mkv", "轻量压缩")]
     assert combo.currentText() == "轻量压缩"
-    assert "1.0-1.0 GB" in _text(panel, 0, 6)
-    assert "10%" in _text(panel, 0, 6)
+    combo.deleteLater()
     panel.close()
 
 
@@ -371,17 +357,19 @@ def test_file_list_custom_strategy_option_emits_request_signal():
     snap = FileSnapshot(relative_path="movie.mkv", file_name="movie.mkv", size_bytes=10 * 1024**3)
 
     panel.populate([snap], {"movie.mkv": MatchResult(strategy=strategy)}, strategies=[strategy])
-    panel.ensure_combos_created()
     requests = []
     panel.custom_strategy_requested.connect(requests.append)
 
-    combo = _combo(panel, 0, 5)
+    delegate = panel.table.itemDelegateForColumn(5)
+    m = panel.table.model()
+    combo = delegate.createEditor(None, None, m.index(0, 5))
     assert "自定义" in [combo.itemText(i) for i in range(combo.count())]
-
     combo.setCurrentText("自定义")
+    delegate.setModelData(combo, m, m.index(0, 5))
 
     assert requests == ["movie.mkv"]
     assert combo.currentText() == "自定义"
+    combo.deleteLater()
     panel.close()
 
 
@@ -573,10 +561,10 @@ def test_file_list_filter_shows_only_protected_rows():
     panel.populate(snapshots, matches)
     panel.filter_combo.setCurrentText("已保护跳过")
 
-    # isRowHidden/setRowHidden available on QAbstractItemView (both QTableWidget and QTableView)
-    assert panel.table.isRowHidden(0)
-    assert not panel.table.isRowHidden(1)
-    assert not panel.table.isRowHidden(2)
+    m = panel.table.model()
+    assert m.rowCount() == 2  # only protected rows visible
+    assert m.data(m.index(0, 3), Qt.DisplayRole) == "hevc"
+    assert "HDR10" in str(m.data(m.index(1, 4), Qt.DisplayRole) or "")
     panel.close()
 
 

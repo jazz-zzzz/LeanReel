@@ -5,7 +5,7 @@ import re
 from typing import Any
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem,
+    QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QTableView,
     QHeaderView, QLabel, QHBoxLayout, QComboBox, QStackedWidget,
     QTreeWidget, QTreeWidgetItem, QPushButton
 )
@@ -144,32 +144,41 @@ class FileListPanel(QWidget):
         return []
 
     def set_store(self, store):
-        """注入 FileTableStore 并创建适配器，将复选框操作委托给 Store。"""
+        """注入 FileTableStore 并创建 Adapters（QTableView+Model/Delegate）。"""
         from leanreel.gui.adapters.flat_adapter import FlatAdapter
         from leanreel.gui.adapters.tree_adapter import TreeAdapter
         self._store = store
-        self._flat_adapter = FlatAdapter(store, self.table)
+        self._flat_adapter = FlatAdapter(store, self.table,
+            strategy_lookup=self._strategy_lookup,
+            combo_factory=self._create_strategy_combo)
         self._tree_adapter = TreeAdapter(store, self.tree)
-        # 替换复选框变更回调为 Store 委托版本
-        try:
-            self.table.itemChanged.disconnect(self._on_item_changed)
-        except (TypeError, RuntimeError):
-            pass
-        self.table.itemChanged.connect(self._on_flat_checkbox_changed)
-        try:
-            self.tree.itemChanged.disconnect(self._on_tree_item_changed)
-        except (TypeError, RuntimeError):
-            pass
+        # QTableView: model dataChanged → 复选框/策略变更
+        self._model = self.table.model()
+        self._model.dataChanged.connect(self._on_flat_data_changed)
+        # QTableView: selectionModel → 行选中
+        self.table.selectionModel().selectionChanged.connect(self._on_selection_changed)
         self.tree.itemChanged.connect(self._on_tree_checkbox_changed)
 
-    def _on_flat_checkbox_changed(self, item: QTableWidgetItem):
-        """平铺表格复选框变更 —— 委托给 Store（若已注入）。"""
-        if item.column() != 0:
+    def _on_flat_data_changed(self, topLeft, bottomRight, roles):
+        """Model 数据变更 — 处理复选框和策略下拉。"""
+        if not roles:
             return
-        key = self._coerce_key(item.data(Qt.UserRole))
-        if self._store is not None and key is not None:
-            self._store.set_checked(key, item.checkState() == Qt.Checked)
-        self._apply_filter()
+        # 复选框变更 → 同步到 Store
+        if Qt.CheckStateRole in roles:
+            for row in range(topLeft.row(), bottomRight.row() + 1):
+                store_idx = self._model._to_store_index(row)
+                row_obj = self._store.row_at(store_idx)
+                if row_obj:
+                    checked = self._model.data(self._model.index(row, 0), Qt.CheckStateRole) == Qt.Checked
+                    self._store.set_checked(row_obj.key, checked)
+            self._apply_filter()
+        # 策略变更 → 触发 override 信号
+        if Qt.EditRole in roles and topLeft.column() == 5:
+            store_idx = self._model._to_store_index(topLeft.row())
+            row_obj = self._store.row_at(store_idx) if store_idx >= 0 else None
+            if row_obj:
+                text = self._model.data(topLeft, Qt.DisplayRole) or ""
+                self._on_strategy_combo_changed(row_obj.snap.relative_path, text)
 
     def _on_tree_checkbox_changed(self, item: QTreeWidgetItem, column: int):
         """树视图复选框变更 —— 委托给 Store（若已注入）。"""
@@ -210,30 +219,12 @@ class FileListPanel(QWidget):
         info_layout.addWidget(self.filter_combo)
         layout.addLayout(info_layout)
 
-        # 文件表格
-        self.table = QTableWidget()
-        self.table.setColumnCount(len(_HEADERS))
-        self.table.setHorizontalHeaderLabels(_HEADERS)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.table.setSortingEnabled(True)
+        # 文件表格 (QTableView + FileTableModel)
+        self.table = QTableView()
+        self.table.setSelectionBehavior(QTableView.SelectRows)
+        self.table.setEditTriggers(QTableView.NoEditTriggers)
+        self.table.setSortingEnabled(False)
         self.table.setAutoScroll(False)
-        header = self.table.horizontalHeader()
-        header.setSortIndicatorShown(True)
-        header.setSectionsMovable(False)
-        header.setSectionResizeMode(0, QHeaderView.Fixed)
-        header.setSectionResizeMode(1, QHeaderView.Interactive)
-        for i in range(2, len(_HEADERS)):
-            header.setSectionResizeMode(i, QHeaderView.Interactive)
-        self.table.verticalHeader().setDefaultSectionSize(32)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setColumnWidth(0, 30)
-        self.table.setColumnWidth(1, 260)
-        self.table.setColumnWidth(2, 70)
-        self.table.setColumnWidth(3, 175)
-        self.table.setColumnWidth(4, 60)
-        self.table.setColumnWidth(5, 260)
-        self.table.setColumnWidth(6, 190)
 
         self.tree = QTreeWidget()
         self.tree.setColumnCount(len(_TREE_HEADERS))
@@ -271,8 +262,6 @@ class FileListPanel(QWidget):
         select_layout.addStretch()
         layout.addLayout(select_layout)
 
-        self.table.itemChanged.connect(self._on_item_changed)
-        self.table.itemSelectionChanged.connect(self._on_selection_changed)
         self.tree.itemChanged.connect(self._on_tree_item_changed)
         self.tree.itemSelectionChanged.connect(self._on_tree_selection_changed)
 
@@ -301,12 +290,8 @@ class FileListPanel(QWidget):
             rows.append(FileRow(snap=s, match=m, decision=d))
         self._store.rebuild(rows, strategies=strategies, keep_checked=not fast)
 
-        # Store.rebuild 通过信号驱动 Adapter 更新 UI
+        # Store.rebuild 通过信号驱动 Model/Adapter 自动更新 UI
         self._show_table()
-        if self._flat_adapter:
-            self._flat_adapter._on_rebuild()
-        if self._tree_adapter:
-            self._tree_adapter._on_rebuild()
 
         # 更新摘要
         total_size = sum(getattr(s, 'size_bytes', 0) or 0 for s in snapshots)
@@ -317,10 +302,6 @@ class FileListPanel(QWidget):
         )
         self._update_selection_count()
 
-    def ensure_combos_created(self):
-        """同步创建所有 QComboBox（供测试使用）。"""
-        if self._flat_adapter:
-            self._flat_adapter.create_combo_cells(self._create_strategy_combo)
 
     def _format_hdr(self, hdr_type: Any) -> str:
         return getattr(hdr_type, "value", str(hdr_type))
@@ -400,16 +381,10 @@ class FileListPanel(QWidget):
             return
         self.current_view_mode = mode
         if mode == "tree":
-            # TreeAdapter 通过 Store 信号已自动维护树视图
-            # 这里只需确保树视图已构建并切换显示
-            if self._tree_adapter:
-                self._tree_adapter._on_rebuild()
             self._show_tree()
             self.table.hide()
             self.tree.show()
         else:
-            if self._flat_adapter:
-                self._flat_adapter._on_rebuild()
             self._show_table()
             self.tree.hide()
             self.table.show()
@@ -568,27 +543,8 @@ class FileListPanel(QWidget):
             else:
                 self._apply_tree_filter_legacy(filter_key)
         else:
-            store = self._store
-            for table_row in range(self.table.rowCount()):
-                item = self.table.item(table_row, 1)
-                key = self._coerce_key(item.data(Qt.UserRole)) if item else None
-                row = store.row_by_key(key) if store and key else None
-                d = row.decision if row else None
-                check_item = self.table.item(table_row, 0)
-                checked = check_item is not None and check_item.checkState() == Qt.Checked
-                hide = False
-                if d:
-                    if filter_key == "processable":
-                        hide = not d.processable
-                    elif filter_key == "protected":
-                        hide = d.status_key != "protected"
-                    elif filter_key == "probe_failed":
-                        hide = d.status_key != "probe_failed"
-                    elif filter_key == "checked":
-                        hide = not checked
-                elif filter_key in ("processable", "protected", "probe_failed"):
-                    hide = True
-                self.table.setRowHidden(table_row, hide)
+            if self._flat_adapter:
+                self._flat_adapter.set_filter(filter_key)
         self._update_selection_count()
 
     def _apply_tree_filter_legacy(self, filter_key: str):

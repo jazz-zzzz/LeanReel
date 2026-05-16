@@ -25,6 +25,7 @@ class FileTableModel(QAbstractTableModel):
         self._sort_order = Qt.AscendingOrder
         self._visible_rows: list[int] = []  # store index → visual row
         self._filter_key = "all"
+        self._edit_values: dict[tuple[int, int], str] = {}  # pending edit values
 
         store.rows_rebuilt.connect(self._on_rebuilt)
         store.row_updated.connect(self._on_row_updated)
@@ -46,6 +47,11 @@ class FileTableModel(QAbstractTableModel):
         if row is None:
             return None
         col = index.column()
+        # 策略列正在编辑中 → 返回编辑值
+        if col == _COL_STRATEGY and role in (Qt.DisplayRole, Qt.EditRole):
+            ev = self._edit_values.get((index.row(), index.column()))
+            if ev is not None:
+                return ev
         d = row.decision
         snap = row.snap
 
@@ -68,6 +74,11 @@ class FileTableModel(QAbstractTableModel):
             if row:
                 self._store.set_checked(row.key, value == Qt.Checked)
                 return True
+        # 策略列 EditRole → 存储编辑值供 dataChanged handler 读取
+        if role == Qt.EditRole and index.column() == _COL_STRATEGY:
+            self._edit_values[(index.row(), index.column())] = value
+            self.dataChanged.emit(index, index, [Qt.EditRole])
+            return True
         return False
 
     def flags(self, index):

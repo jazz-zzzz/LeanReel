@@ -1,7 +1,7 @@
 """控制器集成测试 — 验证 _populate_file_list → Store → 表格可见"""
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QTableView, QApplication
 
 
 def _text(table, row, col):
@@ -93,11 +93,9 @@ def test_store_rebuild_triggers_flat_adapter(qtbot):
     """store.rebuild 应触发 FlatAdapter 更新表格"""
     from leanreel.data.file_store import FileTableStore, FileRow
     from leanreel.gui.adapters.flat_adapter import FlatAdapter
-    from PySide6.QtWidgets import QTableWidget
-
+    
     store = FileTableStore()
-    table = QTableWidget()
-    table.setColumnCount(7)
+    table = QTableView()
     adapter = FlatAdapter(store, table)
 
     snap = _snap(video_codec="h264")
@@ -117,11 +115,9 @@ def test_store_update_row_triggers_flat_adapter(qtbot):
     """store.update_row 应更新表格对应单元格"""
     from leanreel.data.file_store import FileTableStore, FileRow
     from leanreel.gui.adapters.flat_adapter import FlatAdapter
-    from PySide6.QtWidgets import QTableWidget
-
+    
     store = FileTableStore()
-    table = QTableWidget()
-    table.setColumnCount(7)
+    table = QTableView()
     adapter = FlatAdapter(store, table)
 
     old = _snap(video_codec="", probe_ok=False)
@@ -146,8 +142,7 @@ def test_store_checked_propagates_to_both_adapters(qtbot):
     from leanreel.gui.file_list import FileDecisionDisplay
 
     store = FileTableStore()
-    table = QTableWidget()
-    table.setColumnCount(7)
+    table = QTableView()
     tree = QTreeWidget()
     tree.setColumnCount(6)
     fa = FlatAdapter(store, table)

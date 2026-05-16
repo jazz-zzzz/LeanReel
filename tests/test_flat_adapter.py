@@ -1,6 +1,6 @@
-"""FlatAdapter 测试"""
+"""FlatAdapter 测试 (QTableView + FileTableModel)"""
 import pytest
-from PySide6.QtWidgets import QTableWidget
+from PySide6.QtWidgets import QTableView
 from PySide6.QtCore import Qt
 
 from leanreel.data.file_store import FileTableStore, FileRow
@@ -53,8 +53,7 @@ def test_flat_adapter_rebuild_populates_table(qtbot):
     from leanreel.gui.adapters.flat_adapter import FlatAdapter
 
     store = FileTableStore()
-    table = QTableWidget()
-    table.setColumnCount(7)
+    table = QTableView()
     adapter = FlatAdapter(store, table)
 
     snap = _snap(video_codec="h264", size_bytes=1024)
@@ -70,8 +69,7 @@ def test_flat_adapter_rebuild_empty_clears_table(qtbot):
     from leanreel.gui.adapters.flat_adapter import FlatAdapter
 
     store = FileTableStore()
-    table = QTableWidget()
-    table.setColumnCount(7)
+    table = QTableView()
     adapter = FlatAdapter(store, table)
 
     store.rebuild([_row(_snap())])
@@ -84,8 +82,7 @@ def test_flat_adapter_row_update(qtbot):
     from leanreel.gui.adapters.flat_adapter import FlatAdapter
 
     store = FileTableStore()
-    table = QTableWidget()
-    table.setColumnCount(7)
+    table = QTableView()
     adapter = FlatAdapter(store, table)
 
     snap = _snap(video_codec="", size_bytes=0, probe_ok=False)
@@ -101,8 +98,7 @@ def test_flat_adapter_checkbox_sync(qtbot):
     from leanreel.gui.adapters.flat_adapter import FlatAdapter
 
     store = FileTableStore()
-    table = QTableWidget()
-    table.setColumnCount(7)
+    table = QTableView()
     adapter = FlatAdapter(store, table)
 
     snap = _snap(video_codec="h264")
@@ -118,8 +114,7 @@ def test_flat_adapter_protected_row_not_checkable(qtbot):
     from leanreel.gui.adapters.flat_adapter import FlatAdapter
 
     store = FileTableStore()
-    table = QTableWidget()
-    table.setColumnCount(7)
+    table = QTableView()
     adapter = FlatAdapter(store, table)
 
     snap = _snap(video_codec="hevc")
