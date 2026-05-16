@@ -561,6 +561,11 @@ class FileListPanel(QWidget):
         child = self._find_tree_child(relative_path)
         if child is None:
             return
+        # 同步数据追踪字典
+        key = self._file_key(snap)
+        if key:
+            self._status_by_key[key] = decision.status_key
+            self._processable_by_key[key] = decision.processable
         child.setText(1, _format_bytes(snap.size_bytes))
         child.setText(2, self._format_codec(snap))
         child.setText(3, self._format_hdr(snap.hdr_type))
