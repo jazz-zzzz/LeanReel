@@ -407,9 +407,9 @@ class Application:
             self.win.set_status(str(e))
             return
         self._refresh_libraries()
-        self._probe_folder_streaming(folder.id, path, replace_existing=False)
+        self._probe_folder_streaming(folder.id, path)
 
-    def _probe_folder_streaming(self, folder_id: int, path: str, replace_existing: bool):
+    def _probe_folder_streaming(self, folder_id: int, path: str):
         """流式探测单个文件夹 — stat+ffprobe 合并，即时渲染。"""
         self._scan_token += 1
         my_token = self._scan_token
@@ -423,14 +423,9 @@ class Application:
             self.win.set_status(f"未找到视频文件：{path}")
             return
 
-        # 管理 current state
-        if replace_existing:
-            self.current_snapshots = [s for s in self.current_snapshots if s.library_folder_id != folder_id]
-        else:
-            self.current_snapshots = [s for s in self.current_snapshots if s.library_folder_id != folder_id]
         self.current_folder_paths[folder_id] = path
 
-        # 创建占位快照填充表格（探测完会刷新）
+        # 创建占位快照（探测完逐个刷新）
         placeholders = []
         for rel_path, abs_path in files:
             placeholders.append(FileSnapshot(
@@ -440,8 +435,9 @@ class Application:
                 size_bytes=0,
                 probe_ok=False,
             ))
-        self.current_snapshots = placeholders
-        self._populate_file_list(placeholders)
+        self.current_snapshots = [s for s in self.current_snapshots if s.library_folder_id != folder_id]
+        self.current_snapshots.extend(placeholders)
+        self._populate_file_list(self.current_snapshots)
 
         done = [0]
         lock = threading.Lock()
@@ -646,7 +642,7 @@ class Application:
         path = self.current_folder_paths[folder_id]
         self.current_snapshots = [s for s in self.current_snapshots if s.library_folder_id != folder_id]
         self._populate_file_list(self.current_snapshots)
-        self._probe_folder_streaming(folder_id, path, replace_existing=False)
+        self._probe_folder_streaming(folder_id, path)
 
     # ── 策略信号处理 ──
 
