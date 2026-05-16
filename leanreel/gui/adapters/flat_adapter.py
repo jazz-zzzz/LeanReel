@@ -36,9 +36,21 @@ class FlatAdapter:
         view.setColumnWidth(6, 190)
         if combo_factory and strategy_lookup:
             view.setItemDelegateForColumn(5, StrategyDelegate(strategy_lookup, combo_factory))
+        self._model.layoutChanged.connect(self._open_persistent_combos)
 
     def enable_sorting(self):
         self._view.setSortingEnabled(True)
 
     def set_filter(self, filter_key: str):
+        for row in range(self._model.rowCount()):
+            self._view.closePersistentEditor(self._model.index(row, 5))
         self._model.set_filter(filter_key)
+        self._open_persistent_combos()
+
+    def _open_persistent_combos(self):
+        """为所有可处理行创建一直可见的 QComboBox（规范 B3）"""
+        for row in range(self._model.rowCount()):
+            store_idx = self._model._to_store_index(row)
+            r = self._store.row_at(store_idx)
+            if r and r.decision and r.decision.processable:
+                self._view.openPersistentEditor(self._model.index(row, 5))

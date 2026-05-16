@@ -512,16 +512,22 @@ class Application:
         def _scan_in_background():
             """后台线程：遍历目录 + 创建占位快照 + 准备探测输入（I/O 不阻塞主线程）"""
             from leanreel.core.file_discovery import find_video_files
-            placeholders = []
-            folder_inputs = []
-            for folder_id, path in folders_at_call:
-                files = find_video_files(path)
-                folder_inputs.append((folder_id, path, files))
-                for rel_path, abs_path in files:
-                    placeholders.append(FileSnapshot(
-                        library_folder_id=folder_id, relative_path=rel_path,
-                        file_name=os.path.basename(abs_path), size_bytes=0, probe_ok=False))
-            self.notifier.scan_ready.emit(placeholders, folder_inputs, my_token)
+            try:
+                placeholders = []
+                folder_inputs = []
+                for folder_id, path in folders_at_call:
+                    files = find_video_files(path)
+                    folder_inputs.append((folder_id, path, files))
+                    for rel_path, abs_path in files:
+                        placeholders.append(FileSnapshot(
+                            library_folder_id=folder_id, relative_path=rel_path,
+                            file_name=os.path.basename(abs_path), size_bytes=0, probe_ok=False))
+                self.notifier.scan_ready.emit(placeholders, folder_inputs, my_token)
+            except Exception:
+                import traceback
+                traceback.print_exc()
+                self._refresh_running = False
+                self.win.set_status("扫描失败，请检查网络连接后重试")
 
         threading.Thread(target=_scan_in_background, daemon=True).start()
 
