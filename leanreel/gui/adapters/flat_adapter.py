@@ -24,12 +24,13 @@ class FlatAdapter(QObject):
 
     # ── rebuild (分批渲染，避免主线程阻塞) ──
 
-    _BATCH = 20
+    _BATCH = 500
 
     def _on_rebuild(self):
         store = self._store
         self._table.setSortingEnabled(False)
         self._table.blockSignals(True)
+        self._table.setUpdatesEnabled(False)
         self._table.clearContents()
         self._table.setRowCount(store.count())
         self._row_key = []
@@ -38,7 +39,7 @@ class FlatAdapter(QObject):
         self._render_batch()
 
     def _render_batch(self):
-        """每批渲染 _BATCH 行，剩余用 QTimer 调度。"""
+        """每批渲染 _BATCH 行，只最后一批时恢复重绘。"""
         store = self._store
         end = min(self._rebuild_idx + self._BATCH, store.count())
         for i in range(self._rebuild_idx, end):
@@ -47,11 +48,10 @@ class FlatAdapter(QObject):
             self._render_row(i, row)
         self._rebuild_idx = end
         if self._rebuild_idx < store.count():
-            from PySide6.QtWidgets import QApplication
-            QApplication.processEvents()
             from PySide6.QtCore import QTimer
-            QTimer.singleShot(5, self._render_batch)
+            QTimer.singleShot(1, self._render_batch)
         else:
+            self._table.setUpdatesEnabled(True)
             self._table.blockSignals(False)
 
     def _render_row(self, table_row: int, row):
@@ -152,12 +152,13 @@ class FlatAdapter(QObject):
                         item.setCheckState(state)
 
     def create_combo_cells(self, combo_factory):
-        """分批创建 QComboBox，避免一次性大量 widget 阻塞主线程。"""
+        """分批创建 QComboBox，抑制中间重绘。"""
         if self._combo_created:
             return
         self._combo_factory = combo_factory
         self._combo_idx = 0
         self._combo_created = True
+        self._table.setUpdatesEnabled(False)
         self._render_combo_batch()
 
     def _render_combo_batch(self):
@@ -182,7 +183,7 @@ class FlatAdapter(QObject):
             self._table.setCellWidget(i, 5, combo)
         self._combo_idx = end
         if self._combo_idx < self._table.rowCount():
-            from PySide6.QtWidgets import QApplication
-            QApplication.processEvents()
             from PySide6.QtCore import QTimer
-            QTimer.singleShot(5, self._render_combo_batch)
+            QTimer.singleShot(1, self._render_combo_batch)
+        else:
+            self._table.setUpdatesEnabled(True)
