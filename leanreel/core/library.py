@@ -33,7 +33,7 @@ class LibraryManager:
         # 检查同一库中是否已存在
         existing = self.db.get_folders_for_library(lib_id)
         for folder in existing:
-            if _os.path.normpath(folder.path) == normalized:
+            if _os.path.normpath(folder.path).casefold() == normalized.casefold():
                 raise ValueError(f"文件夹已存在：{path}")
         folder = LibraryFolder(library_id=lib_id, path=normalized)
         folder.id = self.db.insert_folder(folder)

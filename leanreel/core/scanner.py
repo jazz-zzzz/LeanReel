@@ -322,6 +322,7 @@ class Scanner:
         folder_path: str,
         on_result: Callable[[FileSnapshot], None],
         on_finished: Callable[[], None] | None = None,
+        files: list[tuple[str, str]] | None = None,
     ) -> int:
         """合并 stat+ffprobe 为一次 I/O — 边扫描边输出结果。
 
@@ -334,7 +335,8 @@ class Scanner:
         import concurrent.futures
 
         folder_path = os.path.normpath(folder_path)
-        files = find_video_files(folder_path)
+        if files is None:
+            files = find_video_files(folder_path)
         cached_dict = {s.relative_path: s for s in self._repo.load_all(library_folder_id)}
         total = len(files)
 
