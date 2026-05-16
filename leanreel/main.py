@@ -400,13 +400,8 @@ class Application:
             rows.append(FileRow(snap=s, match=m, decision=d))
         keep_checked = not fast  # fast=True 表示切库，应清空勾选
         self.store.rebuild(rows, strategies=self.services.strategies, keep_checked=keep_checked)
-        # 确保策略查找表已更新（供 ComboBox 工厂使用）
         self.file_panel._strategy_lookup = self.file_panel._build_strategy_lookup(self.services.strategies)
-        # Store.rebuild 通过信号驱动 Adapter 自动更新 UI，显式调用确保即时刷新
-        if self.file_panel._flat_adapter:
-            self.file_panel._flat_adapter._on_rebuild()
-        if self.file_panel._tree_adapter:
-            self.file_panel._tree_adapter._on_rebuild()
+        self.file_panel.stack.setCurrentWidget(self.file_panel.table)
         return matched
 
     # ── 库信号处理 ──
