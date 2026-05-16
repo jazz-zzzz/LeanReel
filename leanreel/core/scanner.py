@@ -82,6 +82,8 @@ class Scanner:
                     snap.relative_path = rel_path
                     snap.file_mtime = fmtime
                     snap.probe_ok = True
+                    if fsize > 0:
+                        snap.size_bytes = fsize  # stat 体积比 ffprobe 更可靠
                     try:
                         self._repo.save(snap)
                     except Exception as save_err:
@@ -171,6 +173,8 @@ class Scanner:
                     snap.relative_path = rel_path
                     snap.file_mtime = fmtime
                     snap.probe_ok = True
+                    if fsize > 0:
+                        snap.size_bytes = fsize  # stat 体积比 ffprobe 更可靠
                     try:
                         self._repo.save(snap)
                     except Exception as save_err:
