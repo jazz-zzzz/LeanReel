@@ -303,6 +303,75 @@ class TestQueuePanelUpdateTask:
         icon_label = widget.findChild(QLabel, "queue_icon")
         assert icon_label.text() == _STATUS_ICONS[TaskStatus.SKIPPED]
 
+    def test_queue_updates_duplicate_basenames_by_input_path(self, qtbot):
+        """同名文件在不同路径下应该各自更新正确的行"""
+        panel = QueuePanel()
+        qtbot.addWidget(panel)
+
+        task_a = EncodeTask(
+            file_name="movie.mkv",
+            input_path="/path/A/movie.mkv",
+            output_path="/path/A/movie_SS.mkv",
+            strategy_name="均衡压缩",
+            original_size=1024,
+            status=TaskStatus.PENDING,
+        )
+        task_b = EncodeTask(
+            file_name="movie.mkv",
+            input_path="/path/B/movie.mkv",
+            output_path="/path/B/movie_SS.mkv",
+            strategy_name="极限压缩",
+            original_size=2048,
+            status=TaskStatus.PENDING,
+        )
+
+        panel.add_task_row(task_a)
+        panel.add_task_row(task_b)
+
+        # 验证两行的 task_key 属性不同
+        row_a = panel.task_layout.itemAt(0).widget()
+        row_b = panel.task_layout.itemAt(1).widget()
+        assert row_a.property("task_key") == "/path/A/movie.mkv"
+        assert row_b.property("task_key") == "/path/B/movie.mkv"
+
+        # 验证两行都显示相同文件名
+        name_a = row_a.findChild(QLabel, "queue_name")
+        name_b = row_b.findChild(QLabel, "queue_name")
+        assert name_a.text() == "movie.mkv"
+        assert name_b.text() == "movie.mkv"
+
+        # 更新 task B 的状态为 COMPLETED
+        task_b.status = TaskStatus.COMPLETED
+        task_b.compressed_size = 512
+        panel.update_task_row(task_b)
+
+        # 验证 task B 的行被更新（图标变为 COMPLETED）
+        icon_b = row_b.findChild(QLabel, "queue_icon")
+        assert icon_b.text() == _STATUS_ICONS[TaskStatus.COMPLETED]
+
+        # 验证 task A 没有被误更新（图标仍为 PENDING）
+        icon_a = row_a.findChild(QLabel, "queue_icon")
+        assert icon_a.text() == _STATUS_ICONS[TaskStatus.PENDING]
+
+    def test_add_task_row_sets_tooltip_to_input_path(self, qtbot):
+        """文件名 label 的 tooltip 应该显示完整路径"""
+        panel = QueuePanel()
+        qtbot.addWidget(panel)
+
+        task = EncodeTask(
+            file_name="movie.mkv",
+            input_path="/media/extdrive/movies/movie.mkv",
+            output_path="/media/extdrive/movies/movie_SS.mkv",
+            strategy_name="均衡压缩",
+            original_size=5_000_000_000,
+            status=TaskStatus.PENDING,
+        )
+        panel.add_task_row(task)
+
+        widget = panel.task_layout.itemAt(0).widget()
+        name_label = widget.findChild(QLabel, "queue_name")
+        assert name_label.toolTip() == "/media/extdrive/movies/movie.mkv"
+
 
 class TestQueuePanelClear:
     """clear_tasks() 方法测试"""

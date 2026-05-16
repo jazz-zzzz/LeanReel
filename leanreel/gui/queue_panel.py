@@ -99,6 +99,7 @@ class QueuePanel(QWidget):
     def add_task_row(self, task):
         row = QWidget()
         row.setProperty("task_status", task.status.value)
+        row.setProperty("task_key", task.input_path)  # 唯一标识：全路径
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(4, 2, 4, 2)
         row_layout.setSpacing(8)
@@ -112,6 +113,7 @@ class QueuePanel(QWidget):
 
         name_label = QLabel(task.file_name)
         name_label.setObjectName("queue_name")
+        name_label.setToolTip(task.input_path)  # 悬停显示完整路径
         name_label.setStyleSheet("color: #e8e3db;")
         row_layout.addWidget(name_label, 1)
 
@@ -172,13 +174,12 @@ class QueuePanel(QWidget):
         self.total_label.setText("就绪")
 
     def update_task_row(self, task):
-        """增量更新已存在的任务行（根据 file_name 匹配）"""
+        """增量更新已存在的任务行（根据 input_path 全路径匹配）"""
         for i in range(self.task_layout.count()):
             item = self.task_layout.itemAt(i)
             if item and item.widget():
                 row = item.widget()
-                name_label = row.findChild(QLabel, "queue_name")
-                if name_label is None or name_label.text() != task.file_name:
+                if row.property("task_key") != task.input_path:
                     continue
                 row.setProperty("task_status", task.status.value)
 

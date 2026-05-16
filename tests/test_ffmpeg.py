@@ -102,7 +102,7 @@ def test_ffmpeg_executor_runs_built_command(monkeypatch, balanced_strategy, tmp_
         # 模拟 ffmpeg 在临时路径创建输出文件
         temp_out = cmd[-1]
         Path(temp_out).parent.mkdir(parents=True, exist_ok=True)
-        Path(temp_out).write_text("")
+        Path(temp_out).write_text("fake_video_data")
         calls.append(cmd)
         return 0, ""
 
