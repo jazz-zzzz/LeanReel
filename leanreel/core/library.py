@@ -1,4 +1,6 @@
 """库管理器 — 库和文件夹的 CRUD 操作"""
+import os as _os
+
 from leanreel.data.database import Database
 from leanreel.data.models import Library, LibraryFolder
 
@@ -27,8 +29,15 @@ class LibraryManager:
         self.db.delete_library(lib_id)
 
     def add_folder(self, lib_id: int, path: str) -> LibraryFolder:
-        fid = self.db.insert_folder(LibraryFolder(library_id=lib_id, path=path))
-        return LibraryFolder(id=fid, library_id=lib_id, path=path)
+        normalized = _os.path.normpath(path)
+        # 检查同一库中是否已存在
+        existing = self.db.get_folders_for_library(lib_id)
+        for folder in existing:
+            if _os.path.normpath(folder.path) == normalized:
+                raise ValueError(f"文件夹已存在：{path}")
+        folder = LibraryFolder(library_id=lib_id, path=normalized)
+        folder.id = self.db.insert_folder(folder)
+        return folder
 
     def get_folders(self, lib_id: int) -> list[LibraryFolder]:
         return self.db.get_folders_for_library(lib_id)
