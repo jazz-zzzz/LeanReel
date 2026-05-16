@@ -466,7 +466,7 @@ class Application:
             self._populate_file_list(self.current_snapshots)
             self.notifier.all_done.emit()
 
-        self.services.scanner.probe_stream(folder_id, path, _on_result, _on_finished)
+        self.services.scanner.probe_stream(folder_id, path, _on_result, _on_finished, files=files)
         self.win.set_status(f"探测中：0/{total} ...")
 
     def _on_scan_finished(self, snapshots, folder_id, folder_path, pending_jobs):
