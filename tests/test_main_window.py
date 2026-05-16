@@ -138,6 +138,7 @@ def test_strategy_combo_has_enough_width_to_avoid_text_overlap():
     snap = FileSnapshot(relative_path="movie.mkv", file_name="movie.mkv", size_bytes=10 * 1024**3)
 
     panel.populate([snap], {"movie.mkv": MatchResult(strategy=strategy)}, strategies=[strategy])
+    panel.ensure_combos_created()
     combo = panel.table.cellWidget(0, 5)
 
     assert combo.minimumWidth() >= 140
@@ -308,6 +309,7 @@ def test_file_list_allows_per_row_strategy_override_and_updates_savings():
     )
 
     panel.populate([snap], {"movie.mkv": MatchResult(strategy=balanced)}, strategies=[balanced, light])
+    panel.ensure_combos_created()
     changes = []
     panel.strategy_override_changed.connect(lambda rel_path, strategy: changes.append((rel_path, strategy)))
 
@@ -335,6 +337,7 @@ def test_file_list_custom_strategy_option_emits_request_signal():
     snap = FileSnapshot(relative_path="movie.mkv", file_name="movie.mkv", size_bytes=10 * 1024**3)
 
     panel.populate([snap], {"movie.mkv": MatchResult(strategy=strategy)}, strategies=[strategy])
+    panel.ensure_combos_created()
     requests = []
     panel.custom_strategy_requested.connect(requests.append)
 

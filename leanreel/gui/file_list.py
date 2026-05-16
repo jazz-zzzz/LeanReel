@@ -378,25 +378,41 @@ class FileListPanel(QWidget):
                 row, 6,
                 SortableTableWidgetItem(decision.result_text, decision.result_sort),
             )
-            if strategies and decision.processable:
-                self.table.setCellWidget(
-                    row, 5,
-                    self._create_strategy_combo(snap.relative_path, decision.strategy_text),
-                )
-            else:
-                strategy_item = QTableWidgetItem(decision.strategy_text)
-                strategy_item.setToolTip(decision.tooltip)
-                if decision.status_key == "protected":
-                    strategy_item.setForeground(_COLOR_HDR_DV)
-                elif decision.status_key == "probe_failed":
-                    strategy_item.setForeground(_COLOR_PROBE_FAILED)
-                self.table.setItem(row, 5, strategy_item)
+            # 列5：先用纯文本占位（快），QComboBox 延后异步创建
+            strategy_item = QTableWidgetItem(decision.strategy_text)
+            strategy_item.setToolTip(decision.tooltip)
+            if decision.status_key == "protected":
+                strategy_item.setForeground(_COLOR_HDR_DV)
+            elif decision.status_key == "probe_failed":
+                strategy_item.setForeground(_COLOR_PROBE_FAILED)
+            self.table.setItem(row, 5, strategy_item)
             self._batch_total_size += snap.size_bytes
             self._batch_row_index += 1
 
         # 还有剩余行，调度下一批
         from PySide6.QtCore import QTimer
         QTimer.singleShot(0, lambda g=gen: self._render_row_batch(g))
+
+    def _create_combo_cells(self):
+        """异步创建 QComboBox（在全部行渲染完成后调用）。"""
+        strategies = self._batch_strategies
+        if not strategies:
+            return
+        for row in range(self.table.rowCount()):
+            if self._row_processable.get(row, False):
+                item = self.table.item(row, 1)
+                if item is None:
+                    continue
+                key = self._coerce_key(item.data(Qt.UserRole))
+                rel = key[1] if key else ""
+                if not rel:
+                    continue
+                old = self.table.item(row, 5)
+                current_text = old.text() if old else ""
+                self.table.setCellWidget(
+                    row, 5,
+                    self._create_strategy_combo(rel, current_text),
+                )
 
     def _finish_populate(self):
         """分批渲染完成后的收尾工作。"""
@@ -412,6 +428,13 @@ class FileListPanel(QWidget):
         self._update_selection_count()
         self._populate_tree(snapshots, self._batch_matches)
         self._apply_filter()
+        # 延后异步创建 QComboBox（测试可通过 processEvents 或 ensure_combos 触发）
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, self._create_combo_cells)
+
+    def ensure_combos_created(self):
+        """同步创建所有 QComboBox（供测试使用）。"""
+        self._create_combo_cells()
 
     def _format_hdr(self, hdr_type: Any) -> str:
         return getattr(hdr_type, "value", str(hdr_type))
