@@ -142,6 +142,10 @@ class FileListPanel(QWidget):
         key = self._file_key(snap)
         return matches.get(key, matches.get(snap.relative_path))
 
+    def enable_sorting(self):
+        """探测完成后启用表格排序（探测期间禁用避免 setItem 触发频繁重排）。"""
+        self.table.setSortingEnabled(True)
+
     def get_checked_file_keys(self) -> list[tuple[int, str]]:
         """返回所有勾中文件的 (library_folder_id, relative_path) key 列表（已排序）。"""
         return sorted(self._checked_keys)
@@ -394,7 +398,6 @@ class FileListPanel(QWidget):
             f"已保护跳过 {protected_count} · 总计 {total_tb:.2f} TB"
         )
         self._update_selection_count()
-        self.table.setSortingEnabled(True)
         self._populate_tree(snapshots, self._batch_matches)
         self._apply_filter()
 
@@ -454,6 +457,7 @@ class FileListPanel(QWidget):
 
     def _create_strategy_combo(self, relative_path: str, selected_name: str) -> QComboBox:
         combo = QComboBox()
+        combo.wheelEvent = lambda event: event.ignore()  # 滚轮不改变策略，留给表格滚动
         combo.setMinimumWidth(140)
         combo.setMaximumHeight(28)
         combo.setStyleSheet("QComboBox { padding: 1px 4px; }")
