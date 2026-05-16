@@ -58,6 +58,8 @@ class FileTableModel(QAbstractTableModel):
         if role == Qt.DisplayRole:
             return self._display_text(col, snap, d)
         if role == Qt.UserRole:
+            if col in (_COL_CHECK, _COL_NAME):
+                return row.key  # 勾选和文件名列存储 key 供 selection/checkbox lookup
             return self._sort_value(col, snap, d)
         if role == Qt.CheckStateRole and col == _COL_CHECK:
             return Qt.Checked if self._store.is_checked(row.key) else Qt.Unchecked

@@ -497,11 +497,12 @@ class FileListPanel(QWidget):
         rows = {idx.row() for idx in self.table.selectedIndexes()}
         if len(rows) == 1:
             row = next(iter(rows))
-            item = self.table.item(row, 1)
-            data = item.data(Qt.UserRole) if item else None
-            key = self._coerce_key(data) if data else None
-            rel = key[1] if key else ""
-            self.row_selected.emit(rel or "")
+            m = self.table.model()
+            key = m.data(m.index(row, 1), Qt.UserRole) if m else None
+            if isinstance(key, tuple) and len(key) == 2:
+                self.row_selected.emit(key[1])
+            else:
+                self.row_selected.emit("")
         else:
             self.row_selected.emit("")  # 多选或取消选中 → 清空右面板绑定
 
