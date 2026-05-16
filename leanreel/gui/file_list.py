@@ -469,8 +469,57 @@ class FileListPanel(QWidget):
         self.tree.blockSignals(False)
         # 默认折叠，用户按需展开目录
 
+    def _find_tree_child(self, relative_path: str) -> QTreeWidgetItem | None:
+        """在树视图中按 relative_path 查找叶子节点。"""
+        def _walk(item):
+            for i in range(item.childCount()):
+                child = item.child(i)
+                if child.childCount() > 0:
+                    result = _walk(child)
+                    if result is not None:
+                        return result
+                elif child.data(0, Qt.UserRole) == relative_path:
+                    return child
+            return None
+        for i in range(self.tree.topLevelItemCount()):
+            result = _walk(self.tree.topLevelItem(i))
+            if result is not None:
+                return result
+        return None
+
+    def _update_tree_child(self, relative_path: str, snap: Any, decision: FileDecisionDisplay):
+        """更新树视图中单个文件行的编码、策略、结果列及颜色。"""
+        child = self._find_tree_child(relative_path)
+        if child is None:
+            return
+        child.setText(2, self._format_codec(snap))
+        child.setText(3, self._format_hdr(snap.hdr_type))
+        child.setText(4, decision.strategy_text)
+        child.setText(5, decision.result_text)
+        child.setToolTip(4, decision.tooltip)
+        # 颜色
+        if getattr(snap, "video_codec", ""):
+            child.setForeground(2, _COLOR_CODEC_OK)
+        elif getattr(snap, "probe_ok", None) is False and getattr(snap, "probe_error", ""):
+            child.setForeground(2, _COLOR_PROBE_FAILED)
+        else:
+            child.setForeground(2, _COLOR_CODEC_MISSING)
+        child.setForeground(3, self._hdr_color(getattr(snap, "hdr_type", None)))
+        if decision.status_key == "protected":
+            child.setForeground(4, _COLOR_HDR_DV)
+        elif decision.status_key == "probe_failed":
+            child.setForeground(4, _COLOR_PROBE_FAILED)
+        else:
+            child.setForeground(4, QColor())  # 恢复默认
+        # 可处理性
+        if decision.processable:
+            child.setFlags(child.flags() | Qt.ItemIsEnabled)
+        else:
+            child.setFlags((child.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEnabled)
+            child.setToolTip(0, decision.tooltip)
+
     def _on_strategy_combo_changed(self, relative_path: str, strategy_name: str):
-        row = self._find_row_by_relative_path(relative_path)
+        row = self._row_by_path.get(relative_path)
         if row is None:
             return
 
@@ -492,7 +541,7 @@ class FileListPanel(QWidget):
 
     def apply_strategy_to_row(self, relative_path: str, strategy: Any):
         """Apply a strategy object to one row and refresh its savings estimate."""
-        row = self._find_row_by_relative_path(relative_path)
+        row = self._row_by_path.get(relative_path)
         snap = self._snapshots_by_path.get(relative_path)
         if row is None or snap is None:
             return
@@ -515,6 +564,8 @@ class FileListPanel(QWidget):
             if item:
                 item.setText(decision.strategy_text)
                 item.setToolTip(decision.tooltip)
+        if self.current_view_mode == "tree":
+            self._update_tree_child(relative_path, snap, decision)
         self._apply_filter()
 
     def update_snapshot_row(self, snap: Any, match: Any = None):
@@ -585,6 +636,9 @@ class FileListPanel(QWidget):
                 elif decision.status_key == "probe_failed":
                     strategy_item.setForeground(_COLOR_PROBE_FAILED)
                 self.table.setItem(row, 5, strategy_item)
+            # 同步更新树视图
+            if self.current_view_mode == "tree":
+                self._update_tree_child(relative_path, snap, decision)
 
     def _find_row_by_relative_path(self, relative_path: str) -> int | None:
         for row in range(self.table.rowCount()):
