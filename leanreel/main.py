@@ -373,7 +373,7 @@ class Application:
 
     # ── 文件列表填充 ──
 
-    def _populate_file_list(self, snapshots) -> dict[str, MatchResult]:
+    def _populate_file_list(self, snapshots, fast: bool = False) -> dict[str, MatchResult]:
         matched: dict[str, MatchResult] = {}
         for s in snapshots:
             strategy = self.services.matcher.match(s)
@@ -387,7 +387,7 @@ class Application:
                 strategy=strategy,
                 estimate=estimate_savings(s, strategy),
             )
-        self.file_panel.populate(snapshots, matched, self.services.strategies)
+        self.file_panel.populate(snapshots, matched, self.services.strategies, fast=fast)
         return matched
 
     # ── 库信号处理 ──
@@ -478,7 +478,7 @@ class Application:
         self.current_folder_paths = folder_paths
         self.strategy_overrides = {}
         self.current_snapshots = snapshots
-        self._populate_file_list(snapshots)
+        self._populate_file_list(snapshots, fast=True)
         self.win.set_status(f"已加载 {len(snapshots)} 个文件")
 
     def _on_library_deleted(self, lib_id):

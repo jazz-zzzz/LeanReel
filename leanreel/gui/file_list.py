@@ -277,8 +277,12 @@ class FileListPanel(QWidget):
         self.tree.itemChanged.connect(self._on_tree_item_changed)
         self.tree.itemSelectionChanged.connect(self._on_tree_selection_changed)
 
-    def populate(self, snapshots: list, matched_strategies: dict[str, MatchResult | None], strategies: list | None = None):
-        """分批填充文件表格行，避免一次性创建大量控件导致主线程冻结。"""
+    def populate(self, snapshots: list, matched_strategies: dict[str, MatchResult | None], strategies: list | None = None, fast: bool = False):
+        """填充文件表格行。
+
+        fast=True: 一次同步渲染（缓存加载，无需分批）。
+        fast=False: 分批渲染（探测期间，保持 UI 响应）。
+        """
         self._populate_gen += 1
         self._last_snapshots = list(snapshots)
         self._last_matches = dict(matched_strategies)
@@ -309,14 +313,80 @@ class FileListPanel(QWidget):
         self.table.clearContents()
         self.table.setRowCount(len(snapshots))
 
-        # 存储分批渲染状态，首屏同步渲染让测试通过，后续分批
-        self._batch_snapshots = list(snapshots)
-        self._batch_matches = dict(matched_strategies)
-        self._batch_strategies = strategies
-        self._batch_total_size = 0
-        self._batch_row_index = 0
-        self._render_gen += 1
-        self._render_row_batch(self._render_gen)  # 首屏立即渲染
+        if fast:
+            # 一次同步渲染（缓存加载），QComboBox 也同步创建
+            self._render_all_rows(snapshots, matched_strategies, strategies)
+        else:
+            # 分批渲染（探测期间），QComboBox 延后
+            self._batch_snapshots = list(snapshots)
+            self._batch_matches = dict(matched_strategies)
+            self._batch_strategies = strategies
+            self._batch_total_size = 0
+            self._batch_row_index = 0
+            self._render_gen += 1
+            self._render_row_batch(self._render_gen)
+
+    def _render_all_rows(self, snapshots, matched_strategies, strategies):
+        """一次同步渲染全部行（用于缓存加载场景，无需保持 UI 响应）。"""
+        total_size = 0
+        for row, snap in enumerate(snapshots):
+            file_key = self._file_key(snap)
+            self._row_by_path[snap.relative_path] = row
+            self._row_by_key[file_key] = row
+            check_item = QTableWidgetItem()
+            check_item.setData(Qt.UserRole, file_key)
+            skip_reason = get_skip_reason(snap)
+            if skip_reason:
+                check_item.setFlags(Qt.ItemIsUserCheckable)
+                check_item.setToolTip(skip_reason)
+            else:
+                check_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            check_item.setCheckState(Qt.Checked if file_key in self._checked_keys else Qt.Unchecked)
+            self.table.setItem(row, 0, check_item)
+            file_item = QTableWidgetItem(snap.file_name)
+            file_item.setData(Qt.UserRole, file_key)
+            self.table.setItem(row, 1, file_item)
+            self.table.setItem(row, 2, SortableTableWidgetItem(_format_bytes(snap.size_bytes), snap.size_bytes))
+            codec_item = QTableWidgetItem(self._format_codec(snap))
+            if getattr(snap, "video_codec", ""):
+                codec_item.setForeground(_COLOR_CODEC_OK)
+            elif getattr(snap, "probe_ok", None) is False and getattr(snap, "probe_error", ""):
+                codec_item.setForeground(_COLOR_PROBE_FAILED)
+                codec_item.setToolTip(getattr(snap, "probe_error", ""))
+            else:
+                codec_item.setForeground(_COLOR_CODEC_MISSING)
+            self.table.setItem(row, 3, codec_item)
+            hdr_item = QTableWidgetItem(self._format_hdr(snap.hdr_type))
+            hdr_item.setForeground(self._hdr_color(getattr(snap, "hdr_type", None)))
+            self.table.setItem(row, 4, hdr_item)
+            decision = self._decision_display(snap, self._match_for_snap(snap, matched_strategies))
+            self._row_status_keys[row] = decision.status_key
+            self._row_processable[row] = decision.processable
+            self._status_by_key[file_key] = decision.status_key
+            self._processable_by_key[file_key] = decision.processable
+            self.table.setItem(row, 6, SortableTableWidgetItem(decision.result_text, decision.result_sort))
+            if strategies and decision.processable:
+                self.table.setCellWidget(row, 5, self._create_strategy_combo(snap.relative_path, decision.strategy_text))
+            else:
+                strategy_item = QTableWidgetItem(decision.strategy_text)
+                strategy_item.setToolTip(decision.tooltip)
+                if decision.status_key == "protected":
+                    strategy_item.setForeground(_COLOR_HDR_DV)
+                elif decision.status_key == "probe_failed":
+                    strategy_item.setForeground(_COLOR_PROBE_FAILED)
+                self.table.setItem(row, 5, strategy_item)
+            total_size += snap.size_bytes
+        self.table.blockSignals(False)
+        total_tb = total_size / (1024**4)
+        processable_count = sum(1 for v in self._row_processable.values() if v)
+        protected_count = sum(1 for v in self._row_status_keys.values() if v == "protected")
+        self.summary_label.setText(
+            f"已扫描 {len(snapshots)} 个文件 · 可处理 {processable_count} · "
+            f"已保护跳过 {protected_count} · 总计 {total_tb:.2f} TB"
+        )
+        self._update_selection_count()
+        self._populate_tree(snapshots, matched_strategies)
+        self._apply_filter()
 
     def _render_row_batch(self, gen: int = 0):
         """每批渲染最多 100 行，剩余用 QTimer 调度以保持 UI 响应。"""
