@@ -171,8 +171,8 @@ class FileListPanel(QWidget):
         # 顶部信息栏
         info_layout = QHBoxLayout()
         self.summary_label = QLabel("未扫描")
-        self.refresh_btn = QPushButton("刷新")
-        self.refresh_btn.setToolTip("重新扫描当前文件夹，重建缓存")
+        self.refresh_btn = QPushButton("重建缓存")
+        self.refresh_btn.setToolTip("重新扫描所有文件夹并重建编码信息缓存")
         self.refresh_btn.clicked.connect(self.refresh_requested.emit)
         info_layout.addWidget(self.refresh_btn)
         self.view_combo = QComboBox()

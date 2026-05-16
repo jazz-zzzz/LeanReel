@@ -407,16 +407,74 @@ class Application:
             self.win.set_status(str(e))
             return
         self._refresh_libraries()
+        self._probe_folder_streaming(folder.id, path, replace_existing=False)
+
+    def _probe_folder_streaming(self, folder_id: int, path: str, replace_existing: bool):
+        """流式探测单个文件夹 — stat+ffprobe 合并，即时渲染。"""
+        self._scan_token += 1
+        my_token = self._scan_token
         self.win.set_status(f"扫描 {path}...")
 
-        def _scan_in_background():
-            batch = self.services.scanner.scan_folder_fast_batch(folder.id, path)
-            self.notifier.scan_finished.emit(batch.snapshots, folder.id, path, batch.pending_jobs)
+        # 先获取文件总数预填充表格
+        from leanreel.core.file_discovery import find_video_files
+        files = find_video_files(path)
+        total = len(files)
+        if total == 0:
+            self.win.set_status(f"未找到视频文件：{path}")
+            return
 
-        threading.Thread(target=_scan_in_background, daemon=True).start()
+        # 管理 current state
+        if replace_existing:
+            self.current_snapshots = [s for s in self.current_snapshots if s.library_folder_id != folder_id]
+        else:
+            self.current_snapshots = [s for s in self.current_snapshots if s.library_folder_id != folder_id]
+        self.current_folder_paths[folder_id] = path
+
+        # 创建占位快照填充表格（探测完会刷新）
+        placeholders = []
+        for rel_path, abs_path in files:
+            placeholders.append(FileSnapshot(
+                library_folder_id=folder_id,
+                relative_path=rel_path,
+                file_name=os.path.basename(abs_path),
+                size_bytes=0,
+                probe_ok=False,
+            ))
+        self.current_snapshots = placeholders
+        self._populate_file_list(placeholders)
+
+        done = [0]
+        lock = threading.Lock()
+
+        def _on_result(snap):
+            if self._scan_token != my_token:
+                return
+            # 替换占位快照
+            for i, s in enumerate(self.current_snapshots):
+                if s.relative_path == snap.relative_path and s.library_folder_id == folder_id:
+                    self.current_snapshots[i] = snap
+                    break
+            if snap.probe_ok:
+                strategy = self.services.matcher.match(snap)
+                match = MatchResult(strategy=strategy, estimate=estimate_savings(snap, strategy) if strategy else None) if strategy else None
+            else:
+                match = None
+            self.notifier.probed.emit(snap, match)
+            with lock:
+                done[0] += 1
+                self.notifier.progress.emit(done[0], total)
+
+        def _on_finished():
+            if self._scan_token != my_token:
+                return
+            self._populate_file_list(self.current_snapshots)
+            self.notifier.all_done.emit()
+
+        self.services.scanner.probe_stream(folder_id, path, _on_result, _on_finished)
+        self.win.set_status(f"探测中：0/{total} ...")
 
     def _on_scan_finished(self, snapshots, folder_id, folder_path, pending_jobs):
-        """扫描后台线程完成后的回调（在主线程执行）"""
+        """扫描后台线程完成后的回调（保留兼容旧路径，实际已不用两阶段）。"""
         self._scan_token += 1
         my_token = self._scan_token
 
@@ -427,7 +485,6 @@ class Application:
                 if s.library_folder_id != folder_id
             ] + list(snapshots)
         else:
-            # 全量刷新：替换所有快照，保留 folder_paths
             self.current_snapshots = list(snapshots)
         self.strategy_overrides = {
             path: strategy for path, strategy in self.strategy_overrides.items()
@@ -436,7 +493,6 @@ class Application:
 
         self._populate_file_list(self.current_snapshots)
 
-        # 区分"无视频文件"和"有待探测文件"
         if len(snapshots) == 0:
             self.win.set_status(f"未找到视频文件：{folder_path}")
             return
@@ -444,13 +500,12 @@ class Application:
         pending = len(pending_jobs)
         if pending > 0:
             self.win.set_status(f"扫描中：0/{pending} 个文件已探测...")
-
             done_count = [0]
             lock = threading.Lock()
 
             def on_probed(snap):
                 if self._scan_token != my_token:
-                    return  # 旧扫描的回调，丢弃
+                    return
                 if snap.probe_ok:
                     strategy = self.services.matcher.match(snap)
                     match = MatchResult(strategy=strategy, estimate=estimate_savings(snap, strategy) if strategy else None) if strategy else None
@@ -509,7 +564,7 @@ class Application:
         self.win.set_status("文件夹已移除")
 
     def _on_refresh_requested(self):
-        """重新扫描当前所有文件夹，刷新文件列表和编码信息缓存。"""
+        """重建缓存：重新扫描所有文件夹（合并 stat+ffprobe 为一次 I/O）。"""
         if not self.current_folder_paths:
             self.win.set_status("没有已添加的文件夹，请先添加文件夹")
             return
@@ -518,43 +573,80 @@ class Application:
             self.win.set_status("扫描已在进行中，请等待完成")
             return
 
-        # 即时清空列表，用户看到反馈
+        # 即时清空列表
         self.current_snapshots = []
         self.file_panel.populate([], {}, self.services.strategies)
         self._refresh_running = True
-        self.win.set_status("扫描中...")
         folders_at_call = list(self.current_folder_paths.items())
 
-        def _scan_in_background():
-            try:
-                all_snapshots: list = []
-                all_jobs: list = []
-                for folder_id, path in folders_at_call:
-                    batch = self.services.scanner.scan_folder_fast_batch(folder_id, path)
-                    all_snapshots.extend(batch.snapshots)
-                    all_jobs.extend(batch.pending_jobs)
-                self.notifier.scan_finished.emit(all_snapshots, None, None, all_jobs)
-            finally:
-                self._refresh_running = False
+        total = [0]
+        done = [0]
+        completed_folders = [0]
+        lock = threading.Lock()
+        self._scan_token += 1
+        my_token = self._scan_token
 
-        threading.Thread(target=_scan_in_background, daemon=True).start()
+        for folder_id, path in folders_at_call:
+            def _make_result_handler(fid, fpath):
+                def _on_result(snap):
+                    if self._scan_token != my_token:
+                        return
+                    for i, s in enumerate(self.current_snapshots):
+                        if s.relative_path == snap.relative_path and s.library_folder_id == fid:
+                            self.current_snapshots[i] = snap
+                            break
+                    else:
+                        self.current_snapshots.append(snap)
+                    if snap.probe_ok:
+                        strategy = self.services.matcher.match(snap)
+                        match = MatchResult(strategy=strategy, estimate=estimate_savings(snap, strategy) if strategy else None) if strategy else None
+                    else:
+                        match = None
+                    self.notifier.probed.emit(snap, match)
+                    with lock:
+                        done[0] += 1
+                        self.notifier.progress.emit(done[0], total[0])
+                return _on_result
+
+            count = self.services.scanner.probe_stream(
+                folder_id, path,
+                on_result=_make_result_handler(folder_id, path),
+                on_finished=None,
+            )
+            with lock:
+                total[0] += count
+            self.current_folder_paths[folder_id] = path
+
+        if total[0] == 0:
+            self._refresh_running = False
+            self.win.set_status("未找到视频文件")
+            return
+
+        self.win.set_status(f"探测中：0/{total[0]} ...")
+
+        # 等待所有 probe_stream 完成的后台监视线程
+        def _wait_all():
+            import time as _time
+            while done[0] < total[0]:
+                if self._scan_token != my_token:
+                    self._refresh_running = False
+                    return
+                _time.sleep(0.2)
+            self._refresh_running = False
+            if self._scan_token == my_token:
+                self._populate_file_list(self.current_snapshots)
+                self.notifier.all_done.emit()
+
+        threading.Thread(target=_wait_all, daemon=True).start()
 
     def _on_single_folder_refresh(self, folder_id):
-        """刷新单个文件夹（库面板或树视图右键触发）。"""
+        """流式刷新单个文件夹（库面板或树视图右键触发）。"""
         if folder_id not in self.current_folder_paths:
             return
         path = self.current_folder_paths[folder_id]
-
-        # 即时移除该文件夹的旧快照
         self.current_snapshots = [s for s in self.current_snapshots if s.library_folder_id != folder_id]
         self._populate_file_list(self.current_snapshots)
-        self.win.set_status(f"刷新 {path}...")
-
-        def _scan_in_background():
-            batch = self.services.scanner.scan_folder_fast_batch(folder_id, path)
-            self.notifier.scan_finished.emit(batch.snapshots, folder_id, path, batch.pending_jobs)
-
-        threading.Thread(target=_scan_in_background, daemon=True).start()
+        self._probe_folder_streaming(folder_id, path, replace_existing=False)
 
     # ── 策略信号处理 ──
 
