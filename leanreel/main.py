@@ -392,7 +392,7 @@ class Application:
                 strategy=strategy,
                 estimate=estimate_savings(s, strategy),
             )
-        # 同步更新 Store（新数据路径）
+        # Store 是唯一数据路径
         rows = []
         for s in snapshots:
             m = matched.get(s.relative_path)
@@ -400,8 +400,13 @@ class Application:
             rows.append(FileRow(snap=s, match=m, decision=d))
         keep_checked = not fast  # fast=True 表示切库，应清空勾选
         self.store.rebuild(rows, strategies=self.services.strategies, keep_checked=keep_checked)
-        # 保留旧的 populate 调用（兼容现有流程）
-        self.file_panel.populate(snapshots, matched, self.services.strategies, fast=fast)
+        # 确保策略查找表已更新（供 ComboBox 工厂使用）
+        self.file_panel._strategy_lookup = self.file_panel._build_strategy_lookup(self.services.strategies)
+        # Store.rebuild 通过信号驱动 Adapter 自动更新 UI，显式调用确保即时刷新
+        if self.file_panel._flat_adapter:
+            self.file_panel._flat_adapter._on_rebuild()
+        if self.file_panel._tree_adapter:
+            self.file_panel._tree_adapter._on_rebuild()
         return matched
 
     # ── 库信号处理 ──
@@ -621,13 +626,17 @@ class Application:
             self.strategy_panel.show_preset_strategy()
             self.strategy_panel.preset_panel.select_by_strategy(override.name)
             return
-        match = self.file_panel._last_matches.get(relative_path)
-        strategy = getattr(match, "strategy", None) if match else None
-        if strategy:
-            name = strategy if isinstance(strategy, str) else getattr(strategy, "name", "")
-            if name:
-                self.strategy_panel.show_preset_strategy()
-                self.strategy_panel.preset_panel.select_by_strategy(name)
+        # 从 Store 中查找该文件的匹配策略
+        for row_obj in self.store._rows:
+            if row_obj.snap.relative_path == relative_path:
+                match = row_obj.match
+                strategy = getattr(match, "strategy", None) if match else None
+                if strategy:
+                    name = strategy if isinstance(strategy, str) else getattr(strategy, "name", "")
+                    if name:
+                        self.strategy_panel.show_preset_strategy()
+                        self.strategy_panel.preset_panel.select_by_strategy(name)
+                break
 
     def _on_preset_strategy_changed(self, index):
         """策略面板预设策略变更时，应用到所有选中/勾选的文件。"""
