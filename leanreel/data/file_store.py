@@ -24,8 +24,9 @@ class FileRow:
 
     @property
     def folder_name(self) -> str:
-        name = str(self.snap.relative_path).replace("\\", "/").rsplit("/", 1)[0]
-        return name or "."
+        path = str(self.snap.relative_path).replace("\\", "/")
+        parts = path.rsplit("/", 1)
+        return parts[0] if len(parts) > 1 else "."
 
 
 class FileTableStore(QObject):
