@@ -13,9 +13,6 @@ class AppSignals(QObject):
     probed = Signal(object, object)
     """探测完成 — (FileSnapshot, MatchResult|None)"""
 
-    scan_finished = Signal(object, object, object, object)
-    """扫描批次完成 — (list[FileSnapshot], folder_id:int|None, path:str|None, pending_jobs:list)"""
-
     all_done = Signal()
     """全部探测任务完成"""
 

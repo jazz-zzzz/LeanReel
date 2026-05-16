@@ -1,5 +1,6 @@
 """扫描器测试"""
 import json
+import threading
 import time
 import pytest
 from pathlib import Path
@@ -12,6 +13,22 @@ from leanreel.data.models import (
     HDRType,
     SubtitleTrack,
 )
+
+
+def _probe_sync(scanner, folder_id, folder_path):
+    """同步包装 probe_stream，便利测试。"""
+    results = []
+    event = threading.Event()
+
+    def on_result(snap):
+        results.append(snap)
+
+    def on_finished():
+        event.set()
+
+    scanner.probe_stream(folder_id, folder_path, on_result, on_finished)
+    event.wait(timeout=10)
+    return results
 
 
 class MockFFprobe:
@@ -101,7 +118,7 @@ def test_scanner_finds_video_files(tmp_path: Path):
     scanner = Scanner(db, probe_runner=MockFFprobe())
     lib_id = db.insert_library(Library(name="Test"))
     folder_id = db.insert_folder(LibraryFolder(library_id=lib_id, path=str(tmp_path)))
-    result = scanner.scan_folder(folder_id, str(tmp_path))
+    result = _probe_sync(scanner, folder_id, str(tmp_path))
     assert len(result) == 2
     exts = {r.file_name for r in result}
     assert "movie.mkv" in exts
@@ -117,8 +134,8 @@ def test_scanner_caches_results(tmp_path: Path):
     lib_id = db.insert_library(Library(name="Test"))
     folder_id = db.insert_folder(LibraryFolder(library_id=lib_id, path=str(tmp_path)))
 
-    first = scanner.scan_folder(folder_id, str(tmp_path))
-    second = scanner.scan_folder(folder_id, str(tmp_path))
+    first = _probe_sync(scanner, folder_id, str(tmp_path))
+    second = _probe_sync(scanner, folder_id, str(tmp_path))
     assert len(first) == len(second)
 
 
@@ -138,7 +155,7 @@ def test_scanner_reprobes_cached_snapshot_without_codec(tmp_path: Path):
     probe = CountingFFprobe()
     scanner = Scanner(db, probe_runner=probe)
 
-    result = scanner.scan_folder(folder_id, str(tmp_path))
+    result = _probe_sync(scanner, folder_id, str(tmp_path))
 
     assert probe.calls == 1
     assert result[0].video_codec == "hevc"
@@ -155,7 +172,7 @@ def test_scanner_probes_changed_files_concurrently(tmp_path: Path):
     scanner = Scanner(db, probe_runner=SlowFFprobe(), max_workers=4)
 
     started = time.perf_counter()
-    result = scanner.scan_folder(folder_id, str(tmp_path))
+    result = _probe_sync(scanner, folder_id, str(tmp_path))
     elapsed = time.perf_counter() - started
 
     assert len(result) == 4
@@ -172,7 +189,7 @@ def test_scanner_persists_tracks_as_json_and_restores_typed_snapshot(tmp_path: P
     lib_id = db.insert_library(Library(name="Test"))
     folder_id = db.insert_folder(LibraryFolder(library_id=lib_id, path=str(tmp_path)))
 
-    scanner.scan_folder(folder_id, str(tmp_path))
+    _probe_sync(scanner, folder_id, str(tmp_path))
     rows = db.execute(
         "SELECT audio_tracks, subtitle_tracks FROM file_snapshot WHERE library_folder_id=?",
         [folder_id],
@@ -180,7 +197,7 @@ def test_scanner_persists_tracks_as_json_and_restores_typed_snapshot(tmp_path: P
     assert json.loads(rows[0]["audio_tracks"])[0]["codec"] == "truehd"
     assert json.loads(rows[0]["subtitle_tracks"])[0]["is_forced"] is True
 
-    cached = Scanner(db, probe_runner=FailingFFprobe()).scan_folder(folder_id, str(tmp_path))
+    cached = _probe_sync(Scanner(db, probe_runner=FailingFFprobe()), folder_id, str(tmp_path))
 
     assert len(cached) == 1
     snapshot = cached[0]
@@ -332,10 +349,11 @@ def test_save_exhausts_retries_and_raises(tmp_path: Path):
     assert busy_db.call_count == 3
 
 
-def test_fast_scan_batches_keep_independent_pending_jobs(tmp_path: Path):
+def test_probe_stream_isolates_folders(tmp_path: Path):
+    """probe_stream 区分不同文件夹，各自产生正确结果。"""
     from leanreel.core.scanner import Scanner
 
-    db = Database(str(tmp_path / "scan_batch.db"))
+    db = Database(str(tmp_path / "isolated.db"))
     try:
         first = tmp_path / "first"
         second = tmp_path / "second"
@@ -345,11 +363,15 @@ def test_fast_scan_batches_keep_independent_pending_jobs(tmp_path: Path):
         (second / "b.mkv").write_bytes(b"second")
 
         scanner = Scanner(db, probe_runner=MockFFprobe(), max_workers=1)
-        first_batch = scanner.scan_folder_fast_batch(1, str(first))
-        second_batch = scanner.scan_folder_fast_batch(2, str(second))
+        results1 = _probe_sync(scanner, 1, str(first))
+        results2 = _probe_sync(scanner, 2, str(second))
 
-        assert [job[1] for job in first_batch.pending_jobs] == ["a.mkv"]
-        assert [job[1] for job in second_batch.pending_jobs] == ["b.mkv"]
+        assert len(results1) == 1
+        assert results1[0].file_name == "a.mkv"
+        assert results1[0].library_folder_id == 1
+        assert len(results2) == 1
+        assert results2[0].file_name == "b.mkv"
+        assert results2[0].library_folder_id == 2
     finally:
         db.close()
 
