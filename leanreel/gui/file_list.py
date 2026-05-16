@@ -118,23 +118,7 @@ class FileListPanel(QWidget):
 
     def __init__(self):
         super().__init__()
-        self._snapshots_by_path: dict[str, Any] = {}
-        self._snapshots_by_key: dict[tuple[int, str], Any] = {}
         self._strategy_lookup: dict[str, Any] = {}
-        self._last_snapshots: list[Any] = []
-        self._last_matches: dict[str, Any] = {}
-        self._last_strategies: list[Any] | None = None
-        self._row_by_path: dict[str, int] = {}
-        self._row_by_key: dict[tuple[int, str], int] = {}
-        self._row_status_keys: dict[int, str] = {}
-        self._row_processable: dict[int, bool] = {}
-        self._status_by_key: dict[tuple[int, str], str] = {}
-        self._processable_by_key: dict[tuple[int, str], bool] = {}
-        self._checked_keys: set[tuple[int, str]] = set()
-        self._tree_item_by_key: dict[tuple[int, str], QTreeWidgetItem] = {}
-        self._populate_gen = 0
-        self._render_gen = 0
-        self._path_gen: dict[str, int] = {}
         self.current_view_mode = "flat"
         self._store = None
         self._flat_adapter = None
@@ -163,14 +147,16 @@ class FileListPanel(QWidget):
 
     def get_checked_file_keys(self) -> list[tuple[int, str]]:
         """返回所有勾中文件的 (library_folder_id, relative_path) key 列表（已排序）。"""
-        return sorted(self._checked_keys)
+        if self._store:
+            return self._store.checked_keys()
+        return []
 
     def set_store(self, store):
         """注入 FileTableStore 并创建适配器，将复选框操作委托给 Store。"""
         from leanreel.gui.adapters.flat_adapter import FlatAdapter
         from leanreel.gui.adapters.tree_adapter import TreeAdapter
         self._store = store
-        self._flat_adapter = FlatAdapter(store, self.table, strategies=self._last_strategies)
+        self._flat_adapter = FlatAdapter(store, self.table)
         self._tree_adapter = TreeAdapter(store, self.tree)
         # 替换复选框变更回调为 Store 委托版本
         try:
@@ -185,53 +171,22 @@ class FileListPanel(QWidget):
         self.tree.itemChanged.connect(self._on_tree_checkbox_changed)
 
     def _on_flat_checkbox_changed(self, item: QTableWidgetItem):
-        """平铺表格复选框变更 —— 委托给 Store（若已注入）或回退到旧逻辑。"""
+        """平铺表格复选框变更 —— 委托给 Store（若已注入）。"""
         if item.column() != 0:
             return
         key = self._coerce_key(item.data(Qt.UserRole))
         if self._store is not None and key is not None:
             self._store.set_checked(key, item.checkState() == Qt.Checked)
-        elif key is not None:
-            # 回退到旧逻辑
-            if item.checkState() == Qt.Checked and item.flags() & Qt.ItemIsEnabled:
-                self._checked_keys.add(key)
-            else:
-                self._checked_keys.discard(key)
         self._apply_filter()
 
     def _on_tree_checkbox_changed(self, item: QTreeWidgetItem, column: int):
-        """树视图复选框变更 —— 委托给 Store（若已注入）或回退到旧逻辑。"""
+        """树视图复选框变更 —— 委托给 Store（若已注入）。"""
         if column != 0:
             return
         key = self._coerce_key(item.data(0, Qt.UserRole))
         if self._store is not None and key is not None:
             self._store.set_checked(key, item.checkState(0) == Qt.Checked)
-        elif key is not None:
-            # 回退到旧逻辑
-            if item.checkState(0) == Qt.Checked and item.flags() & Qt.ItemIsEnabled:
-                self._checked_keys.add(key)
-            else:
-                self._checked_keys.discard(key)
         self._apply_filter()
-
-    def _sync_checked_from_view(self):
-        """将当前视图的勾选状态同步回 _checked_keys。"""
-        if self.current_view_mode == "tree":
-            for key, item in list(self._tree_item_by_key.items()):
-                if item.flags() & Qt.ItemIsEnabled and item.checkState(0) == Qt.Checked:
-                    self._checked_keys.add(key)
-                else:
-                    self._checked_keys.discard(key)
-        else:
-            for row in range(self.table.rowCount()):
-                check_item = self.table.item(row, 0)
-                if check_item is not None:
-                    key = self._coerce_key(check_item.data(Qt.UserRole))
-                    if key is not None:
-                        if check_item.checkState() == Qt.Checked and check_item.flags() & Qt.ItemIsEnabled:
-                            self._checked_keys.add(key)
-                        else:
-                            self._checked_keys.discard(key)
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
@@ -330,233 +285,52 @@ class FileListPanel(QWidget):
         self.tree.itemSelectionChanged.connect(self._on_tree_selection_changed)
 
     def populate(self, snapshots: list, matched_strategies: dict[str, MatchResult | None], strategies: list | None = None, fast: bool = False):
-        """填充文件表格行。
+        """填充文件表格行（委托给 Store + Adapter）。"""
+        from leanreel.data.file_store import FileTableStore, FileRow
 
-        fast=True: 一次同步渲染（缓存加载，无需分批）。
-        fast=False: 分批渲染（探测期间，保持 UI 响应）。
-        """
-        self._populate_gen += 1
-        self._last_snapshots = list(snapshots)
-        self._last_matches = dict(matched_strategies)
-        self._last_strategies = strategies
-        self._snapshots_by_path = {snap.relative_path: snap for snap in snapshots}
-        self._snapshots_by_key = {self._file_key(snap): snap for snap in snapshots}
-        self._row_by_path = {}
-        self._row_by_key = {}
-        self._row_status_keys = {}
-        self._row_processable = {}
-        self._status_by_key = {}
-        self._processable_by_key = {}
-        self._tree_item_by_key = {}
-        valid_keys = set(self._snapshots_by_key)
-        self._checked_keys = {key for key in self._checked_keys if key in valid_keys}
-        self._path_gen = {snap.relative_path: self._populate_gen for snap in snapshots}
         self._strategy_lookup = self._build_strategy_lookup(strategies)
 
         if not snapshots:
             self.stack.setCurrentWidget(self.empty_label)
             self.summary_label.setText("未扫描")
+            if self._store:
+                self._store.rebuild([], strategies=strategies, keep_checked=False)
             self._update_selection_count()
             return
 
+        # 确保 Store 和 Adapter 存在（测试兼容：测试可能直接调用 populate 而未 set_store）
+        if self._store is None:
+            self.set_store(FileTableStore())
+
+        # 构建 FileRow 列表
+        rows = []
+        for s in snapshots:
+            m = self._match_for_snap(s, matched_strategies)
+            d = self._decision_display(s, m)
+            rows.append(FileRow(snap=s, match=m, decision=d))
+        self._store.rebuild(rows, strategies=strategies, keep_checked=not fast)
+
+        # Store.rebuild 会通过信号驱动 Adapter 更新 UI
+        # 显式调用确保即时刷新（信号在某些测试场景下可能尚未连接）
         self.stack.setCurrentWidget(self.table)
-        self.table.setSortingEnabled(False)
-        self.table.blockSignals(True)
-        self.table.clearContents()
-        self.table.setRowCount(len(snapshots))
+        if self._flat_adapter:
+            self._flat_adapter._on_rebuild()
+        if self._tree_adapter:
+            self._tree_adapter._on_rebuild()
 
-        if fast:
-            # 一次同步渲染（缓存加载），QComboBox 也同步创建
-            self._render_all_rows(snapshots, matched_strategies, strategies)
-        else:
-            # 分批渲染（探测期间），QComboBox 延后
-            self._batch_snapshots = list(snapshots)
-            self._batch_matches = dict(matched_strategies)
-            self._batch_strategies = strategies
-            self._batch_total_size = 0
-            self._batch_row_index = 0
-            self._render_gen += 1
-            self._render_row_batch(self._render_gen)
-
-    def _render_all_rows(self, snapshots, matched_strategies, strategies):
-        """一次同步渲染全部行（用于缓存加载场景，无需保持 UI 响应）。"""
-        total_size = 0
-        for row, snap in enumerate(snapshots):
-            file_key = self._file_key(snap)
-            self._row_by_path[snap.relative_path] = row
-            self._row_by_key[file_key] = row
-            check_item = QTableWidgetItem()
-            check_item.setData(Qt.UserRole, file_key)
-            skip_reason = get_skip_reason(snap)
-            if skip_reason:
-                check_item.setFlags(Qt.ItemIsUserCheckable)
-                check_item.setToolTip(skip_reason)
-            else:
-                check_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-            check_item.setCheckState(Qt.Checked if file_key in self._checked_keys else Qt.Unchecked)
-            self.table.setItem(row, 0, check_item)
-            file_item = QTableWidgetItem(snap.file_name)
-            file_item.setData(Qt.UserRole, file_key)
-            self.table.setItem(row, 1, file_item)
-            self.table.setItem(row, 2, SortableTableWidgetItem(_format_bytes(snap.size_bytes), snap.size_bytes))
-            codec_item = QTableWidgetItem(self._format_codec(snap))
-            if getattr(snap, "video_codec", ""):
-                codec_item.setForeground(_COLOR_CODEC_OK)
-            elif getattr(snap, "probe_ok", None) is False and getattr(snap, "probe_error", ""):
-                codec_item.setForeground(_COLOR_PROBE_FAILED)
-                codec_item.setToolTip(getattr(snap, "probe_error", ""))
-            else:
-                codec_item.setForeground(_COLOR_CODEC_MISSING)
-            self.table.setItem(row, 3, codec_item)
-            hdr_item = QTableWidgetItem(self._format_hdr(snap.hdr_type))
-            hdr_item.setForeground(self._hdr_color(getattr(snap, "hdr_type", None)))
-            self.table.setItem(row, 4, hdr_item)
-            decision = self._decision_display(snap, self._match_for_snap(snap, matched_strategies))
-            self._row_status_keys[row] = decision.status_key
-            self._row_processable[row] = decision.processable
-            self._status_by_key[file_key] = decision.status_key
-            self._processable_by_key[file_key] = decision.processable
-            self.table.setItem(row, 6, SortableTableWidgetItem(decision.result_text, decision.result_sort))
-            if strategies and decision.processable:
-                self.table.setCellWidget(row, 5, self._create_strategy_combo(snap.relative_path, decision.strategy_text))
-            else:
-                strategy_item = QTableWidgetItem(decision.strategy_text)
-                strategy_item.setToolTip(decision.tooltip)
-                if decision.status_key == "protected":
-                    strategy_item.setForeground(_COLOR_HDR_DV)
-                elif decision.status_key == "probe_failed":
-                    strategy_item.setForeground(_COLOR_PROBE_FAILED)
-                self.table.setItem(row, 5, strategy_item)
-            total_size += snap.size_bytes
-        self.table.blockSignals(False)
-        total_tb = total_size / (1024**4)
-        processable_count = sum(1 for v in self._row_processable.values() if v)
-        protected_count = sum(1 for v in self._row_status_keys.values() if v == "protected")
+        # 更新摘要
+        total_size = sum(getattr(s, 'size_bytes', 0) or 0 for s in snapshots)
+        total_tb = total_size / (1024**4) if total_size else 0
+        processable = sum(1 for s in snapshots if getattr(s, 'video_codec', '') and not get_skip_reason(s))
         self.summary_label.setText(
-            f"已扫描 {len(snapshots)} 个文件 · 可处理 {processable_count} · "
-            f"已保护跳过 {protected_count} · 总计 {total_tb:.2f} TB"
+            f"已扫描 {len(snapshots)} 个文件 · 可处理 {processable} · 总计 {total_tb:.2f} TB"
         )
         self._update_selection_count()
-        self._populate_tree(snapshots, matched_strategies)
-        self._apply_filter()
-
-    def _render_row_batch(self, gen: int = 0):
-        """每批渲染最多 100 行，剩余用 QTimer 调度以保持 UI 响应。"""
-        if gen != self._render_gen:
-            return  # 旧代际的回调，丢弃
-        batch_size = 100
-        snapshots = self._batch_snapshots
-        matched_strategies = self._batch_matches
-        strategies = self._batch_strategies
-        for _ in range(batch_size):
-            row = self._batch_row_index
-            if row >= len(snapshots):
-                # 全部分批完成
-                self._finish_populate()
-                return
-            snap = snapshots[row]
-            file_key = self._file_key(snap)
-            self._row_by_path[snap.relative_path] = row
-            self._row_by_key[file_key] = row
-            check_item = QTableWidgetItem()
-            skip_reason = get_skip_reason(snap)
-            if skip_reason:
-                check_item.setFlags(Qt.ItemIsUserCheckable)
-                check_item.setToolTip(skip_reason)
-            else:
-                check_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-            check_item.setData(Qt.UserRole, file_key)
-            check_item.setCheckState(Qt.Checked if file_key in self._checked_keys else Qt.Unchecked)
-            self.table.setItem(row, 0, check_item)
-            file_item = QTableWidgetItem(snap.file_name)
-            file_item.setData(Qt.UserRole, file_key)
-            self.table.setItem(row, 1, file_item)
-            self.table.setItem(
-                row, 2,
-                SortableTableWidgetItem(_format_bytes(snap.size_bytes), snap.size_bytes),
-            )
-            codec_item = QTableWidgetItem(self._format_codec(snap))
-            if getattr(snap, "video_codec", ""):
-                codec_item.setForeground(_COLOR_CODEC_OK)
-            elif getattr(snap, "probe_ok", None) is False and getattr(snap, "probe_error", ""):
-                codec_item.setForeground(_COLOR_PROBE_FAILED)
-                codec_item.setToolTip(getattr(snap, "probe_error", ""))
-            elif getattr(snap, "probe_ok", None) is False:
-                codec_item.setForeground(_COLOR_CODEC_MISSING)
-            else:
-                codec_item.setForeground(_COLOR_CODEC_MISSING)
-            self.table.setItem(row, 3, codec_item)
-            hdr_item = QTableWidgetItem(self._format_hdr(snap.hdr_type))
-            hdr_item.setForeground(self._hdr_color(getattr(snap, "hdr_type", None)))
-            self.table.setItem(row, 4, hdr_item)
-            decision = self._decision_display(
-                snap, self._match_for_snap(snap, matched_strategies)
-            )
-            self._row_status_keys[row] = decision.status_key
-            self._row_processable[row] = decision.processable
-            self._status_by_key[file_key] = decision.status_key
-            self._processable_by_key[file_key] = decision.processable
-            self.table.setItem(
-                row, 6,
-                SortableTableWidgetItem(decision.result_text, decision.result_sort),
-            )
-            # 列5：先用纯文本占位（快），QComboBox 延后异步创建
-            strategy_item = QTableWidgetItem(decision.strategy_text)
-            strategy_item.setToolTip(decision.tooltip)
-            if decision.status_key == "protected":
-                strategy_item.setForeground(_COLOR_HDR_DV)
-            elif decision.status_key == "probe_failed":
-                strategy_item.setForeground(_COLOR_PROBE_FAILED)
-            self.table.setItem(row, 5, strategy_item)
-            self._batch_total_size += snap.size_bytes
-            self._batch_row_index += 1
-
-        # 还有剩余行，调度下一批
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(0, lambda g=gen: self._render_row_batch(g))
-
-    def _create_combo_cells(self):
-        """异步创建 QComboBox（在全部行渲染完成后调用）。"""
-        strategies = self._batch_strategies
-        if not strategies:
-            return
-        for row in range(self.table.rowCount()):
-            if self._row_processable.get(row, False):
-                item = self.table.item(row, 1)
-                if item is None:
-                    continue
-                key = self._coerce_key(item.data(Qt.UserRole))
-                rel = key[1] if key else ""
-                if not rel:
-                    continue
-                old = self.table.item(row, 5)
-                current_text = old.text() if old else ""
-                self.table.setCellWidget(
-                    row, 5,
-                    self._create_strategy_combo(rel, current_text),
-                )
-
-    def _finish_populate(self):
-        """分批渲染完成后的收尾工作。"""
-        snapshots = self._batch_snapshots
-        self.table.blockSignals(False)
-        total_tb = self._batch_total_size / (1024**4)
-        processable_count = sum(1 for value in self._row_processable.values() if value)
-        protected_count = sum(1 for value in self._row_status_keys.values() if value == "protected")
-        self.summary_label.setText(
-            f"已扫描 {len(snapshots)} 个文件 · 可处理 {processable_count} · "
-            f"已保护跳过 {protected_count} · 总计 {total_tb:.2f} TB"
-        )
-        self._update_selection_count()
-        self._populate_tree(snapshots, self._batch_matches)
-        self._apply_filter()
-        # 延后异步创建 QComboBox（测试可通过 processEvents 或 ensure_combos 触发）
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(0, self._create_combo_cells)
 
     def ensure_combos_created(self):
         """同步创建所有 QComboBox（供测试使用）。"""
-        self._create_combo_cells()
+        if self._flat_adapter:
+            self._flat_adapter.create_combo_cells(self._create_strategy_combo)
 
     def _format_hdr(self, hdr_type: Any) -> str:
         return getattr(hdr_type, "value", str(hdr_type))
@@ -634,152 +408,46 @@ class FileListPanel(QWidget):
     def set_view_mode(self, mode: str):
         if mode not in {"flat", "tree"}:
             return
-        # 切换前将当前视图勾选状态同步到 _checked_keys
-        self._sync_checked_from_view()
         self.current_view_mode = mode
         if mode == "tree":
-            self._populate_tree(list(self._snapshots_by_path.values()), self._last_matches)
+            # TreeAdapter 通过 Store 信号已自动维护树视图
+            # 这里只需确保树视图已构建并切换显示
+            if self._tree_adapter:
+                self._tree_adapter._on_rebuild()
             self.stack.setCurrentWidget(self.tree)
             self.table.hide()
             self.tree.show()
         else:
-            # 切回平铺时从 _checked_keys 同步表格勾选状态
-            self.table.blockSignals(True)
-            for row in range(self.table.rowCount()):
-                check_item = self.table.item(row, 0)
-                if check_item is not None:
-                    key = self._coerce_key(check_item.data(Qt.UserRole))
-                    if key is not None:
-                        if key in self._checked_keys and check_item.flags() & Qt.ItemIsEnabled:
-                            check_item.setCheckState(Qt.Checked)
-                        else:
-                            check_item.setCheckState(Qt.Unchecked)
-            self.table.blockSignals(False)
+            # 切回平铺，FlatAdapter 已自动维护表格
+            if self._flat_adapter:
+                self._flat_adapter._on_rebuild()
             self.stack.setCurrentWidget(self.table)
             self.tree.hide()
             self.table.show()
 
-    def _populate_tree(self, snapshots: list, matched_strategies: dict):
-        self.tree.clear()
-        self.tree.blockSignals(True)
-        self._tree_item_by_key.clear()
-        # 预计算每个文件夹的总大小
-        folder_sizes: dict[str, int] = {}
-        for snap in snapshots:
-            folder_name = str(snap.relative_path).replace("\\", "/").rsplit("/", 1)[0]
-            folder_sizes[folder_name] = folder_sizes.get(folder_name, 0) + snap.size_bytes
-        folders: dict[str, QTreeWidgetItem] = {}
-        for snap in snapshots:
-            folder_name = str(snap.relative_path).replace("\\", "/").rsplit("/", 1)[0]
-            folder_name = folder_name or "."
-            folder_item = folders.get(folder_name)
-            if folder_item is None:
-                folder_size = folder_sizes.get(folder_name, 0)
-                folder_item = _SortableTreeItem([folder_name, _format_bytes(folder_size), "", "", "", ""])
-                folder_item.setData(1, Qt.UserRole, folder_size)  # 按数值排序
-                folder_item.setData(0, Qt.UserRole, snap.library_folder_id)
-                font = folder_item.font(0)
-                font.setBold(True)
-                folder_item.setFont(0, font)
-                folders[folder_name] = folder_item
-                self.tree.addTopLevelItem(folder_item)
-            decision = self._decision_display(
-                snap, matched_strategies.get(snap.relative_path)
-            )
-            file_key = self._file_key(snap)
-            child = QTreeWidgetItem([
-                snap.file_name,
-                _format_bytes(snap.size_bytes),
-                self._format_codec(snap),
-                self._format_hdr(snap.hdr_type),
-                decision.strategy_text,
-                decision.result_text,
-            ])
-            child.setData(0, Qt.UserRole, file_key)
-            child.setToolTip(0, decision.tooltip or snap.file_name)
-            child.setToolTip(4, decision.tooltip)
-            # 颜色标记 — 与平铺表格一致
-            if getattr(snap, "video_codec", ""):
-                child.setForeground(2, _COLOR_CODEC_OK)
-            elif getattr(snap, "probe_ok", None) is False and getattr(snap, "probe_error", ""):
-                child.setForeground(2, _COLOR_PROBE_FAILED)
-            else:
-                child.setForeground(2, _COLOR_CODEC_MISSING)
-            child.setForeground(3, self._hdr_color(getattr(snap, "hdr_type", None)))
-            if decision.status_key == "protected":
-                child.setForeground(4, _COLOR_HDR_DV)
-            elif decision.status_key == "probe_failed":
-                child.setForeground(4, _COLOR_PROBE_FAILED)
-            if decision.processable:
-                child.setFlags(child.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-                child.setCheckState(0, Qt.Checked if file_key in self._checked_keys else Qt.Unchecked)
-            else:
-                child.setFlags((child.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEnabled)
-                child.setToolTip(0, decision.tooltip)
-            self._tree_item_by_key[file_key] = child
-            folder_item.addChild(child)
-        self.tree.blockSignals(False)
-        # 默认折叠，用户按需展开目录
-
-    def _find_tree_child(self, relative_path: str) -> QTreeWidgetItem | None:
-        """在树视图中按 relative_path 查找叶子节点（通过 _tree_item_by_key 定位）。"""
-        for (folder_id, path), item in self._tree_item_by_key.items():
-            if path == relative_path:
-                return item
-        return None
-
-    def _update_tree_child(self, relative_path: str, snap: Any, decision: FileDecisionDisplay):
-        """更新树视图中单个文件行的编码、策略、结果列及颜色。"""
-        child = self._find_tree_child(relative_path)
-        if child is None:
-            return
-        # 同步数据追踪字典
-        key = self._file_key(snap)
-        if key:
-            self._status_by_key[key] = decision.status_key
-            self._processable_by_key[key] = decision.processable
-        child.setText(1, _format_bytes(snap.size_bytes))
-        child.setText(2, self._format_codec(snap))
-        child.setText(3, self._format_hdr(snap.hdr_type))
-        child.setText(4, decision.strategy_text)
-        child.setText(5, decision.result_text)
-        child.setToolTip(4, decision.tooltip)
-        # 颜色
-        if getattr(snap, "video_codec", ""):
-            child.setForeground(2, _COLOR_CODEC_OK)
-        elif getattr(snap, "probe_ok", None) is False and getattr(snap, "probe_error", ""):
-            child.setForeground(2, _COLOR_PROBE_FAILED)
-        else:
-            child.setForeground(2, _COLOR_CODEC_MISSING)
-        child.setForeground(3, self._hdr_color(getattr(snap, "hdr_type", None)))
-        if decision.status_key == "protected":
-            child.setForeground(4, _COLOR_HDR_DV)
-        elif decision.status_key == "probe_failed":
-            child.setForeground(4, _COLOR_PROBE_FAILED)
-        else:
-            child.setForeground(4, QColor())  # 恢复默认
-        # 可处理性
-        if decision.processable:
-            child.setFlags(child.flags() | Qt.ItemIsEnabled)
-        else:
-            child.setFlags((child.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEnabled)
-            child.setToolTip(0, decision.tooltip)
-
     def _on_strategy_combo_changed(self, relative_path: str, strategy_name: str):
-        row = self._row_by_path.get(relative_path)
-        if row is None:
+        """策略下拉框变更 — 通过 Store 更新数据，Adapter 自动渲染 UI。"""
+        if self._store is None:
+            return
+        # 在 Store 中查找该 relative_path 的所有行
+        target_key = None
+        target_row = None
+        for row in self._store._rows:
+            if row.snap.relative_path == relative_path:
+                target_key = row.key
+                target_row = row
+                break
+        if target_key is None:
             return
 
-        snap = self._snapshots_by_path.get(relative_path)
-        if snap is not None and strategy_name != "自定义":
+        if strategy_name != "自定义":
             lookup = self._strategy_lookup.get(strategy_name, strategy_name)
             match = MatchResult(strategy=lookup) if not isinstance(lookup, MatchResult) else lookup
-            decision = self._decision_display(snap, match)
-            self._row_status_keys[row] = decision.status_key
-            self._row_processable[row] = decision.processable
-            self.table.setItem(row, 6, SortableTableWidgetItem(decision.result_text, decision.result_sort))
-        elif snap is not None:
-            self.table.setItem(row, 6, SortableTableWidgetItem("—", -1))
+            decision = self._decision_display(target_row.snap, match)
+            self._store.update_row(target_key, target_row.snap, match, decision=decision)
+        else:
+            # "自定义"选项：不改变 store 中的 match，只发信号
+            pass
 
         self.strategy_override_changed.emit(relative_path, strategy_name)
         if strategy_name == "自定义":
@@ -787,114 +455,31 @@ class FileListPanel(QWidget):
         self._apply_filter()
 
     def apply_strategy_to_row(self, relative_path: str, strategy: Any):
-        """Apply a strategy object to one row and refresh its savings estimate."""
-        row = self._row_by_path.get(relative_path)
-        snap = self._snapshots_by_path.get(relative_path)
-        if row is None or snap is None:
+        """Apply a strategy object to one row and refresh its savings estimate.（通过 Store）"""
+        if self._store is None:
             return
-
-        match = MatchResult(strategy=strategy) if not isinstance(strategy, MatchResult) else strategy
-        decision = self._decision_display(snap, match)
-        self._row_status_keys[row] = decision.status_key
-        self._row_processable[row] = decision.processable
-        self.table.setItem(row, 6, SortableTableWidgetItem(decision.result_text, decision.result_sort))
-        combo = self.table.cellWidget(row, 5)
-        if isinstance(combo, QComboBox):
-            if combo.findText(decision.strategy_text) < 0:
-                combo.addItem(decision.strategy_text)
-            if combo.currentText() != decision.strategy_text:
-                combo.blockSignals(True)
-                combo.setCurrentText(decision.strategy_text)
-                combo.blockSignals(False)
-        else:
-            item = self.table.item(row, 5)
-            if item:
-                item.setText(decision.strategy_text)
-                item.setToolTip(decision.tooltip)
-        if self.current_view_mode == "tree":
-            self._update_tree_child(relative_path, snap, decision)
+        # 在 Store 中查找该 relative_path
+        for row in self._store._rows:
+            if row.snap.relative_path == relative_path:
+                match = MatchResult(strategy=strategy) if not isinstance(strategy, MatchResult) else strategy
+                decision = self._decision_display(row.snap, match)
+                self._store.update_row(row.key, row.snap, match, decision=decision)
+                break
         self._apply_filter()
 
     def update_snapshot_row(self, snap: Any, match: Any = None):
-        """后台探测完成后增量更新单行编码信息。"""
+        """后台探测完成后增量更新单行编码信息。
+
+        新架构：Store.update_row + Adapter 信号自动更新 UI。此方法保留作为信号兼容层。
+        """
+        if self._store is None:
+            return
         relative_path = str(getattr(snap, "relative_path", ""))
         if not relative_path:
             return
-
-        self._snapshots_by_path[relative_path] = snap
-        if match is not None:
-            self._last_matches[relative_path] = match
-        row = self._row_by_path.get(relative_path)
-        if row is not None:
-            # 验证缓存行号未因排序而失效
-            item = self.table.item(row, 1)
-            if item is None:
-                row = None
-            else:
-                key = self._coerce_key(item.data(Qt.UserRole))
-                if key is None or key[1] != relative_path:
-                    row = None
-        if row is None:
-            # 缓存失效（例如排序后），回退到线性扫描并重建缓存
-            row = self._find_row_by_relative_path(relative_path)
-            if row is not None:
-                self._row_by_path[relative_path] = row
-        if row is not None:
-            probe_failed = getattr(snap, "probe_ok", None) is False and not getattr(
-                snap, "video_codec", ""
-            )
-            probe_error = getattr(snap, "probe_error", "") or ""
-            if probe_failed and probe_error:
-                codec_item = QTableWidgetItem("探测失败")
-                codec_item.setToolTip(probe_error)
-                codec_item.setForeground(_COLOR_PROBE_FAILED)
-            elif probe_failed:
-                codec_item = QTableWidgetItem("探测中...")
-                codec_item.setForeground(_COLOR_CODEC_MISSING)
-            else:
-                codec_item = QTableWidgetItem(self._format_codec(snap))
-                codec_item.setForeground(
-                    _COLOR_CODEC_OK if getattr(snap, "video_codec", "") else _COLOR_CODEC_MISSING
-                )
-            self.table.setItem(row, 3, codec_item)
-            hdr_item = QTableWidgetItem(self._format_hdr(snap.hdr_type))
-            hdr_item.setForeground(self._hdr_color(getattr(snap, "hdr_type", None)))
-            self.table.setItem(row, 4, hdr_item)
-            # 更新列 2（体积）— 优先用探测结果，仅当占位值为0时刷新
-            old_size_item = self.table.item(row, 2)
-            old_sort = old_size_item.data(Qt.UserRole) if old_size_item else 0
-            if (isinstance(old_sort, (int, float)) and old_sort <= 0) or (snap.size_bytes and snap.size_bytes > 0):
-                self.table.setItem(row, 2, SortableTableWidgetItem(_format_bytes(snap.size_bytes), snap.size_bytes))
-            # 更新列 5（处理状态）和列 6（预计结果）
-            match = self._last_matches.get(relative_path)
-            decision = self._decision_display(snap, match)
-            self._row_status_keys[row] = decision.status_key
-            self._row_processable[row] = decision.processable
-            self.table.setItem(
-                row, 6,
-                SortableTableWidgetItem(decision.result_text, decision.result_sort),
-            )
-            combo = self.table.cellWidget(row, 5)
-            if isinstance(combo, QComboBox):
-                if decision.processable and self._last_strategies:
-                    if combo.findText(decision.strategy_text) < 0:
-                        combo.addItem(decision.strategy_text)
-                    combo.blockSignals(True)
-                    combo.setCurrentText(decision.strategy_text)
-                    combo.blockSignals(False)
-                else:
-                    combo.setEnabled(False)
-            else:
-                strategy_item = QTableWidgetItem(decision.strategy_text)
-                strategy_item.setToolTip(decision.tooltip)
-                if decision.status_key == "protected":
-                    strategy_item.setForeground(_COLOR_HDR_DV)
-                elif decision.status_key == "probe_failed":
-                    strategy_item.setForeground(_COLOR_PROBE_FAILED)
-                self.table.setItem(row, 5, strategy_item)
-            # 同步更新树视图
-            if self.current_view_mode == "tree":
-                self._update_tree_child(relative_path, snap, decision)
+        key = (int(getattr(snap, "library_folder_id", 0) or 0), relative_path)
+        decision = self._decision_display(snap, match)
+        self._store.update_row(key, snap, match, decision=decision)
 
     def _find_row_by_relative_path(self, relative_path: str) -> int | None:
         for row in range(self.table.rowCount()):
@@ -906,64 +491,42 @@ class FileListPanel(QWidget):
         return None
 
     def get_checked_relative_paths(self) -> list[str]:
-        """返回所有勾中文件的 relative_path 列表（基于 _checked_keys，与视图无关）。"""
-        return sorted({key[1] for key in self._checked_keys})
+        """返回所有勾中文件的 relative_path 列表（基于 Store，与视图无关）。"""
+        if self._store:
+            return sorted({key[1] for key in self._store.checked_keys()})
+        return []
 
     def _get_checked_tree_paths(self) -> list[str]:
-        """兼容旧调用方：基于 _checked_keys 返回已勾选路径列表。"""
+        """兼容旧调用方：基于 Store 返回已勾选路径列表。"""
         return self.get_checked_relative_paths()
 
     def select_all(self):
-        # 更新共享状态
-        for key in self._snapshots_by_key:
-            if self._processable_by_key.get(key, False):
-                self._checked_keys.add(key)
-        # 更新 UI
-        if self.current_view_mode == "tree":
-            self._set_tree_checked(True)
-        else:
-            self.table.blockSignals(True)
-            for row in range(self.table.rowCount()):
-                item = self.table.item(row, 0)
-                if item and item.flags() & Qt.ItemIsEnabled:
-                    item.setCheckState(Qt.Checked)
-            self.table.blockSignals(False)
+        if self._store is None:
+            return
+        for i in range(self._store.count()):
+            row = self._store.row_at(i)
+            if row.decision and row.decision.processable:
+                self._store.set_checked(row.key, True)
+        # Adapter 的 checked_changed 信号会自动更新 UI 勾选状态
         self._update_selection_count()
 
     def deselect_all(self):
-        self._checked_keys.clear()
-        if self.current_view_mode == "tree":
-            self._set_tree_checked(False)
-        else:
-            self.table.blockSignals(True)
-            for row in range(self.table.rowCount()):
-                item = self.table.item(row, 0)
-                if item:
-                    item.setCheckState(Qt.Unchecked)
-            self.table.blockSignals(False)
+        if self._store is None:
+            return
+        for key in list(self._store._checked):
+            self._store.set_checked(key, False)
+        # Adapter 的 checked_changed 信号会自动更新 UI 勾选状态
         self._update_selection_count()
 
-    def _set_tree_checked(self, checked: bool):
-        state = Qt.Checked if checked else Qt.Unchecked
-        def _walk(item):
-            for i in range(item.childCount()):
-                child = item.child(i)
-                if child.childCount() > 0:
-                    _walk(child)
-                else:
-                    if child.flags() & Qt.ItemIsEnabled:
-                        child.setCheckState(0, state)
-        for i in range(self.tree.topLevelItemCount()):
-            _walk(self.tree.topLevelItem(i))
-
     def _on_item_changed(self, item: QTableWidgetItem):
+        """旧复选框回调 — 在 set_store 后会被 _on_flat_checkbox_changed 替换。
+
+        保留作为 setup_ui 中的初始连接，避免启动时报错。
+        """
         if item.column() == 0:
             key = self._coerce_key(item.data(Qt.UserRole))
-            if key is not None:
-                if item.checkState() == Qt.Checked and item.flags() & Qt.ItemIsEnabled:
-                    self._checked_keys.add(key)
-                else:
-                    self._checked_keys.discard(key)
+            if key is not None and self._store is not None:
+                self._store.set_checked(key, item.checkState() == Qt.Checked)
             self._apply_filter()
 
     def _on_selection_changed(self):
@@ -979,13 +542,11 @@ class FileListPanel(QWidget):
             self.row_selected.emit("")  # 多选或取消选中 → 清空右面板绑定
 
     def _on_tree_item_changed(self, item: QTreeWidgetItem, column: int):
+        """旧树复选框回调 — 在 set_store 后会被 _on_tree_checkbox_changed 替换。"""
         if column == 0:
             key = self._coerce_key(item.data(0, Qt.UserRole))
-            if key is not None:
-                if item.checkState(0) == Qt.Checked and item.flags() & Qt.ItemIsEnabled:
-                    self._checked_keys.add(key)
-                else:
-                    self._checked_keys.discard(key)
+            if key is not None and self._store is not None:
+                self._store.set_checked(key, item.checkState(0) == Qt.Checked)
             self._apply_filter()
 
     def _on_tree_context_menu(self, pos):
@@ -1013,57 +574,74 @@ class FileListPanel(QWidget):
     def _apply_filter(self):
         filter_key = self.filter_combo.currentData() if hasattr(self, "filter_combo") else "all"
         if self.current_view_mode == "tree":
-            self._apply_tree_filter(filter_key)
+            if self._tree_adapter:
+                self._tree_adapter.apply_tree_filter(filter_key)
+            else:
+                self._apply_tree_filter_legacy(filter_key)
         else:
-            for row in range(self.table.rowCount()):
-                status_key = self._row_status_keys.get(row, "unmatched")
-                check_item = self.table.item(row, 0)
+            store = self._store
+            for table_row in range(self.table.rowCount()):
+                item = self.table.item(table_row, 1)
+                key = self._coerce_key(item.data(Qt.UserRole)) if item else None
+                row = store.row_by_key(key) if store and key else None
+                d = row.decision if row else None
+                check_item = self.table.item(table_row, 0)
                 checked = check_item is not None and check_item.checkState() == Qt.Checked
                 hide = False
-                if filter_key == "processable":
-                    hide = not self._row_processable.get(row, False)
-                elif filter_key == "protected":
-                    hide = status_key != "protected"
-                elif filter_key == "probe_failed":
-                    hide = status_key != "probe_failed"
-                elif filter_key == "checked":
-                    hide = not checked
-                self.table.setRowHidden(row, hide)
+                if d:
+                    if filter_key == "processable":
+                        hide = not d.processable
+                    elif filter_key == "protected":
+                        hide = d.status_key != "protected"
+                    elif filter_key == "probe_failed":
+                        hide = d.status_key != "probe_failed"
+                    elif filter_key == "checked":
+                        hide = not checked
+                elif filter_key in ("processable", "protected", "probe_failed"):
+                    hide = True
+                self.table.setRowHidden(table_row, hide)
         self._update_selection_count()
 
-    def _apply_tree_filter(self, filter_key: str):
-        """树视图过滤：隐藏不匹配的叶子节点，并隐藏空文件夹。"""
-        # 先对每个叶子项决定可见性
-        for key, child in self._tree_item_by_key.items():
-            status_key = self._status_by_key.get(key, "unmatched")
-            checked = (
-                child.flags() & Qt.ItemIsEnabled
-                and child.checkState(0) == Qt.Checked
-            )
-            hide = False
-            if filter_key == "processable":
-                hide = not self._processable_by_key.get(key, False)
-            elif filter_key == "protected":
-                hide = status_key != "protected"
-            elif filter_key == "probe_failed":
-                hide = status_key != "probe_failed"
-            elif filter_key == "checked":
-                hide = not checked
-            child.setHidden(hide)
-        # 遍历顶层文件夹：有可见子项的保持可见，否则隐藏
+    def _apply_tree_filter_legacy(self, filter_key: str):
+        """树视图过滤的回退实现（无 TreeAdapter 时使用）。"""
         for i in range(self.tree.topLevelItemCount()):
             folder_item = self.tree.topLevelItem(i)
             has_visible = False
             for j in range(folder_item.childCount()):
-                if not folder_item.child(j).isHidden():
+                child = folder_item.child(j)
+                key = self._coerce_key(child.data(0, Qt.UserRole))
+                row = self._store.row_by_key(key) if self._store and key else None
+                d = row.decision if row else None
+                checked = child.flags() & Qt.ItemIsEnabled and child.checkState(0) == Qt.Checked
+                hide = False
+                if d:
+                    if filter_key == "processable":
+                        hide = not d.processable
+                    elif filter_key == "protected":
+                        hide = d.status_key != "protected"
+                    elif filter_key == "probe_failed":
+                        hide = d.status_key != "probe_failed"
+                    elif filter_key == "checked":
+                        hide = not checked
+                elif filter_key in ("processable", "protected", "probe_failed"):
+                    hide = True
+                child.setHidden(hide)
+                if not hide:
                     has_visible = True
-                    break
             folder_item.setHidden(not has_visible)
 
     def _update_selection_count(self):
-        checked = len([k for k in self._checked_keys if self._processable_by_key.get(k, False)])
-        processable_total = sum(1 for v in self._processable_by_key.values() if v)
-        self.selection_label.setText(f"已选中 {checked}/{processable_total} 个可处理文件")
+        if self._store is None:
+            self.selection_label.setText("已选中 0/0 个可处理文件")
+            return
+        checked_count = 0
+        processable_total = 0
+        for row in self._store._rows:
+            if row.decision and row.decision.processable:
+                processable_total += 1
+                if self._store.is_checked(row.key):
+                    checked_count += 1
+        self.selection_label.setText(f"已选中 {checked_count}/{processable_total} 个可处理文件")
 
     def _decision_display(self, snap: Any, match: MatchResult | None) -> FileDecisionDisplay:
         skip_reason = get_skip_reason(snap)

@@ -16,7 +16,6 @@ class FlatAdapter(QObject):
         super().__init__()
         self._store = store
         self._table = table
-        self._strategies = strategies
         self._row_key: list[tuple] = []
         self._combo_created = False
         store.rows_rebuilt.connect(self._on_rebuild)
@@ -116,20 +115,25 @@ class FlatAdapter(QObject):
             self._render_row(table_row, row)
 
     def _find_table_row(self, key) -> int | None:
-        for i, k in enumerate(self._row_key):
-            if k == key:
+        """扫描表格实际行查找匹配的 key（排序后行号可能与插入顺序不同）。"""
+        for i in range(self._table.rowCount()):
+            item = self._table.item(i, 1)  # 列 1 的文件名存储了 key
+            if item is not None and item.data(Qt.UserRole) == key:
                 return i
         return None
 
     # ── checked ──
 
     def _on_checked_changed(self):
-        for i, key in enumerate(self._row_key):
+        """同步所有勾选框状态（按视觉行号扫描，兼容排序后的表格）。"""
+        for i in range(self._table.rowCount()):
             item = self._table.item(i, 0)
-            if item and item.flags() & Qt.ItemIsEnabled:
-                state = Qt.Checked if self._store.is_checked(key) else Qt.Unchecked
-                if item.checkState() != state:
-                    item.setCheckState(state)
+            if item is not None and item.flags() & Qt.ItemIsEnabled:
+                key = item.data(Qt.UserRole)
+                if isinstance(key, tuple) and len(key) == 2:
+                    state = Qt.Checked if self._store.is_checked(key) else Qt.Unchecked
+                    if item.checkState() != state:
+                        item.setCheckState(state)
 
     def create_combo_cells(self, combo_factory):
         """在全部行渲染后异步创建 QComboBox（接受工厂函数）。"""
@@ -138,8 +142,6 @@ class FlatAdapter(QObject):
         for i in range(self._table.rowCount()):
             row = self._store.row_at(i)
             if row is None or row.decision is None or not row.decision.processable:
-                continue
-            if self._strategies is None:
                 continue
             name_item = self._table.item(i, 1)
             if name_item is None:
