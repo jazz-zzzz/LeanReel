@@ -495,13 +495,19 @@ class FileListPanel(QWidget):
         self.tree.clear()
         self.tree.blockSignals(True)
         self._tree_item_by_key.clear()
+        # 预计算每个文件夹的总大小
+        folder_sizes: dict[str, int] = {}
+        for snap in snapshots:
+            folder_name = str(snap.relative_path).replace("\\", "/").rsplit("/", 1)[0]
+            folder_sizes[folder_name] = folder_sizes.get(folder_name, 0) + snap.size_bytes
         folders: dict[str, QTreeWidgetItem] = {}
         for snap in snapshots:
             folder_name = str(snap.relative_path).replace("\\", "/").rsplit("/", 1)[0]
             folder_name = folder_name or "."
             folder_item = folders.get(folder_name)
             if folder_item is None:
-                folder_item = QTreeWidgetItem([folder_name])
+                total = _format_bytes(folder_sizes.get(folder_name, 0))
+                folder_item = QTreeWidgetItem([f"{folder_name}  [{total}]"])
                 folder_item.setFirstColumnSpanned(True)
                 folders[folder_name] = folder_item
                 self.tree.addTopLevelItem(folder_item)
@@ -555,6 +561,7 @@ class FileListPanel(QWidget):
         child = self._find_tree_child(relative_path)
         if child is None:
             return
+        child.setText(1, _format_bytes(snap.size_bytes))
         child.setText(2, self._format_codec(snap))
         child.setText(3, self._format_hdr(snap.hdr_type))
         child.setText(4, decision.strategy_text)
@@ -676,6 +683,11 @@ class FileListPanel(QWidget):
             hdr_item = QTableWidgetItem(self._format_hdr(snap.hdr_type))
             hdr_item.setForeground(self._hdr_color(getattr(snap, "hdr_type", None)))
             self.table.setItem(row, 4, hdr_item)
+            # 更新列 2（体积）— 优先用探测结果，仅当占位值为0时刷新
+            old_size_item = self.table.item(row, 2)
+            old_sort = old_size_item.data(Qt.UserRole) if old_size_item else 0
+            if (isinstance(old_sort, (int, float)) and old_sort <= 0) or (snap.size_bytes and snap.size_bytes > 0):
+                self.table.setItem(row, 2, SortableTableWidgetItem(_format_bytes(snap.size_bytes), snap.size_bytes))
             # 更新列 5（处理状态）和列 6（预计结果）
             match = self._last_matches.get(relative_path)
             decision = self._decision_display(snap, match)
