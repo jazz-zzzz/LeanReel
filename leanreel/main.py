@@ -423,65 +423,27 @@ class Application:
         self._probe_folder_streaming(folder.id, path)
 
     def _probe_folder_streaming(self, folder_id: int, path: str):
-        """流式探测单个文件夹 — stat+ffprobe 合并，即时渲染。"""
+        """流式探测单个文件夹 — I/O 在后台，UI 在主线程。"""
         self._scan_token += 1
         my_token = self._scan_token
+        self.current_folder_paths[folder_id] = path
         self.win.set_status(f"扫描 {path}...")
 
-        # 先获取文件总数预填充表格
-        from leanreel.core.file_discovery import find_video_files
-        files = find_video_files(path)
-        total = len(files)
-        if total == 0:
-            self.win.set_status(f"未找到视频文件：{path}")
-            return
-
-        self.current_folder_paths[folder_id] = path
-
-        # 创建占位快照（探测完逐个刷新）
-        placeholders = []
-        for rel_path, abs_path in files:
-            placeholders.append(FileSnapshot(
-                library_folder_id=folder_id,
-                relative_path=rel_path,
-                file_name=os.path.basename(abs_path),
-                size_bytes=0,
-                probe_ok=False,
-            ))
-        self.current_snapshots = [s for s in self.current_snapshots if s.library_folder_id != folder_id]
-        self.current_snapshots.extend(placeholders)
-        self._populate_file_list(self.current_snapshots)
-
-        done = [0]
-        lock = threading.Lock()
-
-        def _on_result(snap):
-            if self._scan_token != my_token:
+        def _prepare_in_background():
+            from leanreel.core.file_discovery import find_video_files
+            files = find_video_files(path)
+            if not files:
+                self.win.set_status(f"未找到视频文件：{path}")
                 return
-            # 替换占位快照
-            for i, s in enumerate(self.current_snapshots):
-                if s.relative_path == snap.relative_path and s.library_folder_id == folder_id:
-                    self.current_snapshots[i] = snap
-                    break
-            if snap.probe_ok:
-                strategy = self.services.matcher.match(snap)
-                match = MatchResult(strategy=strategy, estimate=estimate_savings(snap, strategy) if strategy else None) if strategy else None
-            else:
-                match = None
-            self.notifier.probed.emit(snap, match)
-            d = self.file_panel._decision_display(snap, match)
-            self.store.update_row((snap.library_folder_id, snap.relative_path), snap, match, decision=d)
-            with lock:
-                done[0] += 1
-                self.notifier.progress.emit(done[0], total)
+            placeholders = []
+            for rel_path, abs_path in files:
+                placeholders.append(FileSnapshot(
+                    library_folder_id=folder_id, relative_path=rel_path,
+                    file_name=os.path.basename(abs_path), size_bytes=0, probe_ok=False))
+            self.notifier.scan_ready.emit(placeholders,
+                [(folder_id, path, files)], my_token)
 
-        def _on_finished():
-            if self._scan_token != my_token:
-                return
-            self._populate_file_list(self.current_snapshots)
-            self.notifier.all_done.emit()
-
-        self.services.scanner.probe_stream(folder_id, path, _on_result, _on_finished, files=files)
+        threading.Thread(target=_prepare_in_background, daemon=True).start()
         self.win.set_status(f"探测中：0/{total} ...")
 
     def _on_library_selected(self, lib_id):
@@ -552,8 +514,14 @@ class Application:
         """主线程：展示占位符 + 启动探测（scan_ready 信号自动队列分发）"""
         if self._scan_token != my_token:
             return  # 旧扫描，丢弃
-        self.current_snapshots = placeholders
         total = len(placeholders)
+        # 单文件夹→合并，多文件夹→全量替换
+        if len(folder_inputs) == 1:
+            fid = folder_inputs[0][0]
+            self.current_snapshots = [s for s in self.current_snapshots if s.library_folder_id != fid]
+            self.current_snapshots.extend(placeholders)
+        else:
+            self.current_snapshots = placeholders
 
         if total == 0:
             self._refresh_running = False
