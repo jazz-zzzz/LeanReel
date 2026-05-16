@@ -24,7 +24,7 @@ class FlatAdapter(QObject):
 
     # ── rebuild (分批渲染，避免主线程阻塞) ──
 
-    _BATCH = 200
+    _BATCH = 50
 
     def _on_rebuild(self):
         store = self._store
@@ -48,7 +48,7 @@ class FlatAdapter(QObject):
         self._rebuild_idx = end
         if self._rebuild_idx < store.count():
             from PySide6.QtCore import QTimer
-            QTimer.singleShot(0, self._render_batch)
+            QTimer.singleShot(10, self._render_batch)
         else:
             self._table.blockSignals(False)
 
@@ -150,10 +150,17 @@ class FlatAdapter(QObject):
                         item.setCheckState(state)
 
     def create_combo_cells(self, combo_factory):
-        """在全部行渲染后异步创建 QComboBox（接受工厂函数）。"""
+        """分批创建 QComboBox，避免一次性大量 widget 阻塞主线程。"""
         if self._combo_created:
             return
-        for i in range(self._table.rowCount()):
+        self._combo_factory = combo_factory
+        self._combo_idx = 0
+        self._combo_created = True
+        self._render_combo_batch()
+
+    def _render_combo_batch(self):
+        end = min(self._combo_idx + self._BATCH, self._table.rowCount())
+        for i in range(self._combo_idx, end):
             row = self._store.row_at(i)
             if row is None or row.decision is None or not row.decision.processable:
                 continue
@@ -169,6 +176,9 @@ class FlatAdapter(QObject):
                 continue
             old = self._table.item(i, 5)
             current_text = old.text() if old else ""
-            combo = combo_factory(rel, current_text)
+            combo = self._combo_factory(rel, current_text)
             self._table.setCellWidget(i, 5, combo)
-        self._combo_created = True
+        self._combo_idx = end
+        if self._combo_idx < self._table.rowCount():
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(10, self._render_combo_batch)

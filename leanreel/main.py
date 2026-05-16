@@ -368,7 +368,10 @@ class Application:
             lambda done, total: self.win.set_status(f"探测中：{done}/{total} ...")
         )
         self.notifier.all_done.connect(
-            lambda: (self.win.set_status("编码信息探测完成"), self.file_panel.enable_sorting())
+            lambda: (self.win.set_status("编码信息探测完成"),
+                     self.file_panel.enable_sorting(),
+                     self.file_panel._flat_adapter.create_combo_cells(self.file_panel._create_strategy_combo)
+                     if self.file_panel._flat_adapter else None)
         )
         self.notifier.task_updated.connect(self.encoding_ctrl.on_task_updated)
         self.notifier.encoding_done.connect(self.encoding_ctrl.on_encoding_done)
