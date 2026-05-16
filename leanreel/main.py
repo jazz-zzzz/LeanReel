@@ -22,7 +22,8 @@ from leanreel.gui.queue_panel import QueuePanel
 from leanreel.gui.theme import apply_theme
 from leanreel.executor.ffmpeg import FFmpegExecutor
 from leanreel.executor.worker import EncodeTask, WorkerManager
-from leanreel.data.models import TaskStatus
+from leanreel.data.file_store import FileTableStore, FileRow
+from leanreel.data.models import TaskStatus, FileSnapshot
 
 
 def get_data_dir() -> Path:
@@ -312,6 +313,7 @@ class Application:
         self.active_custom_path: str | None = None
         self._refresh_running = False
         self._scan_token = 0
+        self.store = FileTableStore()
 
     def _init_notifier(self):
         self.notifier = AppSignals()
@@ -371,6 +373,9 @@ class Application:
         self.notifier.task_updated.connect(self.encoding_ctrl.on_task_updated)
         self.notifier.encoding_done.connect(self.encoding_ctrl.on_encoding_done)
 
+        # 注入 Store 到 FileListPanel（新数据路径）
+        self.file_panel.set_store(self.store)
+
     # ── 文件列表填充 ──
 
     def _populate_file_list(self, snapshots, fast: bool = False) -> dict[str, MatchResult]:
@@ -387,6 +392,15 @@ class Application:
                 strategy=strategy,
                 estimate=estimate_savings(s, strategy),
             )
+        # 同步更新 Store（新数据路径）
+        rows = []
+        for s in snapshots:
+            m = matched.get(s.relative_path)
+            d = self.file_panel._decision_display(s, m)
+            rows.append(FileRow(snap=s, match=m, decision=d))
+        keep_checked = not fast  # fast=True 表示切库，应清空勾选
+        self.store.rebuild(rows, strategies=self.services.strategies, keep_checked=keep_checked)
+        # 保留旧的 populate 调用（兼容现有流程）
         self.file_panel.populate(snapshots, matched, self.services.strategies, fast=fast)
         return matched
 
@@ -455,6 +469,8 @@ class Application:
             else:
                 match = None
             self.notifier.probed.emit(snap, match)
+            d = self.file_panel._decision_display(snap, match)
+            self.store.update_row((snap.library_folder_id, snap.relative_path), snap, match, decision=d)
             with lock:
                 done[0] += 1
                 self.notifier.progress.emit(done[0], total)
@@ -557,6 +573,8 @@ class Application:
             else:
                 match = None
             self.notifier.probed.emit(snap, match)
+            d = self.file_panel._decision_display(snap, match)
+            self.store.update_row((snap.library_folder_id, snap.relative_path), snap, match, decision=d)
             with lock:
                 done[0] += 1
                 self.notifier.progress.emit(done[0], total)

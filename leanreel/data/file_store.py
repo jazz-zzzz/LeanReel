@@ -57,8 +57,8 @@ class FileTableStore(QObject):
         self._strategies = strategies
         self.rows_rebuilt.emit()
 
-    def update_row(self, key: tuple[int, str], snap: FileSnapshot, match=None):
-        """更新单行的快照（和可选的匹配结果），发出 ``row_updated`` 信号。"""
+    def update_row(self, key: tuple[int, str], snap: FileSnapshot, match=None, decision=None):
+        """更新单行的快照（和可选的匹配结果/决策），发出 ``row_updated`` 信号。"""
         idx = self._by_key.get(key)
         if idx is None:
             return
@@ -66,6 +66,8 @@ class FileTableStore(QObject):
         row.snap = snap
         if match is not None:
             row.match = match
+        if decision is not None:
+            row.decision = decision
         self.row_updated.emit(idx, row)
 
     def set_checked(self, key: tuple[int, str], state: bool):

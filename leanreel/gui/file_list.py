@@ -136,6 +136,9 @@ class FileListPanel(QWidget):
         self._render_gen = 0
         self._path_gen: dict[str, int] = {}
         self.current_view_mode = "flat"
+        self._store = None
+        self._flat_adapter = None
+        self._tree_adapter = None
         self.setup_ui()
 
     @staticmethod
@@ -161,6 +164,55 @@ class FileListPanel(QWidget):
     def get_checked_file_keys(self) -> list[tuple[int, str]]:
         """返回所有勾中文件的 (library_folder_id, relative_path) key 列表（已排序）。"""
         return sorted(self._checked_keys)
+
+    def set_store(self, store):
+        """注入 FileTableStore 并创建适配器，将复选框操作委托给 Store。"""
+        from leanreel.gui.adapters.flat_adapter import FlatAdapter
+        from leanreel.gui.adapters.tree_adapter import TreeAdapter
+        self._store = store
+        self._flat_adapter = FlatAdapter(store, self.table, strategies=self._last_strategies)
+        self._tree_adapter = TreeAdapter(store, self.tree)
+        # 替换复选框变更回调为 Store 委托版本
+        try:
+            self.table.itemChanged.disconnect(self._on_item_changed)
+        except (TypeError, RuntimeError):
+            pass
+        self.table.itemChanged.connect(self._on_flat_checkbox_changed)
+        try:
+            self.tree.itemChanged.disconnect(self._on_tree_item_changed)
+        except (TypeError, RuntimeError):
+            pass
+        self.tree.itemChanged.connect(self._on_tree_checkbox_changed)
+
+    def _on_flat_checkbox_changed(self, item: QTableWidgetItem):
+        """平铺表格复选框变更 —— 委托给 Store（若已注入）或回退到旧逻辑。"""
+        if item.column() != 0:
+            return
+        key = self._coerce_key(item.data(Qt.UserRole))
+        if self._store is not None and key is not None:
+            self._store.set_checked(key, item.checkState() == Qt.Checked)
+        elif key is not None:
+            # 回退到旧逻辑
+            if item.checkState() == Qt.Checked and item.flags() & Qt.ItemIsEnabled:
+                self._checked_keys.add(key)
+            else:
+                self._checked_keys.discard(key)
+        self._apply_filter()
+
+    def _on_tree_checkbox_changed(self, item: QTreeWidgetItem, column: int):
+        """树视图复选框变更 —— 委托给 Store（若已注入）或回退到旧逻辑。"""
+        if column != 0:
+            return
+        key = self._coerce_key(item.data(0, Qt.UserRole))
+        if self._store is not None and key is not None:
+            self._store.set_checked(key, item.checkState(0) == Qt.Checked)
+        elif key is not None:
+            # 回退到旧逻辑
+            if item.checkState(0) == Qt.Checked and item.flags() & Qt.ItemIsEnabled:
+                self._checked_keys.add(key)
+            else:
+                self._checked_keys.discard(key)
+        self._apply_filter()
 
     def _sync_checked_from_view(self):
         """将当前视图的勾选状态同步回 _checked_keys。"""
