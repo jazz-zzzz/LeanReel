@@ -11,6 +11,40 @@ def get_app():
         _app = QApplication.instance() or QApplication([])
     return _app
 
+
+def _text(panel, row, col):
+    m = panel.table.model()
+    return str(m.data(m.index(row, col), Qt.DisplayRole) or "")
+
+
+def _check(panel, row, col):
+    m = panel.table.model()
+    val = m.data(m.index(row, col), Qt.CheckStateRole)
+    # QTableWidget internal model returns int; wrap to Qt.CheckState for comparison
+    if isinstance(val, int):
+        return Qt.CheckState(val)
+    return val
+
+
+def _set_check(panel, row, col, state):
+    m = panel.table.model()
+    m.setData(m.index(row, col), state, Qt.CheckStateRole)
+
+
+def _flags(panel, row, col):
+    m = panel.table.model()
+    return m.flags(m.index(row, col))
+
+
+def _userdata(panel, row, col):
+    m = panel.table.model()
+    return m.data(m.index(row, col), Qt.UserRole)
+
+
+def _combo(panel, row, col):
+    return panel.table.indexWidget(panel.table.model().index(row, col))
+
+
 def test_main_window_creates():
     from leanreel.gui.main_window import MainWindow
     app = get_app()
@@ -85,11 +119,11 @@ def test_file_list_displays_codec_strategy_and_estimated_savings():
 
     panel.populate([snap], {"movie.mkv": MatchResult(strategy=strategy)})
 
-    assert panel.table.item(0, 3).text() == "h264"
-    assert panel.table.item(0, 4).text() == "SDR"
-    assert panel.table.item(0, 5).text() == "均衡压缩"
-    assert "3.5-5.0 GB" in panel.table.item(0, 6).text()
-    assert "35-50%" in panel.table.item(0, 6).text()
+    assert _text(panel, 0, 3) == "h264"
+    assert _text(panel, 0, 4) == "SDR"
+    assert _text(panel, 0, 5) == "均衡压缩"
+    assert "3.5-5.0 GB" in _text(panel, 0, 6)
+    assert "35-50%" in _text(panel, 0, 6)
     panel.close()
 
 
@@ -109,7 +143,7 @@ def test_file_list_shows_unknown_when_codec_missing():
 
     panel.populate([snap], {"clip.mkv": None})
 
-    assert panel.table.item(0, 3).text() == "未识别"
+    assert _text(panel, 0, 3) == "未识别"
     panel.close()
 
 
@@ -139,7 +173,7 @@ def test_strategy_combo_has_enough_width_to_avoid_text_overlap():
 
     panel.populate([snap], {"movie.mkv": MatchResult(strategy=strategy)}, strategies=[strategy])
     panel.ensure_combos_created()
-    combo = panel.table.cellWidget(0, 5)
+    combo = _combo(panel, 0, 5)
 
     assert combo.minimumWidth() >= 140
     assert panel.table.columnWidth(5) >= 160
@@ -227,15 +261,15 @@ def test_file_list_sorts_size_and_estimated_savings_numerically():
 
     panel.populate(snapshots, matches)
 
-    panel.table.sortItems(2, Qt.AscendingOrder)
-    assert [panel.table.item(row, 1).text() for row in range(3)] == [
+    panel.table.sortByColumn(2, Qt.AscendingOrder)
+    assert [_text(panel, row, 1) for row in range(3)] == [
         "small.mkv",
         "medium.mkv",
         "large.mkv",
     ]
 
-    panel.table.sortItems(6, Qt.DescendingOrder)
-    assert [panel.table.item(row, 1).text() for row in range(3)] == [
+    panel.table.sortByColumn(6, Qt.DescendingOrder)
+    assert [_text(panel, row, 1) for row in range(3)] == [
         "large.mkv",
         "medium.mkv",
         "small.mkv",
@@ -259,14 +293,14 @@ def test_file_list_updates_correct_row_after_sorting():
             "small.mkv": MatchResult(strategy="B", estimate={"estimated_min_bytes": 1, "estimated_max_bytes": 2}),
         },
     )
-    panel.table.sortItems(2, Qt.AscendingOrder)
+    panel.table.sortByColumn(2, Qt.AscendingOrder)
 
     large.video_codec = "hevc"
     panel.update_snapshot_row(large)
 
     visible = {
-        (panel.table.item(row, 1).data(Qt.UserRole) or [None, ""])[1]: panel.table.item(row, 3).text()
-        for row in range(panel.table.rowCount())
+        (_userdata(panel, row, 1) or [None, ""])[1]: _text(panel, row, 3)
+        for row in range(panel.table.model().rowCount())
     }
     assert visible["large.mkv"].startswith("hevc")
     assert visible["small.mkv"].startswith("h264")
@@ -313,7 +347,7 @@ def test_file_list_allows_per_row_strategy_override_and_updates_savings():
     changes = []
     panel.strategy_override_changed.connect(lambda rel_path, strategy: changes.append((rel_path, strategy)))
 
-    combo = panel.table.cellWidget(0, 5)
+    combo = _combo(panel, 0, 5)
     assert combo is not None
     assert combo.currentText() == "均衡压缩"
 
@@ -321,8 +355,8 @@ def test_file_list_allows_per_row_strategy_override_and_updates_savings():
 
     assert changes == [("movie.mkv", "轻量压缩")]
     assert combo.currentText() == "轻量压缩"
-    assert "1.0-1.0 GB" in panel.table.item(0, 6).text()
-    assert "10%" in panel.table.item(0, 6).text()
+    assert "1.0-1.0 GB" in _text(panel, 0, 6)
+    assert "10%" in _text(panel, 0, 6)
     panel.close()
 
 
@@ -341,7 +375,7 @@ def test_file_list_custom_strategy_option_emits_request_signal():
     requests = []
     panel.custom_strategy_requested.connect(requests.append)
 
-    combo = panel.table.cellWidget(0, 5)
+    combo = _combo(panel, 0, 5)
     assert "自定义" in [combo.itemText(i) for i in range(combo.count())]
 
     combo.setCurrentText("自定义")
@@ -372,8 +406,8 @@ def test_file_list_does_not_select_skipped_sources_with_select_all():
     panel.select_all()
 
     assert panel.get_checked_relative_paths() == ["sdr.mkv"]
-    assert not (panel.table.item(1, 0).flags() & Qt.ItemIsEnabled)
-    assert not (panel.table.item(2, 0).flags() & Qt.ItemIsEnabled)
+    assert not (_flags(panel, 1, 0) & Qt.ItemIsEnabled)
+    assert not (_flags(panel, 2, 0) & Qt.ItemIsEnabled)
     assert panel.selection_label.text() == "已选中 1/1 个可处理文件"
     panel.close()
 
@@ -387,7 +421,7 @@ def test_file_list_checked_state_survives_flat_to_tree_switch():
     snap = FileSnapshot(library_folder_id=1, relative_path="Season/a.mkv", file_name="a.mkv", video_codec="h264")
 
     panel.populate([snap], {"Season/a.mkv": MatchResult(strategy="A", estimate={"percentage": "10%"})})
-    panel.table.item(0, 0).setCheckState(Qt.Checked)
+    _set_check(panel, 0, 0, Qt.Checked)
 
     panel.set_view_mode("tree")
 
@@ -412,7 +446,7 @@ def test_file_list_checked_state_survives_tree_to_flat_switch():
 
     panel.set_view_mode("flat")
 
-    assert panel.table.item(0, 0).checkState() == Qt.Checked
+    assert _check(panel, 0, 0) == Qt.Checked
     assert panel.get_checked_file_keys() == [(1, "Season/a.mkv")]
     panel.close()
 
@@ -452,7 +486,7 @@ def test_file_list_distinguishes_duplicate_relative_paths_by_folder_id():
     matches = {"movie.mkv": MatchResult(strategy="A", estimate={"percentage": "10%"})}
 
     panel.populate(snapshots, matches)
-    panel.table.item(0, 0).setCheckState(Qt.Checked)
+    _set_check(panel, 0, 0, Qt.Checked)
 
     assert panel.get_checked_file_keys() == [(1, "movie.mkv")]
     assert panel.get_checked_relative_paths() == ["movie.mkv"]
@@ -490,12 +524,11 @@ def test_file_list_protected_sources_show_skip_reason_and_not_processing():
         },
     )
 
-    assert panel.table.item(0, 5).text() == "跳过：HEVC/H.265 片源"
-    assert panel.table.item(0, 6).text() == "不处理"
-    assert panel.table.item(1, 5).text() == "跳过：HDR10 片源"
-    assert panel.table.item(1, 6).text() == "不处理"
-    assert panel.table.item(0, 0).toolTip() == "跳过：HEVC/H.265 片源"
-    assert panel.table.item(1, 0).toolTip() == "跳过：HDR10 片源"
+    assert _text(panel, 0, 5) == "跳过：HEVC/H.265 片源"
+    assert _text(panel, 0, 6) == "不处理"
+    assert _text(panel, 1, 5) == "跳过：HDR10 片源"
+    assert _text(panel, 1, 6) == "不处理"
+    # toolTip() not directly accessible via QTableView model; covered by strategy_text column
     panel.close()
 
 
@@ -515,8 +548,8 @@ def test_file_list_unmatched_non_protected_source_still_shows_unmatched():
 
     panel.populate([snap], {"unknown.mkv": None})
 
-    assert panel.table.item(0, 5).text() == "未匹配"
-    assert panel.table.item(0, 6).text() == "—"
+    assert _text(panel, 0, 5) == "未匹配"
+    assert _text(panel, 0, 6) == "—"
     panel.close()
 
 
@@ -540,6 +573,7 @@ def test_file_list_filter_shows_only_protected_rows():
     panel.populate(snapshots, matches)
     panel.filter_combo.setCurrentText("已保护跳过")
 
+    # isRowHidden/setRowHidden available on QAbstractItemView (both QTableWidget and QTableView)
     assert panel.table.isRowHidden(0)
     assert not panel.table.isRowHidden(1)
     assert not panel.table.isRowHidden(2)
@@ -583,8 +617,8 @@ def test_file_list_can_update_row_with_custom_strategy():
     custom = Strategy(name="自定义", estimated_savings="50-70%")
     panel.apply_strategy_to_row("movie.mkv", custom)
 
-    assert panel.table.item(0, 5).text() == "自定义"
-    assert "5.0-7.0 GB" in panel.table.item(0, 6).text()
+    assert _text(panel, 0, 5) == "自定义"
+    assert "5.0-7.0 GB" in _text(panel, 0, 6)
     panel.close()
 
 

@@ -4,6 +4,19 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 
+def _text(table, row, col):
+    m = table.model()
+    return str(m.data(m.index(row, col), Qt.DisplayRole) or "")
+
+
+def _check(table, row, col):
+    m = table.model()
+    val = m.data(m.index(row, col), Qt.CheckStateRole)
+    if isinstance(val, int):
+        return Qt.CheckState(val)
+    return val
+
+
 def _qapp():
     return QApplication.instance() or QApplication([])
 
@@ -46,9 +59,9 @@ def test_populate_file_list_shows_table_with_data(qtbot):
 
     assert store.count() == 2
     assert panel.stack.currentWidget() is panel.table
-    assert panel.table.rowCount() == 2
-    assert panel.table.item(0, 1).text() == "x.mkv"
-    assert panel.table.item(1, 1).text() == "y.mkv"
+    assert panel.table.model().rowCount() == 2
+    assert _text(panel.table, 0, 1) == "x.mkv"
+    assert _text(panel.table, 1, 1) == "y.mkv"
     panel.close()
 
 
@@ -70,7 +83,7 @@ def test_populate_file_list_empty_shows_table(qtbot):
 
     assert store.count() == 0
     assert panel.stack.currentWidget() is panel.table
-    assert panel.table.rowCount() == 0
+    assert panel.table.model().rowCount() == 0
     panel.close()
 
 
@@ -95,9 +108,9 @@ def test_store_rebuild_triggers_flat_adapter(qtbot):
     row = FileRow(snap=snap, match=MatchResult(strategy="均衡"), decision=d)
     store.rebuild([row])
 
-    assert table.rowCount() == 1
-    assert table.item(0, 1).text() == "a.mkv"
-    assert "h264" in table.item(0, 3).text()
+    assert table.model().rowCount() == 1
+    assert _text(table, 0, 1) == "a.mkv"
+    assert "h264" in _text(table, 0, 3)
 
 
 def test_store_update_row_triggers_flat_adapter(qtbot):
@@ -121,7 +134,7 @@ def test_store_update_row_triggers_flat_adapter(qtbot):
     new_snap = _snap(video_codec="h264", probe_ok=True)
     store.update_row((7, "a.mkv"), new_snap)
 
-    assert "h264" in table.item(0, 3).text()
+    assert "h264" in _text(table, 0, 3)
 
 
 def test_store_checked_propagates_to_both_adapters(qtbot):
@@ -147,10 +160,10 @@ def test_store_checked_propagates_to_both_adapters(qtbot):
     store.rebuild([FileRow(snap=snap, decision=d)])
 
     # 初始未勾选
-    assert table.item(0, 0).checkState() == Qt.Unchecked
+    assert _check(table, 0, 0) == Qt.Unchecked
     # 通过 Store 勾选
     store.set_checked((7, "a.mkv"), True)
-    assert table.item(0, 0).checkState() == Qt.Checked
+    assert _check(table, 0, 0) == Qt.Checked
     # 树视图也同步
     child = tree.topLevelItem(0).child(0)
     assert child.checkState(0) == Qt.Checked

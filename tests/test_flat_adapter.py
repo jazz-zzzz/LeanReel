@@ -8,6 +8,24 @@ from leanreel.data.models import FileSnapshot, HDRType
 from leanreel.gui.file_list import MatchResult, FileDecisionDisplay
 
 
+def _text(table, row, col):
+    m = table.model()
+    return str(m.data(m.index(row, col), Qt.DisplayRole) or "")
+
+
+def _check(table, row, col):
+    m = table.model()
+    val = m.data(m.index(row, col), Qt.CheckStateRole)
+    if isinstance(val, int):
+        return Qt.CheckState(val)
+    return val
+
+
+def _flags(table, row, col):
+    m = table.model()
+    return m.flags(m.index(row, col))
+
+
 def _snap(library_folder_id=7, relative_path="a.mkv", file_name="a.mkv",
           size_bytes=1024, video_codec="h264", probe_ok=True):
     return FileSnapshot(
@@ -43,9 +61,9 @@ def test_flat_adapter_rebuild_populates_table(qtbot):
     row = _row(snap, decision=_make_decision())
     store.rebuild([row])
 
-    assert table.rowCount() == 1
-    assert table.item(0, 1).text() == "a.mkv"
-    assert "h264" in table.item(0, 3).text()
+    assert table.model().rowCount() == 1
+    assert _text(table, 0, 1) == "a.mkv"
+    assert "h264" in _text(table, 0, 3)
 
 
 def test_flat_adapter_rebuild_empty_clears_table(qtbot):
@@ -57,9 +75,9 @@ def test_flat_adapter_rebuild_empty_clears_table(qtbot):
     adapter = FlatAdapter(store, table)
 
     store.rebuild([_row(_snap())])
-    assert table.rowCount() == 1
+    assert table.model().rowCount() == 1
     store.rebuild([])
-    assert table.rowCount() == 0
+    assert table.model().rowCount() == 0
 
 
 def test_flat_adapter_row_update(qtbot):
@@ -76,7 +94,7 @@ def test_flat_adapter_row_update(qtbot):
     new_snap = _snap(video_codec="h264", size_bytes=2048, probe_ok=True)
     store.update_row((7, "a.mkv"), new_snap)
 
-    assert "h264" in table.item(0, 3).text()
+    assert "h264" in _text(table, 0, 3)
 
 
 def test_flat_adapter_checkbox_sync(qtbot):
@@ -91,9 +109,9 @@ def test_flat_adapter_checkbox_sync(qtbot):
     row = _row(snap, decision=_make_decision())
     store.rebuild([row])
 
-    assert table.item(0, 0).checkState() == Qt.Unchecked
+    assert _check(table, 0, 0) == Qt.Unchecked
     store.set_checked((7, "a.mkv"), True)
-    assert table.item(0, 0).checkState() == Qt.Checked
+    assert _check(table, 0, 0) == Qt.Checked
 
 
 def test_flat_adapter_protected_row_not_checkable(qtbot):
@@ -108,5 +126,4 @@ def test_flat_adapter_protected_row_not_checkable(qtbot):
     row = _row(snap, decision=_make_decision(status_key="protected", processable=False, strategy_text="跳过：HEVC"))
     store.rebuild([row])
 
-    item = table.item(0, 0)
-    assert not (item.flags() & Qt.ItemIsEnabled)
+    assert not (_flags(table, 0, 0) & Qt.ItemIsEnabled)
