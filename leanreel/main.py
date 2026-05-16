@@ -346,6 +346,8 @@ class Application:
         self.lib_panel.library_selected.connect(self._on_library_selected)
         self.lib_panel.library_deleted.connect(self._on_library_deleted)
         self.lib_panel.folder_removed.connect(self._on_folder_removed)
+        self.lib_panel.folder_refresh_requested.connect(self._on_single_folder_refresh)
+        self.file_panel.tree_folder_refresh_requested.connect(self._on_single_folder_refresh)
         self.file_panel.strategy_override_changed.connect(self._on_strategy_override_changed)
         self.file_panel.custom_strategy_requested.connect(self._on_custom_strategy_requested)
         self.file_panel.refresh_requested.connect(self._on_refresh_requested)
@@ -516,6 +518,9 @@ class Application:
             self.win.set_status("扫描已在进行中，请等待完成")
             return
 
+        # 即时清空列表，用户看到反馈
+        self.current_snapshots = []
+        self.file_panel.populate([], {}, self.services.strategies)
         self._refresh_running = True
         self.win.set_status("扫描中...")
         folders_at_call = list(self.current_folder_paths.items())
@@ -531,6 +536,23 @@ class Application:
                 self.notifier.scan_finished.emit(all_snapshots, None, None, all_jobs)
             finally:
                 self._refresh_running = False
+
+        threading.Thread(target=_scan_in_background, daemon=True).start()
+
+    def _on_single_folder_refresh(self, folder_id):
+        """刷新单个文件夹（库面板或树视图右键触发）。"""
+        if folder_id not in self.current_folder_paths:
+            return
+        path = self.current_folder_paths[folder_id]
+
+        # 即时移除该文件夹的旧快照
+        self.current_snapshots = [s for s in self.current_snapshots if s.library_folder_id != folder_id]
+        self._populate_file_list(self.current_snapshots)
+        self.win.set_status(f"刷新 {path}...")
+
+        def _scan_in_background():
+            batch = self.services.scanner.scan_folder_fast_batch(folder_id, path)
+            self.notifier.scan_finished.emit(batch.snapshots, folder_id, path, batch.pending_jobs)
 
         threading.Thread(target=_scan_in_background, daemon=True).start()
 

@@ -101,6 +101,7 @@ class FileListPanel(QWidget):
     strategy_override_changed = Signal(str, str)
     custom_strategy_requested = Signal(str)
     refresh_requested = Signal()
+    tree_folder_refresh_requested = Signal(int)  # 树视图右键刷新文件夹，传 folder_id
     row_selected = Signal(str)  # 某行被选中时发出 relative_path 或空串
 
     def __init__(self):
@@ -222,6 +223,8 @@ class FileListPanel(QWidget):
         self.tree.setColumnCount(len(_TREE_HEADERS))
         self.tree.setHeaderLabels(_TREE_HEADERS)
         self.tree.setSortingEnabled(True)
+        self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._on_tree_context_menu)
         self.tree.hide()
 
         # 空状态提示
@@ -509,6 +512,7 @@ class FileListPanel(QWidget):
                 total = _format_bytes(folder_sizes.get(folder_name, 0))
                 folder_item = QTreeWidgetItem([f"{folder_name}  [{total}]"])
                 folder_item.setFirstColumnSpanned(True)
+                folder_item.setData(0, Qt.UserRole, snap.library_folder_id)
                 folders[folder_name] = folder_item
                 self.tree.addTopLevelItem(folder_item)
             decision = self._decision_display(
@@ -815,6 +819,18 @@ class FileListPanel(QWidget):
                 else:
                     self._checked_keys.discard(key)
             self._apply_filter()
+
+    def _on_tree_context_menu(self, pos):
+        item = self.tree.itemAt(pos)
+        if item is None or item.childCount() == 0:
+            return
+        folder_id = item.data(0, Qt.UserRole)
+        if folder_id is None:
+            return
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu()
+        menu.addAction("刷新此文件夹", lambda: self.tree_folder_refresh_requested.emit(folder_id))
+        menu.exec(self.tree.viewport().mapToGlobal(pos))
 
     def _on_tree_selection_changed(self):
         items = self.tree.selectedItems()
