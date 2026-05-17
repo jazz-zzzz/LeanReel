@@ -172,13 +172,13 @@ class FileListPanel(QWidget):
                     checked = self._model.data(self._model.index(row, 0), Qt.CheckStateRole) == Qt.Checked
                     self._store.set_checked(row_obj.key, checked)
             self._apply_filter()
-        # 策略变更 → 触发 override 信号
+        # 策略变更 → 通过 Store key 精确定位，避免同名文件冲突
         if Qt.EditRole in roles and topLeft.column() == 5:
             store_idx = self._model._to_store_index(topLeft.row())
             row_obj = self._store.row_at(store_idx) if store_idx >= 0 else None
             if row_obj:
                 text = self._model.data(topLeft, Qt.DisplayRole) or ""
-                self._on_strategy_combo_changed(row_obj.snap.relative_path, text)
+                self._on_strategy_combo_changed(row_obj.key, text)
 
     def _on_tree_checkbox_changed(self, item: QTreeWidgetItem, column: int):
         """树视图复选框变更 —— 委托给 Store（若已注入）。"""
@@ -397,14 +397,18 @@ class FileListPanel(QWidget):
         """策略下拉框变更 — 通过 Store 更新数据，Adapter 自动渲染 UI。"""
         if self._store is None:
             return
-        # 在 Store 中查找该 relative_path 的所有行
+        # key 可能是 (folder_id, path) tuple 或纯 relative_path 字符串
         target_key = None
         target_row = None
-        for row in self._store._rows:
-            if row.snap.relative_path == relative_path:
-                target_key = row.key
-                target_row = row
-                break
+        if isinstance(relative_path, tuple):
+            target_key = relative_path
+            target_row = self._store.row_by_key(relative_path)
+        else:
+            for row in self._store._rows:
+                if row.snap.relative_path == relative_path:
+                    target_key = row.key
+                    target_row = row
+                    break
         if target_key is None:
             return
 
@@ -417,22 +421,32 @@ class FileListPanel(QWidget):
             # "自定义"选项：不改变 store 中的 match，只发信号
             pass
 
-        self.strategy_override_changed.emit(relative_path, strategy_name)
+        rel = target_row.snap.relative_path if target_row else (relative_path if isinstance(relative_path, str) else relative_path[1])
+        self.strategy_override_changed.emit(rel, strategy_name)
         if strategy_name == "自定义":
-            self.custom_strategy_requested.emit(relative_path)
+            self.custom_strategy_requested.emit(rel)
         self._apply_filter()
 
-    def apply_strategy_to_row(self, relative_path: str, strategy: Any):
+    def apply_strategy_to_row(self, path_or_key, strategy: Any):
         """Apply a strategy object to one row and refresh its savings estimate.（通过 Store）"""
         if self._store is None:
             return
-        # 在 Store 中查找该 relative_path
-        for row in self._store._rows:
-            if row.snap.relative_path == relative_path:
-                match = MatchResult(strategy=strategy) if not isinstance(strategy, MatchResult) else strategy
-                decision = self._decision_display(row.snap, match)
-                self._store.update_row(row.key, row.snap, match, decision=decision)
-                break
+        # 优先 key 查找（精确），回退 relative_path 查找（兼容旧调用）
+        target_key = None
+        if isinstance(path_or_key, tuple):
+            target_key = path_or_key
+        else:
+            for row in self._store._rows:
+                if row.snap.relative_path == path_or_key:
+                    target_key = row.key
+                    break
+        if target_key is None:
+            return
+        row = self._store.row_by_key(target_key)
+        if row:
+            match = MatchResult(strategy=strategy) if not isinstance(strategy, MatchResult) else strategy
+            decision = self._decision_display(row.snap, match)
+            self._store.update_row(target_key, row.snap, match, decision=decision)
         self._apply_filter()
 
     def update_snapshot_row(self, snap: Any, match: Any = None):

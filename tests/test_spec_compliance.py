@@ -340,7 +340,7 @@ def test_e1_selected_qtableview_row_receives_preset_strategy_from_panel(qtbot):
 
     Application._on_preset_strategy_changed(app_like, 0)
 
-    assert app_like.strategy_overrides["a.mkv"] is replacement
+    assert app_like.strategy_overrides[(7, "a.mkv")] is replacement
     model = panel.table.model()
     assert model.data(model.index(0, 5), Qt.DisplayRole) == "Replacement"
     panel.close()
@@ -589,4 +589,64 @@ def test_b6_strategy_edit_stays_with_file_after_sort(qtbot):
         for row in range(model.rowCount())
     }
     assert displayed == {"z.mkv": "Original", "a.mkv": "Replacement"}
+    panel.close()
+
+
+def test_strategy_combo_change_targets_duplicate_relative_path_by_file_key(qtbot):
+    """Changing a duplicate relative path row should update that exact file key."""
+    _qapp()
+    from leanreel.core.strategy import Strategy
+    panel = FileListPanel()
+    qtbot.addWidget(panel)
+    original = Strategy(name="Original")
+    replacement = Strategy(name="Replacement")
+    panel.populate(
+        [
+            _snap(library_folder_id=1, relative_path="movie.mkv", file_name="movie.mkv"),
+            _snap(library_folder_id=2, relative_path="movie.mkv", file_name="movie.mkv"),
+        ],
+        {
+            (1, "movie.mkv"): MatchResult(strategy=original),
+            (2, "movie.mkv"): MatchResult(strategy=original),
+        },
+        strategies=[original, replacement],
+    )
+    model = panel.table.model()
+
+    model.setData(model.index(1, 5), "Replacement", Qt.EditRole)
+
+    decisions = {row.key: row.decision.strategy_text for row in panel._store._rows}
+    assert decisions[(1, "movie.mkv")] == "Original"
+    assert decisions[(2, "movie.mkv")] == "Replacement"
+    panel.close()
+
+
+def test_start_request_uses_checked_file_keys_for_duplicate_relative_paths(qtbot):
+    """Starting encoding must not expand one checked duplicate relative path to all folders."""
+    _qapp()
+    from types import SimpleNamespace
+    from leanreel.main import Application
+    panel = FileListPanel()
+    qtbot.addWidget(panel)
+    win = SimpleNamespace(statuses=[], set_status=lambda text: win.statuses.append(text))
+    captured = {}
+    encoding = SimpleNamespace(start=lambda snaps, paths, overrides: captured.setdefault("snaps", snaps))
+    snapshots = [
+        _snap(library_folder_id=1, relative_path="movie.mkv", file_name="movie.mkv"),
+        _snap(library_folder_id=2, relative_path="movie.mkv", file_name="movie.mkv"),
+    ]
+    panel.populate(snapshots, {(1, "movie.mkv"): MatchResult(strategy="S"), (2, "movie.mkv"): MatchResult(strategy="S")})
+    panel.table.model().setData(panel.table.model().index(1, 0), Qt.Checked, Qt.CheckStateRole)
+    app_like = SimpleNamespace(
+        file_panel=panel,
+        current_snapshots=snapshots,
+        current_folder_paths={1: "C:/one", 2: "C:/two"},
+        strategy_overrides={},
+        encoding_ctrl=encoding,
+        win=win,
+    )
+
+    Application._on_start_requested(app_like)
+
+    assert [(s.library_folder_id, s.relative_path) for s in captured["snaps"]] == [(2, "movie.mkv")]
     panel.close()

@@ -630,21 +630,19 @@ class Application:
         if strategy is None:
             return
         # 收集需要覆盖的 relative_path
-        targets = set(self.file_panel.get_checked_relative_paths())
+        targets = set(self.file_panel.get_checked_file_keys())
         model = self.file_panel.table.model()
         selection = self.file_panel.table.selectionModel()
         if model is not None and selection is not None:
             for idx in selection.selectedRows(1):
                 key = model.data(idx, Qt.UserRole)
                 if isinstance(key, tuple) and len(key) == 2:
-                    targets.add(key[1])
-                elif isinstance(key, str) and key:
                     targets.add(key)
         if not targets:
             return
-        for rel in targets:
-            self.strategy_overrides[rel] = strategy
-            self.file_panel.apply_strategy_to_row(rel, strategy)
+        for key in targets:
+            self.strategy_overrides[key] = strategy
+            self.file_panel.apply_strategy_to_row(key, strategy)
 
     def _on_custom_strategy_requested(self, relative_path):
         self.active_custom_path = relative_path
@@ -659,11 +657,11 @@ class Application:
     # ── 编码控制 ──
 
     def _on_start_requested(self):
-        checked_paths = set(self.file_panel.get_checked_relative_paths())
-        if not checked_paths:
+        checked_keys = set(self.file_panel.get_checked_file_keys())
+        if not checked_keys:
             self.win.set_status("没有勾选任何文件，请先在文件列表中勾选要处理的文件")
             return
-        snapshots = [s for s in self.current_snapshots if s.relative_path in checked_paths]
+        snapshots = [s for s in self.current_snapshots if (s.library_folder_id, s.relative_path) in checked_keys]
         if not snapshots:
             self.win.set_status("勾选的文件未找到")
             return
