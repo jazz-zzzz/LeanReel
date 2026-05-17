@@ -423,3 +423,29 @@ def test_b6_sort_by_size_column():
     model.sort(2, Qt.AscendingOrder)
     first = str(model.data(model.index(0, 1), Qt.DisplayRole) or "")
     assert "small.mkv" in first, f"Expected small first, got {first}"
+
+
+def test_b6_sort_keeps_filtered_store_rows():
+    """Sorting after filtering must reorder only the filtered store rows."""
+    from leanreel.data.file_store import FileTableStore, FileRow
+    from leanreel.gui.adapters.file_table_model import FileTableModel
+    _qapp()
+    store = FileTableStore()
+    view = QTableView()
+    model = FileTableModel(store, view)
+    view.setModel(model)
+    protected = _decision(status_key="protected", processable=False)
+    rows = [
+        FileRow(snap=_snap(relative_path="process-small.mkv", file_name="process-small.mkv", size_bytes=1000), decision=_decision()),
+        FileRow(snap=_snap(relative_path="protected-small.mkv", file_name="protected-small.mkv", size_bytes=2000), decision=protected),
+        FileRow(snap=_snap(relative_path="process-large.mkv", file_name="process-large.mkv", size_bytes=99999), decision=_decision()),
+        FileRow(snap=_snap(relative_path="protected-large.mkv", file_name="protected-large.mkv", size_bytes=5000), decision=protected),
+    ]
+    store.rebuild(rows)
+
+    model.set_filter("protected")
+    assert model.rowCount() == 2
+    model.sort(2, Qt.DescendingOrder)
+
+    names = [str(model.data(model.index(i, 1), Qt.DisplayRole) or "") for i in range(model.rowCount())]
+    assert names == ["protected-large.mkv", "protected-small.mkv"]

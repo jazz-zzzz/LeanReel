@@ -103,13 +103,14 @@ class FileTableModel(QAbstractTableModel):
     # ── Store 信号响应 ──
 
     def _on_rebuilt(self):
-        if self._filter_key == "all":
-            self._visible_rows = list(range(self._store.count()))
-        else:
-            self._rebuild_visible()
+        self._rebuild_visible()
         self.layoutChanged.emit()
 
     def _on_row_updated(self, idx: int, row):
+        if self._filter_key != "all" or self._sort_col >= 0:
+            self._rebuild_visible()
+            self.layoutChanged.emit()
+            return
         vis_row = self._to_visual(idx)
         if vis_row >= 0:
             self.dataChanged.emit(
@@ -118,6 +119,12 @@ class FileTableModel(QAbstractTableModel):
             )
 
     def _on_checked_changed(self):
+        if self._filter_key == "checked":
+            self._rebuild_visible()
+            self.layoutChanged.emit()
+            return
+        if self.rowCount() == 0:
+            return
         # 只刷新复选框列
         top_left = self.index(0, _COL_CHECK)
         bottom_right = self.index(self.rowCount() - 1, _COL_CHECK)
@@ -127,19 +134,13 @@ class FileTableModel(QAbstractTableModel):
 
     def sort(self, column, order=Qt.AscendingOrder):
         """用户点击列标题时 QTableView 调用此方法"""
-        indices = list(range(self._store.count()))
+        if column < 0 or column >= _COLUMNS:
+            return
+        self._sort_col = column
+        self._sort_order = order
         key_func = self._sort_key(column)
         reverse = (order == Qt.DescendingOrder)
-        indices.sort(key=key_func, reverse=reverse)
-        if self._visible_rows:
-            # 过滤中：重新映射到 store indices 再排序
-            store_indices = [self._visible_rows[i] for i in range(len(self._visible_rows))]
-            store_indices.sort(key=key_func, reverse=reverse)
-            self._visible_rows = [self._to_visual(si) for si in store_indices]
-            # Actually, simpler: rebuild visible from sorted store indices
-            self._visible_rows = [si for si in indices if si in set(self._visible_rows)]
-        else:
-            self._visible_rows = indices
+        self._visible_rows.sort(key=key_func, reverse=reverse)
         self.layoutChanged.emit()
 
     def _sort_key(self, column):
@@ -169,17 +170,13 @@ class FileTableModel(QAbstractTableModel):
     # ── 内部 ──
 
     def _to_store_index(self, visual_row):
-        if self._visible_rows:
-            return self._visible_rows[visual_row]
-        return visual_row
+        return self._visible_rows[visual_row]
 
     def _to_visual(self, store_idx):
-        if self._visible_rows:
-            try:
-                return self._visible_rows.index(store_idx)
-            except ValueError:
-                return -1
-        return store_idx
+        try:
+            return self._visible_rows.index(store_idx)
+        except ValueError:
+            return -1
 
     def _display_text(self, col, snap, d):
         from leanreel.gui.utils import _format_bytes
@@ -252,17 +249,17 @@ class FileTableModel(QAbstractTableModel):
     # ── 过滤 ──
 
     def _rebuild_visible(self):
-        self._visible_rows = []
-        for i in range(self._store.count()):
-            if self._is_visible(i):
-                self._visible_rows.append(i)
+        self._visible_rows = [
+            i for i in range(self._store.count())
+            if self._is_visible(i)
+        ]
+        if self._sort_col >= 0:
+            reverse = (self._sort_order == Qt.DescendingOrder)
+            self._visible_rows.sort(key=self._sort_key(self._sort_col), reverse=reverse)
 
     def set_filter(self, filter_key: str):
         self._filter_key = filter_key
-        if filter_key == "all":
-            self._visible_rows = list(range(self._store.count()))
-        else:
-            self._rebuild_visible()
+        self._rebuild_visible()
         self.layoutChanged.emit()
 
     def _is_visible(self, store_idx):
