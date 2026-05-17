@@ -67,15 +67,15 @@ class FlatAdapter:
     def _open_combo_batch(self, generation):
         if generation != self._combo_generation:
             return
-        opened = 0
+        scanned = 0
         row_count = self._model.rowCount()
-        while self._combo_next_row < row_count and opened < self._COMBO_BATCH:
+        while self._combo_next_row < row_count and scanned < self._COMBO_BATCH:
             row = self._combo_next_row
             self._combo_next_row += 1
+            scanned += 1
             store_idx = self._model._to_store_index(row)
             r = self._store.row_at(store_idx)
             if r and r.decision and r.decision.processable:
                 self._view.openPersistentEditor(self._model.index(row, 5))
-                opened += 1
         if self._combo_next_row < row_count:
             QTimer.singleShot(1, lambda gen=generation: self._open_combo_batch(gen))

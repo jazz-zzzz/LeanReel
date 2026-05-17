@@ -106,11 +106,13 @@ class FileTableModel(QAbstractTableModel):
     # ── Store 信号响应 ──
 
     def _on_rebuilt(self):
+        self._edit_values.clear()
         self.layoutAboutToBeChanged.emit()
         self._rebuild_visible()
         self.layoutChanged.emit()
 
     def _on_row_updated(self, idx: int, row):
+        self._edit_values.clear()
         if self._filter_key != "all" or self._sort_col >= 0:
             self.layoutAboutToBeChanged.emit()
             self._rebuild_visible()
@@ -146,6 +148,7 @@ class FileTableModel(QAbstractTableModel):
         self._sort_order = order
         key_func = self._sort_key(column)
         reverse = (order == Qt.DescendingOrder)
+        self._edit_values.clear()
         self.layoutAboutToBeChanged.emit()
         self._visible_rows.sort(key=key_func, reverse=reverse)
         self.layoutChanged.emit()
@@ -266,6 +269,7 @@ class FileTableModel(QAbstractTableModel):
 
     def set_filter(self, filter_key: str):
         self._filter_key = filter_key
+        self._edit_values.clear()
         self.layoutAboutToBeChanged.emit()
         self._rebuild_visible()
         self.layoutChanged.emit()

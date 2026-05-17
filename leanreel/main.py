@@ -631,14 +631,15 @@ class Application:
             return
         # 收集需要覆盖的 relative_path
         targets = set(self.file_panel.get_checked_relative_paths())
-        for idx in self.file_panel.table.selectedIndexes():
-            if idx.column() == 0:
-                continue
-            item = self.file_panel.table.item(idx.row(), 1)
-            if item:
-                rel = item.data(Qt.UserRole)
-                if rel:
-                    targets.add(rel)
+        model = self.file_panel.table.model()
+        selection = self.file_panel.table.selectionModel()
+        if model is not None and selection is not None:
+            for idx in selection.selectedRows(1):
+                key = model.data(idx, Qt.UserRole)
+                if isinstance(key, tuple) and len(key) == 2:
+                    targets.add(key[1])
+                elif isinstance(key, str) and key:
+                    targets.add(key)
         if not targets:
             return
         for rel in targets:

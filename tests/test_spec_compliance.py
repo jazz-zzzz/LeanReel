@@ -108,6 +108,27 @@ def test_b3_combo_opening_is_batched(qtbot):
     )
 
 
+def test_b3_combo_batch_limits_scanned_rows_for_unprocessable_items(qtbot):
+    """Rows without combo editors should still count toward the batch budget."""
+    _qapp()
+    from leanreel.data.file_store import FileTableStore, FileRow
+    from leanreel.gui.adapters.flat_adapter import FlatAdapter
+    store = FileTableStore()
+    view = QTableView()
+    adapter = FlatAdapter(store, view)
+    rows = [
+        FileRow(
+            snap=_snap(relative_path=f"{i}.mkv", file_name=f"{i}.mkv"),
+            decision=_decision(status_key="protected", processable=False),
+        )
+        for i in range(adapter._COMBO_BATCH + 5)
+    ]
+
+    store.rebuild(rows)
+
+    assert adapter._combo_next_row == adapter._COMBO_BATCH
+
+
 def test_b3_combo_still_visible_after_filter(qtbot):
     """过滤后再切回'全部'，QComboBox 仍然可见"""
     _qapp()
@@ -294,6 +315,36 @@ def test_e1_single_select_shows_strategy(qtbot):
 
 
 # ── F1: 响应性不阻塞主线程 ──
+
+def test_e1_selected_qtableview_row_receives_preset_strategy_from_panel(qtbot):
+    """Right-side preset changes should apply to the selected QTableView row."""
+    _qapp()
+    from types import SimpleNamespace
+    from leanreel.core.strategy import Strategy
+    from leanreel.main import Application
+    panel = FileListPanel()
+    qtbot.addWidget(panel)
+    initial = Strategy(name="Initial", estimated_savings="10%")
+    replacement = Strategy(name="Replacement", estimated_savings="20%")
+    panel.populate(
+        [_snap(relative_path="a.mkv", file_name="a.mkv")],
+        {"a.mkv": MatchResult(strategy=initial)},
+        strategies=[initial, replacement],
+    )
+    panel.table.selectRow(0)
+    app_like = SimpleNamespace(
+        file_panel=panel,
+        strategy_panel=SimpleNamespace(current_preset_strategy=replacement),
+        strategy_overrides={},
+    )
+
+    Application._on_preset_strategy_changed(app_like, 0)
+
+    assert app_like.strategy_overrides["a.mkv"] is replacement
+    model = panel.table.model()
+    assert model.data(model.index(0, 5), Qt.DisplayRole) == "Replacement"
+    panel.close()
+
 
 def test_f1_main_thread_stays_responsive_after_rebuild(qtbot):
     """store.rebuild 后主线程仍能处理事件"""
@@ -507,3 +558,35 @@ def test_b6_sort_keeps_filtered_store_rows():
 
     names = [str(model.data(model.index(i, 1), Qt.DisplayRole) or "") for i in range(model.rowCount())]
     assert names == ["protected-large.mkv", "protected-small.mkv"]
+
+
+def test_b6_strategy_edit_stays_with_file_after_sort(qtbot):
+    """Editing a strategy must not leave a visual-row cache behind after sorting."""
+    _qapp()
+    from leanreel.core.strategy import Strategy
+    panel = FileListPanel()
+    qtbot.addWidget(panel)
+    original = Strategy(name="Original", estimated_savings="10%")
+    replacement = Strategy(name="Replacement", estimated_savings="20%")
+    panel.populate(
+        [
+            _snap(relative_path="a.mkv", file_name="a.mkv", size_bytes=1),
+            _snap(relative_path="z.mkv", file_name="z.mkv", size_bytes=2),
+        ],
+        {
+            "a.mkv": MatchResult(strategy=original),
+            "z.mkv": MatchResult(strategy=original),
+        },
+        strategies=[original, replacement],
+    )
+    model = panel.table.model()
+    model.setData(model.index(0, 5), "Replacement", Qt.EditRole)
+
+    model.sort(1, Qt.DescendingOrder)
+
+    displayed = {
+        model.data(model.index(row, 1), Qt.DisplayRole): model.data(model.index(row, 5), Qt.DisplayRole)
+        for row in range(model.rowCount())
+    }
+    assert displayed == {"z.mkv": "Original", "a.mkv": "Replacement"}
+    panel.close()
