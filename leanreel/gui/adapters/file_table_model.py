@@ -34,7 +34,7 @@ class FileTableModel(QAbstractTableModel):
     # ── 必须实现的虚函数 ──
 
     def rowCount(self, parent=QModelIndex()):
-        return len(self._visible_rows) if self._visible_rows else self._store.count()
+        return len(self._visible_rows)
 
     def columnCount(self, parent=QModelIndex()):
         return _COLUMNS
@@ -103,7 +103,10 @@ class FileTableModel(QAbstractTableModel):
     # ── Store 信号响应 ──
 
     def _on_rebuilt(self):
-        self._rebuild_visible()
+        if self._filter_key == "all":
+            self._visible_rows = list(range(self._store.count()))
+        else:
+            self._rebuild_visible()
         self.layoutChanged.emit()
 
     def _on_row_updated(self, idx: int, row):
@@ -119,6 +122,49 @@ class FileTableModel(QAbstractTableModel):
         top_left = self.index(0, _COL_CHECK)
         bottom_right = self.index(self.rowCount() - 1, _COL_CHECK)
         self.dataChanged.emit(top_left, bottom_right)
+
+    # ── 排序 ──
+
+    def sort(self, column, order=Qt.AscendingOrder):
+        """用户点击列标题时 QTableView 调用此方法"""
+        indices = list(range(self._store.count()))
+        key_func = self._sort_key(column)
+        reverse = (order == Qt.DescendingOrder)
+        indices.sort(key=key_func, reverse=reverse)
+        if self._visible_rows:
+            # 过滤中：重新映射到 store indices 再排序
+            store_indices = [self._visible_rows[i] for i in range(len(self._visible_rows))]
+            store_indices.sort(key=key_func, reverse=reverse)
+            self._visible_rows = [self._to_visual(si) for si in store_indices]
+            # Actually, simpler: rebuild visible from sorted store indices
+            self._visible_rows = [si for si in indices if si in set(self._visible_rows)]
+        else:
+            self._visible_rows = indices
+        self.layoutChanged.emit()
+
+    def _sort_key(self, column):
+        def key(store_idx):
+            row = self._store.row_at(store_idx)
+            if row is None:
+                return ""
+            snap = row.snap
+            d = row.decision
+            if column == 0:
+                return ""  # no sort for checkbox
+            if column == 1:
+                return snap.file_name.lower()
+            if column == 2:
+                return snap.size_bytes or 0
+            if column == 3:
+                return snap.video_codec or ""
+            if column == 4:
+                return getattr(snap.hdr_type, "value", "SDR") if snap.hdr_type else "SDR"
+            if column == 5:
+                return d.strategy_text if d else ""
+            if column == 6:
+                return d.result_sort if d else -1
+            return ""
+        return key
 
     # ── 内部 ──
 
@@ -206,14 +252,17 @@ class FileTableModel(QAbstractTableModel):
     # ── 过滤 ──
 
     def _rebuild_visible(self):
-        self._visible_rows.clear()
+        self._visible_rows = []
         for i in range(self._store.count()):
             if self._is_visible(i):
                 self._visible_rows.append(i)
 
     def set_filter(self, filter_key: str):
         self._filter_key = filter_key
-        self._rebuild_visible()
+        if filter_key == "all":
+            self._visible_rows = list(range(self._store.count()))
+        else:
+            self._rebuild_visible()
         self.layoutChanged.emit()
 
     def _is_visible(self, store_idx):

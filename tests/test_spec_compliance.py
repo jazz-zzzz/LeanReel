@@ -370,3 +370,56 @@ def test_c1_tree_to_flat_checked_persists(qtbot):
     assert m.data(m.index(0, 0), Qt.CheckStateRole) == Qt.Checked
     assert m.data(m.index(1, 0), Qt.CheckStateRole) == Qt.Unchecked
     panel.close()
+
+
+# ── B5: 过滤 0 结果时 rowCount 必须为 0 ──
+
+def test_b5_filter_zero_results_shows_empty():
+    """筛选结果为空时 rowCount=0，不回退到全显示"""
+    from leanreel.data.file_store import FileTableStore, FileRow
+    from leanreel.gui.adapters.file_table_model import FileTableModel
+    store = FileTableStore()
+    view = QTableView()
+    model = FileTableModel(store, view)
+    view.setModel(model)
+    rows = [FileRow(snap=_snap(relative_path="a.mkv", video_codec="h264"), decision=_decision())]
+    store.rebuild(rows)
+    assert model.rowCount() == 1
+
+    # 筛选"已保护跳过"——没有受保护的行，应返回 0
+    model.set_filter("protected")
+    assert model.rowCount() == 0, f"Expected 0, got {model.rowCount()}"
+
+    # 改回"全部"——恢复 1 行
+    model.set_filter("all")
+    assert model.rowCount() == 1
+
+
+# ── B6: 点击列标题应排序 ──
+
+def test_b6_sort_by_size_column():
+    """sort(2, DescendingOrder) 后第一行应该是最大的"""
+    from leanreel.data.file_store import FileTableStore, FileRow
+    from leanreel.gui.adapters.file_table_model import FileTableModel
+    store = FileTableStore()
+    view = QTableView()
+    model = FileTableModel(store, view)
+    view.setModel(model)
+    rows = [
+        FileRow(snap=_snap(relative_path="small.mkv", file_name="small.mkv", size_bytes=1000), decision=_decision()),
+        FileRow(snap=_snap(relative_path="large.mkv", file_name="large.mkv", size_bytes=99999), decision=_decision()),
+        FileRow(snap=_snap(relative_path="medium.mkv", file_name="medium.mkv", size_bytes=5000), decision=_decision()),
+    ]
+    store.rebuild(rows)
+    # 默认顺序是插入顺序
+    assert "small.mkv" in str(model.data(model.index(0, 1), Qt.DisplayRole))
+
+    # 按体积降序
+    model.sort(2, Qt.DescendingOrder)
+    first = str(model.data(model.index(0, 1), Qt.DisplayRole) or "")
+    assert "large.mkv" in first, f"Expected large first, got {first}"
+
+    # 按体积升序
+    model.sort(2, Qt.AscendingOrder)
+    first = str(model.data(model.index(0, 1), Qt.DisplayRole) or "")
+    assert "small.mkv" in first, f"Expected small first, got {first}"
