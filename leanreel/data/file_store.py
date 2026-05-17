@@ -1,4 +1,5 @@
 """文件列表唯一数据源 — 数据类 + FileTableStore"""
+import threading
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -60,32 +61,35 @@ class FileTableStore(QObject):
         self._by_key: dict[tuple[int, str], int] = {}
         self._checked: set[tuple[int, str]] = set()
         self._strategies: list | None = None
+        self._lock = threading.Lock()  # 保护 rebuild/update_row 并发
 
     # ── 写入 ──
 
     def rebuild(self, rows: list[FileRow], strategies=None, keep_checked: bool = True):
         """用新行列表全量替换当前数据并发出 ``rows_rebuilt`` 信号。"""
-        if not keep_checked:
-            self._checked.clear()
-        else:
-            valid = {r.key for r in rows}
-            self._checked = {k for k in self._checked if k in valid}
-        self._rows = list(rows)
-        self._by_key = {r.key: i for i, r in enumerate(self._rows)}
-        self._strategies = strategies
+        with self._lock:
+            if not keep_checked:
+                self._checked.clear()
+            else:
+                valid = {r.key for r in rows}
+                self._checked = {k for k in self._checked if k in valid}
+            self._rows = list(rows)
+            self._by_key = {r.key: i for i, r in enumerate(self._rows)}
+            self._strategies = strategies
         self.rows_rebuilt.emit()
 
     def update_row(self, key: tuple[int, str], snap: FileSnapshot, match=None, decision=None):
-        """更新单行的快照（和可选的匹配结果/决策），发出 ``row_updated`` 信号。"""
-        idx = self._by_key.get(key)
-        if idx is None:
-            return
-        row = self._rows[idx]
-        row.snap = snap
-        if match is not None:
-            row.match = match
-        if decision is not None:
-            row.decision = decision
+        """更新单行的快照，发出 ``row_updated`` 信号。线程安全。"""
+        with self._lock:
+            idx = self._by_key.get(key)
+            if idx is None:
+                return
+            row = self._rows[idx]
+            row.snap = snap
+            if match is not None:
+                row.match = match
+            if decision is not None:
+                row.decision = decision
         self.row_updated.emit(idx, row)
 
     def set_checked(self, key: tuple[int, str], state: bool):

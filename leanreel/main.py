@@ -444,7 +444,7 @@ class Application:
             from leanreel.core.file_discovery import find_video_files
             files = find_video_files(path)
             if not files:
-                self.win.set_status(f"未找到视频文件：{path}")
+                self.notifier.scan_ready.emit([], [(folder_id, path, [])], my_token)
                 return
             placeholders = []
             for rel_path, abs_path in files:
@@ -455,7 +455,6 @@ class Application:
                 [(folder_id, path, files)], my_token)
 
         threading.Thread(target=_prepare_in_background, daemon=True).start()
-        self.win.set_status(f"探测中：0/{total} ...")
 
     def _on_library_selected(self, lib_id):
         folders = self.services.db.get_folders_for_library(lib_id)
@@ -526,8 +525,8 @@ class Application:
             except Exception:
                 import traceback
                 traceback.print_exc()
-                self._refresh_running = False
-                self.win.set_status("扫描失败，请检查网络连接后重试")
+                # 通过信号通知主线程（避免跨线程 Qt 调用）
+                self.notifier.scan_ready.emit([], [], my_token)
 
         threading.Thread(target=_scan_in_background, daemon=True).start()
 
@@ -546,7 +545,10 @@ class Application:
 
         if total == 0:
             self._refresh_running = False
-            self.win.set_status("未找到视频文件")
+            if not folder_inputs:
+                self.win.set_status("扫描失败，请检查网络连接后重试")
+            else:
+                self.win.set_status("未找到视频文件")
             return
 
         self._populate_file_list(self.current_snapshots)
