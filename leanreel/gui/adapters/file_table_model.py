@@ -78,7 +78,10 @@ class FileTableModel(QAbstractTableModel):
                 return True
         # 策略列 EditRole → 存储编辑值供 dataChanged handler 读取
         if role == Qt.EditRole and index.column() == _COL_STRATEGY:
-            self._edit_values[(index.row(), index.column())] = value
+            key = (index.row(), index.column())
+            if self._edit_values.get(key) == value:
+                return True
+            self._edit_values[key] = value
             self.dataChanged.emit(index, index, [Qt.EditRole])
             return True
         return False
@@ -103,11 +106,13 @@ class FileTableModel(QAbstractTableModel):
     # ── Store 信号响应 ──
 
     def _on_rebuilt(self):
+        self.layoutAboutToBeChanged.emit()
         self._rebuild_visible()
         self.layoutChanged.emit()
 
     def _on_row_updated(self, idx: int, row):
         if self._filter_key != "all" or self._sort_col >= 0:
+            self.layoutAboutToBeChanged.emit()
             self._rebuild_visible()
             self.layoutChanged.emit()
             return
@@ -120,6 +125,7 @@ class FileTableModel(QAbstractTableModel):
 
     def _on_checked_changed(self):
         if self._filter_key == "checked":
+            self.layoutAboutToBeChanged.emit()
             self._rebuild_visible()
             self.layoutChanged.emit()
             return
@@ -140,6 +146,7 @@ class FileTableModel(QAbstractTableModel):
         self._sort_order = order
         key_func = self._sort_key(column)
         reverse = (order == Qt.DescendingOrder)
+        self.layoutAboutToBeChanged.emit()
         self._visible_rows.sort(key=key_func, reverse=reverse)
         self.layoutChanged.emit()
 
@@ -259,6 +266,7 @@ class FileTableModel(QAbstractTableModel):
 
     def set_filter(self, filter_key: str):
         self._filter_key = filter_key
+        self.layoutAboutToBeChanged.emit()
         self._rebuild_visible()
         self.layoutChanged.emit()
 

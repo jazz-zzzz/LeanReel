@@ -402,8 +402,8 @@ class Application:
             d = self.file_panel._decision_display(s, m)
             rows.append(FileRow(snap=s, match=m, decision=d))
         keep_checked = not fast  # fast=True 表示切库，应清空勾选
+        self.file_panel.set_strategy_lookup(self.services.strategies)
         self.store.rebuild(rows, strategies=self.services.strategies, keep_checked=keep_checked)
-        self.file_panel._strategy_lookup = self.file_panel._build_strategy_lookup(self.services.strategies)
         self.file_panel._show_table()
         # QComboBox 延后创建（fast=True 时同步，否则异步）
         if self.services.strategies and self.file_panel._flat_adapter:

@@ -21,6 +21,8 @@ class StrategyDelegate(QStyledItemDelegate):
             names.append("自定义")
         combo.addItems(names)
         combo.wheelEvent = lambda event: event.ignore()
+        if parent is not None:
+            combo.currentTextChanged.connect(lambda _text, editor=combo: self.commitData.emit(editor))
         return combo
 
     def setEditorData(self, editor, index):

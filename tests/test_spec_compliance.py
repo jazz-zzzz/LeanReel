@@ -50,6 +50,64 @@ def test_b3_combo_always_visible(qtbot):
     panel.close()
 
 
+def test_b3_combo_visible_when_store_is_injected_before_strategies(qtbot):
+    """Application injects the store before strategies are populated."""
+    _qapp()
+    panel = FileListPanel()
+    qtbot.addWidget(panel)
+    store = FileTableStore()
+    panel.set_store(store)
+
+    from leanreel.core.strategy import Strategy
+    strategy = Strategy(name="鍧囪　鍘嬬缉", estimated_savings="35-50%")
+    panel.populate(
+        [_snap(relative_path="a.mkv")],
+        {"a.mkv": MatchResult(strategy=strategy)},
+        strategies=[strategy],
+    )
+
+    from PySide6.QtWidgets import QComboBox
+    widget = panel.table.indexWidget(panel.table.model().index(0, 5))
+    assert isinstance(widget, QComboBox)
+    assert widget.findText(strategy.name) >= 0
+    panel.close()
+
+
+def test_b3_combo_opening_is_batched(qtbot):
+    """Large lists should not synchronously open every combo in one layout pass."""
+    _qapp()
+    from leanreel.core.strategy import Strategy
+    from leanreel.data.file_store import FileTableStore, FileRow
+    from leanreel.gui.adapters.flat_adapter import FlatAdapter
+    strategy = Strategy(name="鍧囪　鍘嬬缉", estimated_savings="35-50%")
+    store = FileTableStore()
+    view = QTableView()
+    adapter = FlatAdapter(store, view, strategy_lookup={strategy.name: strategy})
+    rows = [
+        FileRow(
+            snap=_snap(relative_path=f"{i}.mkv", file_name=f"{i}.mkv"),
+            decision=_decision(strategy_text=strategy.name),
+        )
+        for i in range(adapter._COMBO_BATCH + 5)
+    ]
+
+    store.rebuild(rows)
+
+    first_pass = sum(
+        1 for row in range(view.model().rowCount())
+        if view.indexWidget(view.model().index(row, 5)) is not None
+    )
+    assert first_pass == adapter._COMBO_BATCH
+
+    qtbot.waitUntil(
+        lambda: all(
+            view.indexWidget(view.model().index(row, 5)) is not None
+            for row in range(view.model().rowCount())
+        ),
+        timeout=1000,
+    )
+
+
 def test_b3_combo_still_visible_after_filter(qtbot):
     """过滤后再切回'全部'，QComboBox 仍然可见"""
     _qapp()

@@ -269,7 +269,7 @@ class FileListPanel(QWidget):
         """填充文件表格行（委托给 Store + Adapter）。"""
         from leanreel.data.file_store import FileTableStore, FileRow
 
-        self._strategy_lookup = self._build_strategy_lookup(strategies)
+        self.set_strategy_lookup(strategies)
 
         if not snapshots:
             self._show_empty()
@@ -356,6 +356,10 @@ class FileListPanel(QWidget):
             if name:
                 lookup[name] = strategy
         return lookup
+
+    def set_strategy_lookup(self, strategies: list | None):
+        self._strategy_lookup.clear()
+        self._strategy_lookup.update(self._build_strategy_lookup(strategies))
 
     def _create_strategy_combo(self, relative_path: str, selected_name: str) -> QComboBox:
         combo = QComboBox()
