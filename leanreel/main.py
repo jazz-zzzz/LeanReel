@@ -213,8 +213,18 @@ class Application:
         if self.app_state.scan_token != my_token:
             return
         self.app_state.current_snapshots = snapshots
-        self.scan_ctrl._populate_file_list(snapshots, )
-        self.win.set_status(f"已加载 {len(snapshots)} 个文件")
+        self.scan_ctrl._populate_file_list(snapshots)
+        # 根据该库的扫描状态恢复 UI
+        st = self.app_state.scan_states.get(self.app_state.active_scan_folder_id) if self.app_state.active_scan_folder_id else None
+        if st and st.running:
+            self.file_panel.refresh_btn.setEnabled(False)
+            self.file_panel.set_progress_visible(True)
+            self.file_panel.set_progress(st.done_files, st.total_files)
+            self.win.set_status(f"探测中：{st.done_files}/{st.total_files}...")
+        else:
+            self.file_panel.refresh_btn.setEnabled(True)
+            self.file_panel.set_progress_visible(False)
+            self.win.set_status(f"已加载 {len(snapshots)} 个文件")
 
     # ── 入口 ──
 

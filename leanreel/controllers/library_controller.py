@@ -62,6 +62,8 @@ class LibraryController:
         # 同步设置 folder_paths，避免选库后空窗期
         self._state.current_folder_paths = folder_paths
         self._state.strategy_overrides = {}
+        # 切换活跃扫描锚点（切库时恢复该库的扫描状态）
+        self._state.active_scan_folder_id = next(iter(folder_paths), 0)
         self._state.scan_token += 1
         my_token = self._state.scan_token
         self._win.set_status("加载缓存中...")
