@@ -75,6 +75,7 @@ class FileTableModel(QAbstractTableModel):
             row = self._store.row_at(store_idx)
             if row:
                 self._store.set_checked(row.key, value == Qt.Checked)
+                self.dataChanged.emit(index, index, [Qt.CheckStateRole])
                 return True
         # 策略列 EditRole → 存储编辑值供 dataChanged handler 读取
         if role == Qt.EditRole and index.column() == _COL_STRATEGY:
@@ -145,9 +146,10 @@ class FileTableModel(QAbstractTableModel):
             return
         if self.rowCount() == 0:
             return
+        # 全量 dataChanged 无 roles → _on_flat_data_changed 直接 return
         top_left = self.index(0, _COL_CHECK)
         bottom_right = self.index(self.rowCount() - 1, _COL_CHECK)
-        self.dataChanged.emit(top_left, bottom_right, [Qt.CheckStateRole])
+        self.dataChanged.emit(top_left, bottom_right)
 
     # ── 排序 ──
 

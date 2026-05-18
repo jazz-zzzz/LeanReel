@@ -171,6 +171,7 @@ class Application:
         self.queue_panel.cancel_requested.connect(self.encoding_ctrl.cancel)
 
         self.notifier.scan_ready.connect(self.scan_ctrl._on_scan_ready)
+        self.notifier.scan_resolved.connect(self.scan_ctrl._on_scan_resolved)
         self.notifier.library_cache_loaded.connect(self._on_library_cache_loaded)
         self.notifier.probe_result.connect(self.scan_ctrl._on_probe_result)
         self.notifier.strategies_ready.connect(self._on_strategies_ready)

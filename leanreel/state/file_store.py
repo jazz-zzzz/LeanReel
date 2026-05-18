@@ -95,6 +95,15 @@ class FileTableStore(QObject):
     def checked_keys(self) -> list[tuple[int, str]]:
         return sorted(self._checked)
 
+    def rows(self) -> tuple[FileRow, ...]:
+        return tuple(self._rows)
+
+    def row_by_relative_path(self, relative_path: str) -> FileRow | None:
+        for row in self._rows:
+            if row.snap.relative_path == relative_path:
+                return row
+        return None
+
     def folder_stats(self) -> dict[str, int]:
         """返回 文件夹名 -> 总大小 的映射。"""
         stats: dict[str, int] = {}

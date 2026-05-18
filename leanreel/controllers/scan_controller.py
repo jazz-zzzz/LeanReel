@@ -18,10 +18,15 @@ def remove_folder_from_current_state(snapshots, folder_paths, strategy_overrides
     remaining_snapshots = [s for s in snapshots if s.library_folder_id != folder_id]
     remaining_paths = {fid: path for fid, path in folder_paths.items() if fid != folder_id}
     remaining_relative_paths = {s.relative_path for s in remaining_snapshots}
+    remaining_keys = {(s.library_folder_id, s.relative_path) for s in remaining_snapshots}
     remaining_overrides = {
-        path: strategy
-        for path, strategy in strategy_overrides.items()
-        if path in remaining_relative_paths
+        key: strategy
+        for key, strategy in strategy_overrides.items()
+        if (
+            key in remaining_keys
+            if isinstance(key, tuple)
+            else key in remaining_relative_paths
+        )
     }
     return remaining_snapshots, remaining_paths, remaining_overrides
 
@@ -159,17 +164,37 @@ class ScanController:
                 self._win.set_status("未找到视频文件")
             return
 
-        # B 同步缓存解析（load_cached 是毫秒级 DB 读，不需要后台线程）
-        cache_by_folder: dict[int, dict[str, FileSnapshot]] = {}
-        for folder_id, path, _files in folder_inputs:
-            cache_by_folder[folder_id] = {
-                s.relative_path: s
-                for s in self._services.scanner.load_cached(folder_id, path)
-            }
-        resolved = []
-        for s in placeholders:
-            cached = cache_by_folder.get(s.library_folder_id, {}).get(s.relative_path)
-            resolved.append(cached if cached is not None else s)
+        # Cache resolution may touch slow storage, so keep it off the UI thread.
+        self._win.set_status("加载缓存中...")
+
+        def _resolve_cache_in_background():
+            forbid_main_thread("scan cache resolution")
+            cache_by_folder: dict[int, dict[str, FileSnapshot]] = {}
+            try:
+                for folder_id, path, _files in folder_inputs:
+                    if self._state.scan_token != my_token:
+                        return
+                    cache_by_folder[folder_id] = {
+                        s.relative_path: s
+                        for s in self._services.scanner.load_cached(folder_id, path)
+                    }
+                resolved = [
+                    cache_by_folder.get(s.library_folder_id, {}).get(s.relative_path, s)
+                    for s in placeholders
+                ]
+            except Exception:
+                import traceback
+                traceback.print_exc()
+                resolved = placeholders
+            self._notifier.scan_resolved.emit(resolved, folder_inputs, my_token)
+
+        threading.Thread(target=_resolve_cache_in_background, daemon=True).start()
+
+    def _on_scan_resolved(self, resolved, folder_inputs, my_token):
+        require_main_thread("ScanController._on_scan_resolved")
+        if self._state.scan_token != my_token:
+            return
+        total = len(resolved)
 
         if len(folder_inputs) == 1:
             fid = folder_inputs[0][0]

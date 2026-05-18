@@ -229,6 +229,67 @@ def test_remove_folder_state_filters_snapshots_and_paths():
     assert list(new_overrides) == ["b.mkv"]
 
 
+def test_remove_folder_state_preserves_tuple_overrides_for_remaining_folders():
+    from leanreel.main import remove_folder_from_current_state
+    from leanreel.domain.models import FileSnapshot
+
+    keep = object()
+    drop = object()
+    snapshots = [
+        FileSnapshot(library_folder_id=1, relative_path="a.mkv"),
+        FileSnapshot(library_folder_id=2, relative_path="b.mkv"),
+    ]
+    folder_paths = {1: "C:/one", 2: "C:/two"}
+    overrides = {
+        (1, "a.mkv"): drop,
+        (2, "b.mkv"): keep,
+    }
+
+    _snapshots, _paths, new_overrides = remove_folder_from_current_state(
+        snapshots, folder_paths, overrides, folder_id=1
+    )
+
+    assert new_overrides == {(2, "b.mkv"): keep}
+
+
+def test_folder_removed_accepts_scan_populate_callback_signature():
+    from types import SimpleNamespace
+
+    from leanreel.controllers.library_controller import LibraryController
+    from leanreel.domain.models import FileSnapshot
+
+    refreshed = []
+    removed = []
+    state = SimpleNamespace(
+        current_snapshots=[
+            FileSnapshot(library_folder_id=1, relative_path="a.mkv"),
+            FileSnapshot(library_folder_id=2, relative_path="b.mkv"),
+        ],
+        current_folder_paths={1: "C:/one", 2: "C:/two"},
+        strategy_overrides={},
+    )
+    ctrl = LibraryController(
+        state=state,
+        services=SimpleNamespace(
+            lib_mgr=SimpleNamespace(
+                remove_folder=lambda folder_id: removed.append(folder_id),
+                get_all_libraries=lambda: [],
+                get_folders=lambda lib_id: [],
+            )
+        ),
+        lib_panel=SimpleNamespace(populate=lambda libs, folders: None),
+        file_panel=SimpleNamespace(),
+        win=SimpleNamespace(set_status=lambda text: None),
+        notifier=SimpleNamespace(),
+        on_file_list_refresh=lambda snapshots: refreshed.append(list(snapshots)),
+    )
+
+    ctrl._on_folder_removed(1)
+
+    assert removed == [1]
+    assert [s.relative_path for s in refreshed[0]] == ["b.mkv"]
+
+
 def test_clear_current_state_returns_empty_collections():
     from leanreel.main import clear_current_state
 

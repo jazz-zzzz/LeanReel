@@ -419,6 +419,26 @@ def test_file_list_checked_state_survives_flat_to_tree_switch():
     panel.close()
 
 
+def test_file_list_flat_checkbox_click_updates_store(qtbot):
+    from leanreel.domain.models import FileSnapshot
+    from leanreel.gui.file_list import FileListPanel, MatchResult
+
+    panel = FileListPanel()
+    qtbot.addWidget(panel)
+    snap = FileSnapshot(library_folder_id=1, relative_path="Season/a.mkv", file_name="a.mkv", video_codec="h264")
+
+    panel.populate([snap], {"Season/a.mkv": MatchResult(strategy="A", estimate={"percentage": "10%"})})
+    panel.show()
+
+    index = panel.table.model().index(0, 0)
+    rect = panel.table.visualRect(index)
+    qtbot.mouseClick(panel.table.viewport(), Qt.LeftButton, pos=rect.center())
+
+    assert panel.get_checked_file_keys() == [(1, "Season/a.mkv")]
+    assert _check(panel, 0, 0) == Qt.Checked
+    panel.close()
+
+
 def test_file_list_checked_state_survives_tree_to_flat_switch():
     from leanreel.domain.models import FileSnapshot
     from leanreel.gui.file_list import FileListPanel, MatchResult
@@ -436,6 +456,90 @@ def test_file_list_checked_state_survives_tree_to_flat_switch():
 
     assert _check(panel, 0, 0) == Qt.Checked
     assert panel.get_checked_file_keys() == [(1, "Season/a.mkv")]
+    panel.close()
+
+
+def test_file_list_tree_checkbox_click_updates_store(qtbot):
+    from leanreel.domain.models import FileSnapshot
+    from leanreel.gui.file_list import FileListPanel, MatchResult
+
+    panel = FileListPanel()
+    qtbot.addWidget(panel)
+    snap = FileSnapshot(library_folder_id=1, relative_path="Season/a.mkv", file_name="a.mkv", video_codec="h264")
+
+    panel.populate([snap], {"Season/a.mkv": MatchResult(strategy="A", estimate={"percentage": "10%"})})
+    panel.set_view_mode("tree")
+    panel.show()
+
+    panel.tree.topLevelItem(0).setExpanded(True)
+    child = panel.tree.topLevelItem(0).child(0)
+    rect = panel.tree.visualItemRect(child)
+    qtbot.mouseClick(panel.tree.viewport(), Qt.LeftButton, pos=rect.center())
+
+    assert panel.get_checked_file_keys() == [(1, "Season/a.mkv")]
+    assert child.checkState(0) == Qt.Checked
+    panel.close()
+
+
+def test_file_list_flat_disabled_checkbox_click_shows_reason(qtbot, monkeypatch):
+    from PySide6.QtWidgets import QToolTip
+
+    from leanreel.domain.models import FileSnapshot
+    from leanreel.gui.file_list import FileListPanel, MatchResult
+
+    panel = FileListPanel()
+    qtbot.addWidget(panel)
+    snap = FileSnapshot(
+        library_folder_id=1,
+        relative_path="Season/hevc.mkv",
+        file_name="hevc.mkv",
+        video_codec="hevc",
+    )
+    shown = []
+    monkeypatch.setattr(QToolTip, "showText", lambda _pos, text, *_args: shown.append(text))
+
+    panel.populate([snap], {"Season/hevc.mkv": MatchResult(strategy="跳过：HEVC/H.265 片源")})
+    panel.show()
+
+    index = panel.table.model().index(0, 0)
+    rect = panel.table.visualRect(index)
+    qtbot.mouseClick(panel.table.viewport(), Qt.LeftButton, pos=rect.center())
+
+    assert panel.get_checked_file_keys() == []
+    assert shown
+    assert "HEVC" in shown[-1]
+    panel.close()
+
+
+def test_file_list_tree_disabled_checkbox_click_shows_reason(qtbot, monkeypatch):
+    from PySide6.QtWidgets import QToolTip
+
+    from leanreel.domain.models import FileSnapshot
+    from leanreel.gui.file_list import FileListPanel, MatchResult
+
+    panel = FileListPanel()
+    qtbot.addWidget(panel)
+    snap = FileSnapshot(
+        library_folder_id=1,
+        relative_path="Season/hevc.mkv",
+        file_name="hevc.mkv",
+        video_codec="hevc",
+    )
+    shown = []
+    monkeypatch.setattr(QToolTip, "showText", lambda _pos, text, *_args: shown.append(text))
+
+    panel.populate([snap], {"Season/hevc.mkv": MatchResult(strategy="跳过：HEVC/H.265 片源")})
+    panel.set_view_mode("tree")
+    panel.show()
+
+    panel.tree.topLevelItem(0).setExpanded(True)
+    child = panel.tree.topLevelItem(0).child(0)
+    rect = panel.tree.visualItemRect(child)
+    qtbot.mouseClick(panel.tree.viewport(), Qt.LeftButton, pos=rect.center())
+
+    assert panel.get_checked_file_keys() == []
+    assert shown
+    assert "HEVC" in shown[-1]
     panel.close()
 
 

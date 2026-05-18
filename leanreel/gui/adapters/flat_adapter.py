@@ -44,9 +44,7 @@ class FlatAdapter:
         view.setItemDelegateForColumn(5, StrategyDelegate(self._strategy_lookup, combo_factory, view))
         self._model.layoutAboutToBeChanged.connect(self._close_persistent_combos)
         self._model.layoutChanged.connect(self._schedule_persistent_combos)
-        # E.1 滚动时维护视口内可见行的 QComboBox
         view.verticalScrollBar().valueChanged.connect(self._on_scroll)
-        # D 手动表头排序（探测期间 setSortingEnabled(False)，但仍可点击表头排序）
         h.sectionClicked.connect(self._on_header_clicked)
 
     def enable_sorting(self):
@@ -69,10 +67,9 @@ class FlatAdapter:
 
     def _close_persistent_combos(self):
         self._combo_generation += 1
-        # 只关闭已有 combo 的行，不遍历全表
-        for row in list(self._combo_rows):
-            self._view.closePersistentEditor(self._model.index(row, 5))
         self._combo_rows.clear()
+        for row in range(self._model.rowCount()):
+            self._view.closePersistentEditor(self._model.index(row, 5))
 
     def _schedule_persistent_combos(self):
         """为视口内可见行批量创建 QComboBox。"""

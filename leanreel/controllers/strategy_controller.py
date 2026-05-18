@@ -56,7 +56,7 @@ class StrategyController:
             self._strategy_panel.preset_panel.select_by_strategy(override.name)
             return
         # 从 Store 中查找该文件的匹配策略
-        for row_obj in self._store._rows:
+        for row_obj in self._store.rows():
             if row_obj.snap.relative_path == relative_path:
                 match = row_obj.match
                 strategy = getattr(match, "strategy", None) if match else None

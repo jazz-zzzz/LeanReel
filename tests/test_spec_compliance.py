@@ -478,20 +478,39 @@ def test_f1_probe_update_does_not_block_main_thread(qtbot):
 
 
 def test_f1_scan_ready_offloads_slow_cache_resolution(qtbot):
-    """Cache resolution runs synchronously — UI populated immediately, no blank gap."""
+    """Cache resolution runs in a worker and commits resolved rows on the main thread."""
     _qapp()
+    import threading
     import time
     from types import SimpleNamespace
+    from leanreel.controllers.signals import AppSignals
     from leanreel.controllers.scan_controller import ScanController
+    from leanreel.utils import threading_contract
 
+    threading_contract._reset_for_tests()
+    main_thread_id = threading_contract.capture_main_thread()
+    load_threads = []
+    cache_started = threading.Event()
     populated = []
+    probe_started = []
 
     class SlowScanner:
         def load_cached(self, folder_id, path):
-            time.sleep(0.05)
-            return []
+            load_threads.append(threading.get_ident())
+            cache_started.set()
+            time.sleep(0.15)
+            return [
+                _snap(
+                    library_folder_id=folder_id,
+                    relative_path="a.mkv",
+                    file_name="a.mkv",
+                    video_codec="h264",
+                    probe_ok=True,
+                )
+            ]
 
         def probe_multi(self, folder_inputs, on_result, on_finished=None):
+            probe_started.append(threading.get_ident())
             return sum(len(files) for _fid, _path, files in folder_inputs)
 
     fake_file_panel = SimpleNamespace(
@@ -500,7 +519,7 @@ def test_f1_scan_ready_offloads_slow_cache_resolution(qtbot):
         set_progress=lambda done, total: None,
         enable_sorting=lambda: None,
     )
-    fake_notifier = SimpleNamespace()
+    fake_notifier = AppSignals()
     fake_scan_ctrl = SimpleNamespace(
         _state=SimpleNamespace(
             scan_token=1,
@@ -512,10 +531,18 @@ def test_f1_scan_ready_offloads_slow_cache_resolution(qtbot):
         _win=SimpleNamespace(set_status=lambda text: None),
         _notifier=fake_notifier,
         _services=SimpleNamespace(scanner=SlowScanner()),
-        _populate_file_list=lambda snapshots: populated.append(list(snapshots)),
+        _populate_file_list=lambda snapshots: populated.append((threading.get_ident(), list(snapshots))),
         _probe_total=0,
         _probe_done=0,
         _probe_token=0,
+    )
+    fake_notifier.scan_resolved.connect(
+        lambda snapshots, folder_inputs, token: ScanController._on_scan_resolved(
+            fake_scan_ctrl,
+            snapshots,
+            folder_inputs,
+            token,
+        )
     )
     placeholders = [
         _snap(library_folder_id=1, relative_path="a.mkv", file_name="a.mkv", probe_ok=False)
@@ -526,9 +553,15 @@ def test_f1_scan_ready_offloads_slow_cache_resolution(qtbot):
     ScanController._on_scan_ready(fake_scan_ctrl, placeholders, folder_inputs, 1)
     elapsed = time.perf_counter() - start
 
-    # 同步执行（50ms sleep + overhead），不需后台线程往返
-    assert elapsed < 0.3
+    assert elapsed < 0.05
+    qtbot.waitUntil(cache_started.is_set, timeout=1000)
+    qtbot.waitUntil(lambda: bool(populated), timeout=1000)
+    assert load_threads and all(thread_id != main_thread_id for thread_id in load_threads)
+    assert populated[0][0] == main_thread_id
+    assert populated[0][1][0].video_codec == "h264"
+    assert probe_started == [main_thread_id]
     assert populated
+    threading_contract._reset_for_tests()
 
 
 def test_f1_library_selection_offloads_slow_cache_loading(qtbot):
@@ -705,6 +738,14 @@ def test_f1_probe_results_are_committed_on_main_thread(qtbot):
         _probe_token=0,
     )
     fake_notifier.progress.connect(lambda done, total: progress.append((done, total)))
+    fake_notifier.scan_resolved.connect(
+        lambda snapshots, folder_inputs, token: ScanController._on_scan_resolved(
+            fake_scan_ctrl,
+            snapshots,
+            folder_inputs,
+            token,
+        )
+    )
     if hasattr(fake_notifier, "probe_result"):
         fake_notifier.probe_result.connect(
             lambda snap, token: ScanController._on_probe_result(fake_scan_ctrl, snap, token)
@@ -776,6 +817,79 @@ def test_f1_probe_commit_slot_rejects_worker_thread_direct_call(qtbot):
     assert "ScanController._on_probe_result" in errors[0]
 
     threading_contract._reset_for_tests()
+
+
+def test_f1_scan_resolved_commit_slot_rejects_worker_thread_direct_call(qtbot):
+    """Resolved scan commits are UI work and should reject direct worker-thread calls."""
+    _qapp()
+    import threading
+    from types import SimpleNamespace
+
+    from leanreel.controllers.scan_controller import ScanController
+    from leanreel.utils import threading_contract
+
+    threading_contract._reset_for_tests()
+    threading_contract.capture_main_thread()
+    errors = []
+
+    fake_ctrl = SimpleNamespace(_state=SimpleNamespace(scan_token=1))
+
+    def worker():
+        try:
+            ScanController._on_scan_resolved(fake_ctrl, [], [], 1)
+        except RuntimeError as exc:
+            errors.append(str(exc))
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join(timeout=1)
+
+    assert errors
+    assert "ScanController._on_scan_resolved" in errors[0]
+    threading_contract._reset_for_tests()
+
+
+def test_f1_stale_scan_resolved_result_is_ignored(qtbot):
+    """Late cache resolution from an old scan must not mutate state or start probing."""
+    _qapp()
+    from types import SimpleNamespace
+
+    from leanreel.controllers.scan_controller import ScanController
+
+    populated = []
+    probed = []
+    fake_ctrl = SimpleNamespace(
+        _state=SimpleNamespace(scan_token=2, current_snapshots=[]),
+        _populate_file_list=lambda snapshots: populated.append(list(snapshots)),
+        _services=SimpleNamespace(scanner=SimpleNamespace(probe_multi=lambda *args, **kwargs: probed.append(args))),
+    )
+
+    ScanController._on_scan_resolved(
+        fake_ctrl,
+        [_snap(library_folder_id=1, relative_path="stale.mkv")],
+        [(1, "C:/videos", [("stale.mkv", "C:/videos/stale.mkv")])],
+        1,
+    )
+
+    assert fake_ctrl._state.current_snapshots == []
+    assert populated == []
+    assert probed == []
+
+
+def test_file_table_store_private_state_is_not_read_outside_store():
+    """GUI/controllers should use FileTableStore's public API, not private containers."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    checked_files = [
+        root / "leanreel" / "gui" / "file_list.py",
+        root / "leanreel" / "controllers" / "strategy_controller.py",
+    ]
+
+    for path in checked_files:
+        source = path.read_text(encoding="utf-8")
+        assert "._store._rows" not in source
+        assert "._store._checked" not in source
 
 
 def test_f1_filtered_probe_update_avoids_full_layout_rebuild():

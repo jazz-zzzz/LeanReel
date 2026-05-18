@@ -7,9 +7,9 @@ from typing import Any
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QTableView,
     QHeaderView, QLabel, QHBoxLayout, QComboBox, QStackedWidget,
-    QTreeWidget, QTreeWidgetItem, QPushButton, QProgressBar
+    QTreeWidget, QTreeWidgetItem, QPushButton, QProgressBar, QToolTip
 )
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import QEvent, Signal, Qt
 from PySide6.QtGui import QColor
 
 _HEADERS = ["", "文件名", "体积", "编码信息", "HDR", "处理策略", "预计结果"]
@@ -243,6 +243,7 @@ class FileListPanel(QWidget):
         self.table.setEditTriggers(QTableView.NoEditTriggers)
         self.table.setSortingEnabled(False)
         self.table.setAutoScroll(False)
+        self.table.viewport().installEventFilter(self)
 
         self.tree = QTreeWidget()
         self.tree.setColumnCount(len(_TREE_HEADERS))
@@ -250,6 +251,7 @@ class FileListPanel(QWidget):
         self.tree.setSortingEnabled(True)
         self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._on_tree_context_menu)
+        self.tree.viewport().installEventFilter(self)
         self.tree.hide()
 
         # 空状态提示
@@ -282,6 +284,76 @@ class FileListPanel(QWidget):
 
         self.tree.itemChanged.connect(self._on_tree_item_changed)
         self.tree.itemSelectionChanged.connect(self._on_tree_selection_changed)
+
+    def eventFilter(self, source, event):
+        if event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
+            pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+            if source is self.table.viewport() and self._toggle_flat_check_at(pos):
+                return True
+            if source is self.table.viewport() and self._show_flat_disabled_check_reason_at(pos):
+                return True
+            if source is self.tree.viewport() and self._toggle_tree_check_at(pos):
+                return True
+            if source is self.tree.viewport() and self._show_tree_disabled_check_reason_at(pos):
+                return True
+        return super().eventFilter(source, event)
+
+    def _toggle_flat_check_at(self, pos) -> bool:
+        if self._store is None or self.table.model() is None:
+            return False
+        index = self.table.indexAt(pos)
+        if not index.isValid() or index.column() != 0:
+            return False
+        flags = self.table.model().flags(index)
+        if not (flags & Qt.ItemIsEnabled) or not (flags & Qt.ItemIsUserCheckable):
+            return False
+        current = self.table.model().data(index, Qt.CheckStateRole)
+        next_state = Qt.Unchecked if current == Qt.Checked else Qt.Checked
+        self.table.model().setData(index, next_state, Qt.CheckStateRole)
+        self._apply_filter()
+        return True
+
+    def _show_flat_disabled_check_reason_at(self, pos) -> bool:
+        if self._store is None or self.table.model() is None:
+            return False
+        index = self.table.indexAt(pos)
+        if not index.isValid() or index.column() != 0:
+            return False
+        flags = self.table.model().flags(index)
+        if flags & Qt.ItemIsEnabled or not (flags & Qt.ItemIsUserCheckable):
+            return False
+        reason = self.table.model().data(index, Qt.ToolTipRole) or "该文件当前不可选择"
+        QToolTip.showText(self.table.viewport().mapToGlobal(pos), reason, self.table)
+        return True
+
+    def _toggle_tree_check_at(self, pos) -> bool:
+        if self._store is None:
+            return False
+        item = self.tree.itemAt(pos)
+        if item is None or item.childCount() > 0:
+            return False
+        flags = item.flags()
+        if not (flags & Qt.ItemIsEnabled) or not (flags & Qt.ItemIsUserCheckable):
+            return False
+        key = self._coerce_key(item.data(0, Qt.UserRole))
+        if key is None:
+            return False
+        self._store.set_checked(key, item.checkState(0) != Qt.Checked)
+        self._apply_filter()
+        return True
+
+    def _show_tree_disabled_check_reason_at(self, pos) -> bool:
+        if self._store is None:
+            return False
+        item = self.tree.itemAt(pos)
+        if item is None or item.childCount() > 0:
+            return False
+        flags = item.flags()
+        if flags & Qt.ItemIsEnabled or not (flags & Qt.ItemIsUserCheckable):
+            return False
+        reason = item.toolTip(0) or "该文件当前不可选择"
+        QToolTip.showText(self.tree.viewport().mapToGlobal(pos), reason, self.tree)
+        return True
 
     def populate(self, snapshots: list, matched_strategies: dict[str, MatchResult | None], strategies: list | None = None, fast: bool = False):
         """填充文件表格行（委托给 Store + Adapter）。"""
@@ -424,11 +496,9 @@ class FileListPanel(QWidget):
             target_key = relative_path
             target_row = self._store.row_by_key(relative_path)
         else:
-            for row in self._store._rows:
-                if row.snap.relative_path == relative_path:
-                    target_key = row.key
-                    target_row = row
-                    break
+            target_row = self._store.row_by_relative_path(relative_path)
+            if target_row:
+                target_key = target_row.key
         if target_key is None:
             return
 
@@ -456,10 +526,9 @@ class FileListPanel(QWidget):
         if isinstance(path_or_key, tuple):
             target_key = path_or_key
         else:
-            for row in self._store._rows:
-                if row.snap.relative_path == path_or_key:
-                    target_key = row.key
-                    break
+            row = self._store.row_by_relative_path(path_or_key)
+            if row:
+                target_key = row.key
         if target_key is None:
             return
         row = self._store.row_by_key(target_key)
@@ -515,7 +584,7 @@ class FileListPanel(QWidget):
     def deselect_all(self):
         if self._store is None:
             return
-        for key in list(self._store._checked):
+        for key in self._store.checked_keys():
             self._store.set_checked(key, False)
         # Adapter 的 checked_changed 信号会自动更新 UI 勾选状态
         self._update_selection_count()
@@ -620,7 +689,7 @@ class FileListPanel(QWidget):
             return
         checked_count = 0
         processable_total = 0
-        for row in self._store._rows:
+        for row in self._store.rows():
             if row.decision and row.decision.processable:
                 processable_total += 1
                 if self._store.is_checked(row.key):

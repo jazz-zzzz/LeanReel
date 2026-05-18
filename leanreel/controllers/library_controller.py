@@ -22,7 +22,7 @@ class LibraryController:
         win,
         notifier,
         on_folder_probe: Callable[[int, str], None] | None = None,
-        on_file_list_refresh: Callable[[list, bool], None] | None = None,
+        on_file_list_refresh: Callable[[list], None] | None = None,
     ):
         self._state = state
         self._services = services
@@ -31,7 +31,7 @@ class LibraryController:
         self._win = win
         self._notifier = notifier
         self._on_folder_probe = on_folder_probe or (lambda folder_id, path: None)
-        self._on_file_list_refresh = on_file_list_refresh or (lambda snapshots, fast: None)
+        self._on_file_list_refresh = on_file_list_refresh or (lambda snapshots: None)
 
     # ── 库信号处理 ──
 
@@ -97,7 +97,7 @@ class LibraryController:
             self._state.strategy_overrides,
             folder_id,
         )
-        self._on_file_list_refresh(self._state.current_snapshots, False)
+        self._on_file_list_refresh(self._state.current_snapshots)
         self._refresh_libraries()
         self._win.set_status("文件夹已移除")
 
