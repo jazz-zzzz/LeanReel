@@ -47,7 +47,7 @@ class ScanController:
     def _start_scan(self, anchor_folder_id: int, total_files: int, token: int) -> "ScanState":
         """创建新的扫描状态。token 为本次扫描的唯一标识。"""
         from leanreel.state.scan_state import ScanState
-        st = ScanState(running=True, total_files=total_files, token=token)
+        st = ScanState(running=True, total_files=total_files, token=token, anchor_folder_id=anchor_folder_id)
         self._state.active_scan_folder_id = anchor_folder_id
         self._state.scan_states[token] = st
         return st
@@ -223,10 +223,10 @@ class ScanController:
         self._win.set_status(f"探测中：0/{total}...")
 
         # 用 token 查找/创建 scan state（跨文件夹共享）
+        first_fid = folder_inputs[0][0] if folder_inputs else 0
         st = self._state.scan_states.get(my_token)
         if st is None:
-            first_fid = folder_inputs[0][0] if folder_inputs else 0
-            st = ScanState(running=True, total_files=total, token=my_token)
+            st = ScanState(running=True, total_files=total, token=my_token, anchor_folder_id=first_fid)
             self._state.scan_states[my_token] = st
             self._state.active_scan_folder_id = first_fid
         else:

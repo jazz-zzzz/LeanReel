@@ -214,15 +214,12 @@ class Application:
             return
         self.app_state.current_snapshots = snapshots
         self.scan_ctrl._populate_file_list(snapshots)
-        # 根据该库的扫描状态恢复 UI（查找属于当前库的 running scan）
-        st = None
-        for s in self.app_state.scan_states.values():
-            if s.running and any(
-                fid in self.app_state.current_folder_paths
-                for fid in (self.app_state.active_scan_folder_id,)
-            ):
-                st = s
-                break
+        # 查找属于当前库的 running scan（anchor_folder_id 在 current_folder_paths 中）
+        st = next(
+            (s for s in self.app_state.scan_states.values()
+             if s.running and s.anchor_folder_id in self.app_state.current_folder_paths),
+            None,
+        )
         if st:
             self.file_panel.refresh_btn.setEnabled(False)
             self.file_panel.set_progress_visible(True)
