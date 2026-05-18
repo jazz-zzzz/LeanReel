@@ -1,10 +1,11 @@
-"""FlatAdapter 测试 (QTableView + FileTableModel)"""
+﻿"""FlatAdapter 测试 (QTableView + FileTableModel)"""
 import pytest
 from PySide6.QtWidgets import QTableView
 from PySide6.QtCore import Qt
 
-from leanreel.data.file_store import FileTableStore, FileRow
-from leanreel.data.models import FileSnapshot, HDRType
+from leanreel.state.file_store import FileTableStore
+from leanreel.domain.models import FileRow
+from leanreel.domain.models import FileSnapshot, HDRType
 from leanreel.gui.file_list import MatchResult, FileDecisionDisplay
 
 

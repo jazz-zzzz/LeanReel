@@ -1,8 +1,7 @@
-"""策略匹配器测试"""
+﻿"""策略匹配器测试"""
 import pytest
-from leanreel.core.strategy import Strategy, FilterRule
-from leanreel.core.matcher import Matcher, estimate_savings, get_skip_reason
-from leanreel.data.models import FileSnapshot, HDRType
+from leanreel.domain.models import Strategy, FilterRule, get_skip_reason, FileSnapshot, HDRType
+from leanreel.services.matcher import Matcher, estimate_savings
 
 @pytest.fixture
 def balanced():
@@ -78,7 +77,7 @@ def test_estimate_savings_bytes(balanced):
 
 def test_estimate_savings_4k_hdr_compresses_more():
     """4K HDR 相对压缩比更高（分辨率红利）"""
-    from leanreel.data.models import HDRType
+    from leanreel.domain.models import HDRType
     snap_4k = FileSnapshot(video_codec="h264", size_bytes=80000000000,
                           video_width=3840, video_height=2160, hdr_type=HDRType.HDR10)
     snap_1080p = FileSnapshot(video_codec="h264", size_bytes=80000000000,

@@ -1,9 +1,9 @@
-"""FFmpeg 命令构建测试"""
+﻿"""FFmpeg 命令构建测试"""
 import pytest
 from pathlib import Path
 from leanreel.executor.ffmpeg import FFmpegBuilder, FFmpegExecutor
-from leanreel.core.strategy import Strategy
-from leanreel.data.models import FileSnapshot, HDRType
+from leanreel.domain.models import Strategy
+from leanreel.domain.models import FileSnapshot, HDRType
 
 
 @pytest.fixture
@@ -31,7 +31,7 @@ def test_build_basic_x265_command(balanced_strategy):
 
 
 def test_build_nvenc_command():
-    from leanreel.core.strategy import Strategy
+    from leanreel.domain.models import Strategy
     data = {
         "name": "NVENC 测试", "is_preset": False,
         "video": {"encoder": "hevc_nvenc", "gpu": True, "nv_preset": "p1", "rc": "vbr", "cq": 23},
@@ -173,7 +173,7 @@ def test_build_uses_uppercase_v_for_video_map(balanced_strategy):
 
 
 def test_build_filters_commentary_audio():
-    from leanreel.data.models import AudioTrack
+    from leanreel.domain.models import AudioTrack
     strategy = Strategy.from_dict({
         "name": "test", "audio": {"mode": "keep_original", "remove_commentary": True,
                                   "preferred_languages": []},
@@ -193,7 +193,7 @@ def test_build_filters_commentary_audio():
 
 
 def test_build_strip_commentary_mode():
-    from leanreel.data.models import AudioTrack
+    from leanreel.domain.models import AudioTrack
     strategy = Strategy.from_dict({
         "name": "test", "audio": {"mode": "strip_commentary", "remove_commentary": False},
         "subtitle": {"mode": "keep_all"},
@@ -210,7 +210,7 @@ def test_build_strip_commentary_mode():
 
 
 def test_build_keep_original_keeps_unknown_language_audio():
-    from leanreel.data.models import AudioTrack
+    from leanreel.domain.models import AudioTrack
 
     strategy = Strategy.from_dict({
         "name": "keep-original",
@@ -237,7 +237,7 @@ def test_build_keep_original_keeps_unknown_language_audio():
 
 
 def test_build_filters_by_preferred_languages():
-    from leanreel.data.models import AudioTrack
+    from leanreel.domain.models import AudioTrack
     strategy = Strategy.from_dict({
         "name": "test", "audio": {"mode": "strip_non_preferred", "preferred_languages": ["chi", "zho", "eng"]},
         "subtitle": {"mode": "keep_all"},
@@ -256,7 +256,7 @@ def test_build_filters_by_preferred_languages():
 
 
 def test_build_filters_subtitles_by_language():
-    from leanreel.data.models import SubtitleTrack
+    from leanreel.domain.models import SubtitleTrack
     strategy = Strategy.from_dict({
         "name": "test", "audio": {"mode": "keep_original"},
         "subtitle": {"mode": "keep_chinese"},
@@ -275,7 +275,7 @@ def test_build_filters_subtitles_by_language():
 
 
 def test_build_keep_chinese_english_subtitles():
-    from leanreel.data.models import SubtitleTrack
+    from leanreel.domain.models import SubtitleTrack
     strategy = Strategy.from_dict({
         "name": "test", "audio": {"mode": "keep_original"},
         "subtitle": {"mode": "keep_chinese_english"},
@@ -294,7 +294,7 @@ def test_build_keep_chinese_english_subtitles():
 
 
 def test_build_remove_all_subtitles():
-    from leanreel.data.models import SubtitleTrack
+    from leanreel.domain.models import SubtitleTrack
     strategy = Strategy.from_dict({
         "name": "test", "audio": {"mode": "keep_original"},
         "subtitle": {"mode": "remove_all"},
@@ -598,7 +598,7 @@ def test_set_ffmpeg_path_overrides_and_get_returns_it():
 
 def test_build_hdr10plus_preserves_dynamic_metadata():
     """HDR10+ snapshot 的 hdr_type=HDR10P — 验证命令包含 -hdr10+ 且包含色彩元数据"""
-    from leanreel.core.strategy import Strategy
+    from leanreel.domain.models import Strategy
 
     strategy = Strategy.from_dict({
         "name": "HDR10+测试", "is_preset": False,
@@ -624,7 +624,7 @@ def test_build_hdr10plus_preserves_dynamic_metadata():
 
 def test_build_hdr10plus_with_copy_encoder():
     """验证 copy 编码器 + HDR10P 不会产生 -hdr10+ 标志（copy 模式不触发 HDR 逻辑）"""
-    from leanreel.core.strategy import Strategy
+    from leanreel.domain.models import Strategy
 
     strategy = Strategy.from_dict({
         "name": "copy模式", "is_preset": False,
@@ -652,7 +652,7 @@ def test_build_hdr10plus_with_copy_encoder():
 
 def test_build_nvenc_with_hdr10_preserves_color_info():
     """NVENC 编码器 + HDR10 snapshot — 验证色彩元数据完整且无 -crf"""
-    from leanreel.core.strategy import Strategy
+    from leanreel.domain.models import Strategy
 
     strategy = Strategy.from_dict({
         "name": "NVENC HDR10", "is_preset": False,
@@ -687,7 +687,7 @@ def test_build_nvenc_with_hdr10_preserves_color_info():
 
 def test_build_nvenc_with_hdr10plus_preserves_color_and_dynamic_metadata():
     """NVENC 编码器 + HDR10+ snapshot — 验证同时有色彩元数据和 -hdr10+"""
-    from leanreel.core.strategy import Strategy
+    from leanreel.domain.models import Strategy
 
     strategy = Strategy.from_dict({
         "name": "NVENC HDR10+", "is_preset": False,
@@ -717,7 +717,7 @@ def test_build_nvenc_with_hdr10plus_preserves_color_and_dynamic_metadata():
 
 def test_build_nvenc_with_sdr_no_hdr_flags():
     """NVENC 编码器 + SDR snapshot — 验证不产生任何 HDR 标志"""
-    from leanreel.core.strategy import Strategy
+    from leanreel.domain.models import Strategy
 
     strategy = Strategy.from_dict({
         "name": "NVENC SDR", "is_preset": False,

@@ -1,4 +1,4 @@
-"""FFmpeg 执行器 — 编码编排，I/O 分离、临时文件管理、Dolby Vision 流程"""
+﻿"""FFmpeg 执行器 — 编码编排，I/O 分离、临时文件管理、Dolby Vision 流程"""
 import hashlib
 import os as _os
 import shutil
@@ -7,8 +7,8 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from leanreel.core.pipeline import build_pipeline
-from leanreel.data.models import TaskStatus
+from leanreel.services.pipeline import build_pipeline
+from leanreel.domain.models import TaskStatus
 from leanreel.executor.dovi import DoviTool
 from leanreel.executor.ffmpeg_builder import (
     FFmpegBuilder,

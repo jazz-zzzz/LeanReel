@@ -1,11 +1,12 @@
-"""扫描器测试"""
+﻿"""扫描器测试"""
 import json
 import threading
 import time
 import pytest
 from pathlib import Path
-from leanreel.data.database import Database
-from leanreel.data.models import (
+from leanreel.infrastructure.database import Database
+from leanreel.infrastructure.repository import SnapshotRepository
+from leanreel.domain.models import (
     AudioTrack,
     Library,
     LibraryFolder,
@@ -17,6 +18,7 @@ from leanreel.data.models import (
 
 def _probe_sync(scanner, folder_id, folder_path):
     """同步包装 probe_stream，便利测试。"""
+    from leanreel.infrastructure.file_discovery import find_video_files
     results = []
     event = threading.Event()
 
@@ -26,7 +28,8 @@ def _probe_sync(scanner, folder_id, folder_path):
     def on_finished():
         event.set()
 
-    scanner.probe_stream(folder_id, folder_path, on_result, on_finished)
+    files = find_video_files(folder_path)
+    scanner.probe_stream(folder_id, folder_path, on_result, on_finished, files=files)
     event.wait(timeout=10)
     return results
 
@@ -113,9 +116,9 @@ def test_scanner_finds_video_files(tmp_path: Path):
     (tmp_path / "subdir").mkdir()
     (tmp_path / "subdir" / "another.mp4").write_text("fake")
 
-    from leanreel.core.scanner import Scanner
+    from leanreel.services.scanner import Scanner
     db = Database(str(tmp_path / "test.db"))
-    scanner = Scanner(db, probe_runner=MockFFprobe())
+    scanner = Scanner(repo=SnapshotRepository(db), probe=MockFFprobe())
     lib_id = db.insert_library(Library(name="Test"))
     folder_id = db.insert_folder(LibraryFolder(library_id=lib_id, path=str(tmp_path)))
     result = _probe_sync(scanner, folder_id, str(tmp_path))
@@ -128,9 +131,9 @@ def test_scanner_finds_video_files(tmp_path: Path):
 def test_scanner_caches_results(tmp_path: Path):
     (tmp_path / "movie.mkv").write_text("fake")
 
-    from leanreel.core.scanner import Scanner
+    from leanreel.services.scanner import Scanner
     db = Database(str(tmp_path / "test.db"))
-    scanner = Scanner(db, probe_runner=MockFFprobe())
+    scanner = Scanner(repo=SnapshotRepository(db), probe=MockFFprobe())
     lib_id = db.insert_library(Library(name="Test"))
     folder_id = db.insert_folder(LibraryFolder(library_id=lib_id, path=str(tmp_path)))
 
@@ -142,7 +145,7 @@ def test_scanner_caches_results(tmp_path: Path):
 def test_scanner_reprobes_cached_snapshot_without_codec(tmp_path: Path):
     (tmp_path / "movie.mkv").write_text("fake")
 
-    from leanreel.core.scanner import Scanner
+    from leanreel.services.scanner import Scanner
     db = Database(str(tmp_path / "test.db"))
     lib_id = db.insert_library(Library(name="Test"))
     folder_id = db.insert_folder(LibraryFolder(library_id=lib_id, path=str(tmp_path)))
@@ -153,7 +156,7 @@ def test_scanner_reprobes_cached_snapshot_without_codec(tmp_path: Path):
         [folder_id, "movie.mkv", "movie.mkv", (tmp_path / "movie.mkv").stat().st_size, ""],
     )
     probe = CountingFFprobe()
-    scanner = Scanner(db, probe_runner=probe)
+    scanner = Scanner(repo=SnapshotRepository(db), probe=probe)
 
     result = _probe_sync(scanner, folder_id, str(tmp_path))
 
@@ -165,11 +168,11 @@ def test_scanner_probes_changed_files_concurrently(tmp_path: Path):
     for i in range(4):
         (tmp_path / f"movie-{i}.mkv").write_text("fake")
 
-    from leanreel.core.scanner import Scanner
+    from leanreel.services.scanner import Scanner
     db = Database(str(tmp_path / "test.db"))
     lib_id = db.insert_library(Library(name="Test"))
     folder_id = db.insert_folder(LibraryFolder(library_id=lib_id, path=str(tmp_path)))
-    scanner = Scanner(db, probe_runner=SlowFFprobe(), max_workers=4)
+    scanner = Scanner(repo=SnapshotRepository(db), probe=SlowFFprobe(), max_workers=4)
 
     started = time.perf_counter()
     result = _probe_sync(scanner, folder_id, str(tmp_path))
@@ -182,10 +185,10 @@ def test_scanner_probes_changed_files_concurrently(tmp_path: Path):
 def test_scanner_persists_tracks_as_json_and_restores_typed_snapshot(tmp_path: Path):
     (tmp_path / "movie.mkv").write_bytes(b"x" * 1024)
 
-    from leanreel.core.scanner import Scanner
+    from leanreel.services.scanner import Scanner
 
     db = Database(str(tmp_path / "test.db"))
-    scanner = Scanner(db, probe_runner=TrackFFprobe())
+    scanner = Scanner(repo=SnapshotRepository(db), probe=TrackFFprobe())
     lib_id = db.insert_library(Library(name="Test"))
     folder_id = db.insert_folder(LibraryFolder(library_id=lib_id, path=str(tmp_path)))
 
@@ -197,7 +200,7 @@ def test_scanner_persists_tracks_as_json_and_restores_typed_snapshot(tmp_path: P
     assert json.loads(rows[0]["audio_tracks"])[0]["codec"] == "truehd"
     assert json.loads(rows[0]["subtitle_tracks"])[0]["is_forced"] is True
 
-    cached = _probe_sync(Scanner(db, probe_runner=FailingFFprobe()), folder_id, str(tmp_path))
+    cached = _probe_sync(Scanner(repo=SnapshotRepository(db), probe=FailingFFprobe()), folder_id, str(tmp_path))
 
     assert len(cached) == 1
     snapshot = cached[0]
@@ -223,7 +226,7 @@ def test_scanner_persists_tracks_as_json_and_restores_typed_snapshot(tmp_path: P
 
 def test_hdr_type_fallback_on_invalid_value(tmp_path: Path):
     """数据库中 hdr_type 字段为无效值时，_row_to_snapshot 应回退到 SDR 而非崩溃。"""
-    from leanreel.core.repository import SnapshotRepository
+    from leanreel.infrastructure.repository import SnapshotRepository
 
     db = Database(str(tmp_path / "test.db"))
     lib_id = db.insert_library(Library(name="Test"))
@@ -249,7 +252,7 @@ def test_hdr_type_fallback_on_invalid_value(tmp_path: Path):
 
 def test_hdr_type_fallback_on_empty_string(tmp_path: Path):
     """数据库中 hdr_type 为空字符串时也应回退到 SDR。"""
-    from leanreel.core.repository import SnapshotRepository
+    from leanreel.infrastructure.repository import SnapshotRepository
 
     db = Database(str(tmp_path / "test.db"))
     lib_id = db.insert_library(Library(name="Test"))
@@ -291,7 +294,7 @@ class BusyThenOkDatabase:
 
 def test_save_retries_on_busy(tmp_path: Path):
     """save() 遇到 SQLITE_BUSY 时应重试，最多 3 次后或成功后返回。"""
-    from leanreel.core.repository import SnapshotRepository
+    from leanreel.infrastructure.repository import SnapshotRepository
 
     real_db = Database(str(tmp_path / "test.db"))
     lib_id = real_db.insert_library(Library(name="Test"))
@@ -325,7 +328,7 @@ def test_save_retries_on_busy(tmp_path: Path):
 
 def test_save_exhausts_retries_and_raises(tmp_path: Path):
     """save() 重试耗尽后应抛出异常。"""
-    from leanreel.core.repository import SnapshotRepository
+    from leanreel.infrastructure.repository import SnapshotRepository
 
     real_db = Database(str(tmp_path / "test.db"))
     lib_id = real_db.insert_library(Library(name="Test"))
@@ -351,7 +354,7 @@ def test_save_exhausts_retries_and_raises(tmp_path: Path):
 
 def test_probe_stream_isolates_folders(tmp_path: Path):
     """probe_stream 区分不同文件夹，各自产生正确结果。"""
-    from leanreel.core.scanner import Scanner
+    from leanreel.services.scanner import Scanner
 
     db = Database(str(tmp_path / "isolated.db"))
     try:
@@ -362,7 +365,7 @@ def test_probe_stream_isolates_folders(tmp_path: Path):
         (first / "a.mkv").write_bytes(b"first")
         (second / "b.mkv").write_bytes(b"second")
 
-        scanner = Scanner(db, probe_runner=MockFFprobe(), max_workers=1)
+        scanner = Scanner(repo=SnapshotRepository(db), probe=MockFFprobe(), max_workers=1)
         results1 = _probe_sync(scanner, 1, str(first))
         results2 = _probe_sync(scanner, 2, str(second))
 
@@ -376,9 +379,166 @@ def test_probe_stream_isolates_folders(tmp_path: Path):
         db.close()
 
 
+# ── load_cached 完整性过滤 ──
+
+
+def test_load_cached_filters_out_incomplete_probe(tmp_path: Path):
+    """load_cached 应过滤 probe_ok=True 但 codec/width/height 为空的旧版缓存。"""
+    from leanreel.services.scanner import Scanner
+
+    db = Database(str(tmp_path / "test.db"))
+    lib_id = db.insert_library(Library(name="Test"))
+    folder_id = db.insert_folder(LibraryFolder(library_id=lib_id, path=str(tmp_path)))
+
+    # 插入不完整缓存：probe_ok=1 但 codec 为空（老版本产生的脏数据）
+    db.execute(
+        """INSERT INTO file_snapshot
+           (library_folder_id, relative_path, file_name, size_bytes,
+            video_codec, video_width, video_height, probe_ok)
+           VALUES (?,?,?,?,?,?,?,?)""",
+        [folder_id, "incomplete.mkv", "incomplete.mkv", 1024, "", 0, 0, 1],
+    )
+    # 插入完整缓存
+    from leanreel.infrastructure.repository import SnapshotRepository
+    repo = SnapshotRepository(db)
+    from leanreel.domain.models import FileSnapshot
+    snap = FileSnapshot(
+        library_folder_id=folder_id,
+        relative_path="complete.mkv",
+        file_name="complete.mkv",
+        size_bytes=2048,
+        video_codec="hevc",
+        video_width=1920,
+        video_height=1080,
+        probe_ok=True,
+    )
+    repo.save(snap)
+
+    scanner = Scanner(repo=SnapshotRepository(db), probe=MockFFprobe())
+    results = scanner.load_cached(folder_id, str(tmp_path))
+
+    assert len(results) == 1
+    assert results[0].relative_path == "complete.mkv"
+
+
+def test_load_cached_filters_out_probe_failed(tmp_path: Path):
+    """load_cached 应过滤 probe_ok=False 的条目（探测失败不应出现在快速加载中）。"""
+    from leanreel.services.scanner import Scanner
+
+    db = Database(str(tmp_path / "test.db"))
+    lib_id = db.insert_library(Library(name="Test"))
+    folder_id = db.insert_folder(LibraryFolder(library_id=lib_id, path=str(tmp_path)))
+
+    db.execute(
+        """INSERT INTO file_snapshot
+           (library_folder_id, relative_path, file_name, size_bytes,
+            video_codec, video_width, video_height, probe_ok, probe_error)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        [folder_id, "failed.mkv", "failed.mkv", 1024, "", 0, 0, 0, "timeout"],
+    )
+
+    scanner = Scanner(repo=SnapshotRepository(db), probe=MockFFprobe())
+    results = scanner.load_cached(folder_id, str(tmp_path))
+
+    assert len(results) == 0
+
+
+def test_load_cached_returns_all_complete(tmp_path: Path):
+    """load_cached 应返回所有完整缓存的条目。"""
+    from leanreel.services.scanner import Scanner
+    from leanreel.infrastructure.repository import SnapshotRepository
+
+    db = Database(str(tmp_path / "test.db"))
+    lib_id = db.insert_library(Library(name="Test"))
+    folder_id = db.insert_folder(LibraryFolder(library_id=lib_id, path=str(tmp_path)))
+
+    repo = SnapshotRepository(db)
+    for i in range(5):
+        snap = FileSnapshot(
+            library_folder_id=folder_id,
+            relative_path=f"movie_{i}.mkv",
+            file_name=f"movie_{i}.mkv",
+            size_bytes=1024 * (i + 1),
+            video_codec="hevc",
+            video_width=3840,
+            video_height=2160,
+            probe_ok=True,
+        )
+        repo.save(snap)
+
+    scanner = Scanner(repo=SnapshotRepository(db), probe=MockFFprobe())
+    results = scanner.load_cached(folder_id, str(tmp_path))
+
+    assert len(results) == 5
+
+
+# ── 孤儿清理 ──
+
+
+def test_probe_stream_cleans_orphan_cache(tmp_path: Path):
+    """probe_stream 完成扫描后应删除已不在磁盘上的孤儿缓存。"""
+    from leanreel.services.scanner import Scanner
+    from leanreel.infrastructure.repository import SnapshotRepository
+
+    db = Database(str(tmp_path / "test.db"))
+    lib_id = db.insert_library(Library(name="Test"))
+    folder_id = db.insert_folder(LibraryFolder(library_id=lib_id, path=str(tmp_path)))
+
+    # 预先插入一条孤儿缓存（文件不在磁盘上）
+    repo = SnapshotRepository(db)
+    snap = FileSnapshot(
+        library_folder_id=folder_id,
+        relative_path="gone.mkv",
+        file_name="gone.mkv",
+        size_bytes=9999,
+        video_codec="hevc",
+        video_width=1920,
+        video_height=1080,
+        probe_ok=True,
+    )
+    repo.save(snap)
+
+    # 磁盘上只有一个实际文件
+    (tmp_path / "real.mkv").write_text("fake")
+
+    scanner = Scanner(repo=SnapshotRepository(db), probe=MockFFprobe())
+    _probe_sync(scanner, folder_id, str(tmp_path))
+
+    # 孤儿应被清理
+    remaining = repo.load_all(folder_id)
+    rel_paths = {s.relative_path for s in remaining}
+    assert "gone.mkv" not in rel_paths
+    assert "real.mkv" in rel_paths
+
+
+def test_probe_stream_keeps_cache_when_no_orphans(tmp_path: Path):
+    """磁盘文件与缓存一致时，不应误删任何记录。"""
+    from leanreel.services.scanner import Scanner
+    from leanreel.infrastructure.repository import SnapshotRepository
+
+    db = Database(str(tmp_path / "test.db"))
+    lib_id = db.insert_library(Library(name="Test"))
+    folder_id = db.insert_folder(LibraryFolder(library_id=lib_id, path=str(tmp_path)))
+
+    (tmp_path / "a.mkv").write_text("first")
+    (tmp_path / "b.mkv").write_text("second")
+
+    # 先扫一次建立缓存
+    scanner = Scanner(repo=SnapshotRepository(db), probe=MockFFprobe())
+    _probe_sync(scanner, folder_id, str(tmp_path))
+
+    # 再扫一次，缓存不应被删除
+    scanner2 = Scanner(repo=SnapshotRepository(db), probe=FailingFFprobe())
+    _probe_sync(scanner2, folder_id, str(tmp_path))
+
+    repo = SnapshotRepository(db)
+    remaining = repo.load_all(folder_id)
+    assert len(remaining) == 2
+
+
 def test_save_does_not_retry_non_busy_errors(tmp_path: Path):
     """save() 不应重试非 SQLITE_BUSY 错误。"""
-    from leanreel.core.repository import SnapshotRepository
+    from leanreel.infrastructure.repository import SnapshotRepository
 
     class NonBusyErrorDatabase:
         def execute(self, sql, params=None):

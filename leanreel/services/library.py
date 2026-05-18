@@ -1,12 +1,12 @@
-"""库管理器 — 库和文件夹的 CRUD 操作"""
+﻿"""库管理器 — 库和文件夹的 CRUD 操作，依赖 LibraryStore 接口"""
 import os as _os
 
-from leanreel.data.database import Database
-from leanreel.data.models import Library, LibraryFolder
+from leanreel.domain.interfaces import LibraryStore
+from leanreel.domain.models import Library, LibraryFolder
 
 
 class LibraryManager:
-    def __init__(self, db: Database):
+    def __init__(self, db: LibraryStore):
         self.db = db
 
     def create_library(self, name: str) -> Library:

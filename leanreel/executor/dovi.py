@@ -1,19 +1,17 @@
-"""dovi_tool 封装 — Dolby Vision RPU 提取与注入"""
+﻿"""dovi_tool 封装 — Dolby Vision RPU 提取与注入"""
 import subprocess
 from pathlib import Path
 from typing import Optional
 
-from leanreel.data.models import FileSnapshot, HDRType
-from leanreel.core.strategy import Strategy
+from leanreel.domain.models import FileSnapshot, HDRType
+from leanreel.domain.models import Strategy
 from leanreel.executor.resources import bundled_resource_path
-
-_DOVI_TOOL_PATH = None
+from leanreel.executor._config import _config
 
 
 def get_dovi_tool_path() -> str:
-    global _DOVI_TOOL_PATH
-    if _DOVI_TOOL_PATH:
-        return _DOVI_TOOL_PATH
+    if _config.dovi_tool_path:
+        return _config.dovi_tool_path
     builtin = bundled_resource_path("dovi_tool", "dovi_tool.exe")
     if builtin.exists():
         return str(builtin)
@@ -21,8 +19,7 @@ def get_dovi_tool_path() -> str:
 
 
 def set_dovi_tool_path(path: str):
-    global _DOVI_TOOL_PATH
-    _DOVI_TOOL_PATH = path
+    _config.dovi_tool_path = path
 
 
 def needs_dovi_processing(snap: FileSnapshot, strategy: Strategy) -> bool:

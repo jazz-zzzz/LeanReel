@@ -1,4 +1,4 @@
-"""Worker 管理器 — 并行编码任务调度"""
+﻿"""Worker 管理器 — 并行编码任务调度"""
 from __future__ import annotations
 from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -8,7 +8,7 @@ from leanreel.executor.ffmpeg import CancelledError
 from typing import Optional, Callable
 import time
 
-from leanreel.data.models import TaskStatus
+from leanreel.domain.models import TaskStatus
 
 
 @dataclass

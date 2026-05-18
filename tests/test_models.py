@@ -1,6 +1,6 @@
-"""数据模型单元测试"""
+﻿"""数据模型单元测试"""
 import pytest
-from leanreel.data.models import (
+from leanreel.domain.models import (
     Library, LibraryFolder, FileSnapshot,
     CompressionRecord, AudioTrack, SubtitleTrack, HDRType, TaskStatus
 )

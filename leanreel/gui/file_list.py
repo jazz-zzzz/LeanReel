@@ -1,4 +1,4 @@
-"""文件列表面板 — 文件表格 + 策略匹配结果"""
+﻿"""文件列表面板 — 文件表格 + 策略匹配结果"""
 from __future__ import annotations
 
 import re
@@ -7,7 +7,7 @@ from typing import Any
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QTableView,
     QHeaderView, QLabel, QHBoxLayout, QComboBox, QStackedWidget,
-    QTreeWidget, QTreeWidgetItem, QPushButton
+    QTreeWidget, QTreeWidgetItem, QPushButton, QProgressBar
 )
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QColor
@@ -15,16 +15,16 @@ from PySide6.QtGui import QColor
 _HEADERS = ["", "文件名", "体积", "编码信息", "HDR", "处理策略", "预计结果"]
 _TREE_HEADERS = ["文件名", "体积", "编码信息", "HDR", "处理策略", "预计结果"]
 
-# ── 列配色 ──
-_COLOR_CODEC_OK = QColor("#8db87c")
-_COLOR_CODEC_MISSING = QColor("#6b6560")
-_COLOR_PROBE_FAILED = QColor("#c8675e")
-_COLOR_HDR_DV = QColor("#6ba8d6")
-_COLOR_HDR_HDR10 = QColor("#d4a853")
-_COLOR_HDR_SDR = QColor("#6b6560")
+from leanreel.gui.theme import (
+    _COLOR_CODEC_OK,
+    _COLOR_CODEC_MISSING,
+    _COLOR_PROBE_FAILED,
+    _COLOR_HDR_DV,
+    _COLOR_HDR_HDR10,
+    _COLOR_HDR_SDR,
+)
 
-
-from leanreel.data.file_store import MatchResult, FileDecisionDisplay  # 数据类移入 data 层，此处重导出保持兼容
+from leanreel.domain.models import MatchResult, FileDecisionDisplay, FileRow
 
 
 class SortableTableWidgetItem(QTableWidgetItem):
@@ -56,7 +56,7 @@ class _SortableTreeItem(QTreeWidgetItem):
 
 
 from leanreel.gui.utils import _format_bytes
-from leanreel.core.matcher import get_skip_reason
+from leanreel.domain.models import get_skip_reason
 
 
 def _scale_bytes(size_bytes: int | float) -> tuple[float, str, int]:
@@ -137,6 +137,15 @@ class FileListPanel(QWidget):
         """探测完成后启用表格排序（探测期间禁用避免 setItem 触发频繁重排）。"""
         self.table.setSortingEnabled(True)
 
+    def set_progress_visible(self, visible: bool):
+        """显示/隐藏进度条。"""
+        self.progress_bar.setVisible(visible)
+
+    def set_progress(self, done: int, total: int):
+        """更新进度条（determinate 模式）。"""
+        self.progress_bar.setMaximum(total)
+        self.progress_bar.setValue(done)
+
     def get_checked_file_keys(self) -> list[tuple[int, str]]:
         """返回所有勾中文件的 (library_folder_id, relative_path) key 列表（已排序）。"""
         if self._store:
@@ -199,7 +208,16 @@ class FileListPanel(QWidget):
         self.refresh_btn = QPushButton("重建缓存")
         self.refresh_btn.setToolTip("重新扫描所有文件夹并重建编码信息缓存")
         self.refresh_btn.clicked.connect(self.refresh_requested.emit)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMinimum(0)
+        self.progress_bar.setMaximum(100)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFormat("探测中... %v/%m")
+        self.progress_bar.setFixedWidth(200)
+        self.progress_bar.setMaximumHeight(22)
+        self.progress_bar.hide()
         info_layout.addWidget(self.refresh_btn)
+        info_layout.addWidget(self.progress_bar)
         self.view_combo = QComboBox()
         self.view_combo.addItem("平铺", "flat")
         self.view_combo.addItem("目录树", "tree")
@@ -267,7 +285,7 @@ class FileListPanel(QWidget):
 
     def populate(self, snapshots: list, matched_strategies: dict[str, MatchResult | None], strategies: list | None = None, fast: bool = False):
         """填充文件表格行（委托给 Store + Adapter）。"""
-        from leanreel.data.file_store import FileTableStore, FileRow
+        from leanreel.state.file_store import FileTableStore
 
         self.set_strategy_lookup(strategies)
 
@@ -388,6 +406,8 @@ class FileListPanel(QWidget):
             self._show_tree()
             self.table.hide()
             self.tree.show()
+            if self._tree_adapter:
+                self._tree_adapter.ensure_current()
         else:
             self._show_table()
             self.tree.hide()

@@ -1,18 +1,17 @@
-"""FFmpeg 命令构建 — 纯命令生成，不涉及 I/O"""
+﻿"""FFmpeg 命令构建 — 纯命令生成，不涉及 I/O"""
 import subprocess
 import threading
 
-from leanreel.data.models import FileSnapshot, HDRType
-from leanreel.core.strategy import Strategy
+from leanreel.domain.models import FileSnapshot, HDRType
+from leanreel.domain.models import Strategy
 from leanreel.executor.resources import bundled_resource_path
-
-_FFMPEG_PATH = None
+from leanreel.executor._config import _config
 
 
 def get_ffmpeg_path() -> str:
-    global _FFMPEG_PATH
-    if _FFMPEG_PATH:
-        return _FFMPEG_PATH
+    """获取 ffmpeg 路径，优先使用内置版本"""
+    if _config.ffmpeg_path:
+        return _config.ffmpeg_path
     builtin = bundled_resource_path("ffmpeg", "ffmpeg.exe")
     if builtin.exists():
         return str(builtin)
@@ -20,8 +19,7 @@ def get_ffmpeg_path() -> str:
 
 
 def set_ffmpeg_path(path: str):
-    global _FFMPEG_PATH
-    _FFMPEG_PATH = path
+    _config.ffmpeg_path = path
 
 
 class FFmpegBuilder:

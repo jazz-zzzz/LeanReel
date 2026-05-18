@@ -1,4 +1,4 @@
-"""FFprobe 封装 — 提取视频文件元数据"""
+﻿"""FFprobe 封装 — 提取视频文件元数据"""
 import json
 import math
 import subprocess
@@ -6,18 +6,15 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from leanreel.data.models import FileSnapshot, AudioTrack, SubtitleTrack, HDRType
+from leanreel.domain.models import FileSnapshot, AudioTrack, SubtitleTrack, HDRType
 from leanreel.executor.resources import bundled_resource_path
+from leanreel.executor._config import _config
 
-# FFprobe 二进制路径（打包时替换为相对路径）
-_FFPROBE_PATH = None
-
-
+# 保持向后兼容的模块级 API（委托给 _config 对象，消除 module-level 可变全局状态）
 def get_ffprobe_path() -> str:
     """获取 ffprobe 路径，优先使用内置版本"""
-    global _FFPROBE_PATH
-    if _FFPROBE_PATH:
-        return _FFPROBE_PATH
+    if _config.ffprobe_path:
+        return _config.ffprobe_path
     # 开发环境：从资源目录找
     builtin = bundled_resource_path("ffmpeg", "ffprobe.exe")
     if builtin.exists():
@@ -26,8 +23,7 @@ def get_ffprobe_path() -> str:
 
 
 def set_ffprobe_path(path: str):
-    global _FFPROBE_PATH
-    _FFPROBE_PATH = path
+    _config.ffprobe_path = path
 
 
 def detect_hdr_type_from_ffprobe(video_stream: dict) -> HDRType:

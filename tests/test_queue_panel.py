@@ -1,9 +1,9 @@
-"""QueuePanel 测试 — 覆盖 add_task_row、update_task_row、clear_tasks、update_progress、按钮信号"""
+﻿"""QueuePanel 测试 — 覆盖 add_task_row、update_task_row、clear_tasks、update_progress、按钮信号"""
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QPushButton
 
 from leanreel.executor.worker import EncodeTask
-from leanreel.data.models import TaskStatus
+from leanreel.domain.models import TaskStatus
 from leanreel.gui.queue_panel import QueuePanel, _STATUS_ICONS
 
 

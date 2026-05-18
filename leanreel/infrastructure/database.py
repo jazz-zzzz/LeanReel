@@ -4,10 +4,11 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from leanreel.data.models import (
+from leanreel.domain.models import (
     Library, LibraryFolder, FileSnapshot,
     CompressionRecord, AudioTrack, SubtitleTrack, TaskStatus
 )
+from leanreel.domain.interfaces import LibraryStore
 
 
 class ConnectionPool:
@@ -46,7 +47,7 @@ class ConnectionPool:
             self._local.conn = None
 
 
-class Database:
+class Database(LibraryStore):
     def __init__(self, db_path: str = ":memory:"):
         self._pool = ConnectionPool(db_path)
         conn = self._pool.get()  # 只在初始化线程用一次

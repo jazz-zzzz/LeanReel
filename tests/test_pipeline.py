@@ -1,6 +1,6 @@
-"""管线模型测试"""
+﻿"""管线模型测试"""
 import pytest
-from leanreel.core.pipeline import (
+from leanreel.services.pipeline import (
     StageSlot, StageTask, PipelinePlan, ProgressType, SlotCategory, FailurePolicy,
     SLOT_PREPARE, SLOT_COPY_IN, SLOT_EXTRACT_RPU, SLOT_TRANSCODE, SLOT_INJECT_RPU, SLOT_MOVE_OUT,
 )

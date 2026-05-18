@@ -1,4 +1,4 @@
-"""EncodingController 单元测试 — 全面覆盖初始化、启动、暂停/继续、取消、进度更新、编码完成"""
+﻿"""EncodingController 单元测试 — 全面覆盖初始化、启动、暂停/继续、取消、进度更新、编码完成"""
 from __future__ import annotations
 
 import threading
@@ -6,10 +6,10 @@ from unittest.mock import MagicMock, patch, ANY, call
 
 import pytest
 
-from leanreel.main import EncodingController, build_encode_tasks
+from leanreel.controllers.encoding_controller import EncodingController, build_encode_tasks
 from leanreel.executor.worker import EncodeTask
-from leanreel.data.models import TaskStatus, FileSnapshot
-from leanreel.core.strategy import Strategy
+from leanreel.domain.models import TaskStatus, FileSnapshot
+from leanreel.domain.models import Strategy
 
 
 # ──────────────────────────────────────────
@@ -173,9 +173,9 @@ class TestEncodingControllerInit:
 class TestEncodingControllerStart:
     """start() 方法测试 — 编码入口"""
 
-    @patch('leanreel.main.threading.Thread')
-    @patch('leanreel.main.WorkerManager')
-    @patch('leanreel.main.FFmpegExecutor')
+    @patch('leanreel.controllers.encoding_controller.threading.Thread')
+    @patch('leanreel.controllers.encoding_controller.WorkerManager')
+    @patch('leanreel.controllers.encoding_controller.FFmpegExecutor')
     def test_start_builds_tasks_and_returns_true(
         self, mock_ffmpeg, mock_worker_mgr, mock_thread,
         controller, mock_strategy_panel, mock_win, mock_queue_panel,
@@ -207,9 +207,9 @@ class TestEncodingControllerStart:
         # 验证 encoding_in_progress 为 True
         assert controller.encoding_in_progress is True
 
-    @patch('leanreel.main.threading.Thread')
-    @patch('leanreel.main.WorkerManager')
-    @patch('leanreel.main.FFmpegExecutor')
+    @patch('leanreel.controllers.encoding_controller.threading.Thread')
+    @patch('leanreel.controllers.encoding_controller.WorkerManager')
+    @patch('leanreel.controllers.encoding_controller.FFmpegExecutor')
     def test_start_with_strategy_overrides_builds_correct_tasks(
         self, mock_ffmpeg, mock_worker_mgr, mock_thread,
         controller, mock_strategy_panel, mock_win, mock_queue_panel,
@@ -281,9 +281,9 @@ class TestEncodingControllerStart:
         assert result is False
         mock_win.set_status.assert_called_once_with("没有可压缩文件")
 
-    @patch('leanreel.main.threading.Thread')
-    @patch('leanreel.main.WorkerManager')
-    @patch('leanreel.main.FFmpegExecutor')
+    @patch('leanreel.controllers.encoding_controller.threading.Thread')
+    @patch('leanreel.controllers.encoding_controller.WorkerManager')
+    @patch('leanreel.controllers.encoding_controller.FFmpegExecutor')
     def test_start_sets_encoding_in_progress_before_work(
         self, mock_ffmpeg, mock_worker_mgr, mock_thread,
         controller, sample_snapshots, sample_folder_paths,
@@ -292,9 +292,9 @@ class TestEncodingControllerStart:
         controller.start(sample_snapshots, sample_folder_paths, None)
         assert controller.encoding_in_progress is True
 
-    @patch('leanreel.main.threading.Thread')
-    @patch('leanreel.main.WorkerManager')
-    @patch('leanreel.main.FFmpegExecutor')
+    @patch('leanreel.controllers.encoding_controller.threading.Thread')
+    @patch('leanreel.controllers.encoding_controller.WorkerManager')
+    @patch('leanreel.controllers.encoding_controller.FFmpegExecutor')
     def test_start_active_manager_is_set(
         self, mock_ffmpeg, mock_worker_mgr, mock_thread,
         controller, sample_snapshots, sample_folder_paths,
@@ -303,9 +303,9 @@ class TestEncodingControllerStart:
         controller.start(sample_snapshots, sample_folder_paths, None)
         assert controller.active_manager is mock_worker_mgr.return_value
 
-    @patch('leanreel.main.threading.Thread')
-    @patch('leanreel.main.WorkerManager')
-    @patch('leanreel.main.FFmpegExecutor')
+    @patch('leanreel.controllers.encoding_controller.threading.Thread')
+    @patch('leanreel.controllers.encoding_controller.WorkerManager')
+    @patch('leanreel.controllers.encoding_controller.FFmpegExecutor')
     def test_start_progress_callback_emits_task_updated(
         self, mock_ffmpeg, mock_worker_mgr, mock_thread,
         controller, mock_notifier, sample_snapshots, sample_folder_paths,
@@ -329,9 +329,9 @@ class TestEncodingControllerStart:
         # 验证 emit 被调用并传入了正确的 task
         mock_notifier.task_updated.emit.assert_called_once_with(fake_task)
 
-    @patch('leanreel.main.threading.Thread')
-    @patch('leanreel.main.WorkerManager')
-    @patch('leanreel.main.FFmpegExecutor')
+    @patch('leanreel.controllers.encoding_controller.threading.Thread')
+    @patch('leanreel.controllers.encoding_controller.WorkerManager')
+    @patch('leanreel.controllers.encoding_controller.FFmpegExecutor')
     def test_start_handles_exception_gracefully(
         self, mock_ffmpeg, mock_worker_mgr, mock_thread,
         controller, mock_win, sample_snapshots, sample_folder_paths,
@@ -345,9 +345,9 @@ class TestEncodingControllerStart:
         assert controller.encoding_in_progress is False
         mock_win.set_status.assert_called_with("错误：磁盘空间不足")
 
-    @patch('leanreel.main.threading.Thread')
-    @patch('leanreel.main.WorkerManager')
-    @patch('leanreel.main.FFmpegExecutor')
+    @patch('leanreel.controllers.encoding_controller.threading.Thread')
+    @patch('leanreel.controllers.encoding_controller.WorkerManager')
+    @patch('leanreel.controllers.encoding_controller.FFmpegExecutor')
     def test_start_prefers_preset_strategy_over_current(
         self, mock_ffmpeg, mock_worker_mgr, mock_thread,
         controller, mock_strategy_panel, mock_queue_panel,
@@ -678,9 +678,9 @@ class TestEncodingControllerOnEncodingDone:
 class TestEncodingControllerIntegrationScenarios:
     """跨方法联动场景"""
 
-    @patch('leanreel.main.threading.Thread')
-    @patch('leanreel.main.WorkerManager')
-    @patch('leanreel.main.FFmpegExecutor')
+    @patch('leanreel.controllers.encoding_controller.threading.Thread')
+    @patch('leanreel.controllers.encoding_controller.WorkerManager')
+    @patch('leanreel.controllers.encoding_controller.FFmpegExecutor')
     def test_start_then_on_encoding_done_sequence(
         self, mock_ffmpeg, mock_worker_mgr, mock_thread,
         controller, mock_win, sample_snapshots, sample_folder_paths,

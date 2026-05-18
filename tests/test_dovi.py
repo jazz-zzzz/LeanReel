@@ -1,10 +1,10 @@
-"""dovi_tool 封装测试"""
+﻿"""dovi_tool 封装测试"""
 import pytest
 from pathlib import Path
 import tempfile
 from leanreel.executor.dovi import DoviTool, needs_dovi_processing
-from leanreel.data.models import FileSnapshot, HDRType
-from leanreel.core.strategy import Strategy
+from leanreel.domain.models import FileSnapshot, HDRType
+from leanreel.domain.models import Strategy
 
 @pytest.fixture
 def strategy_dv_reinject():

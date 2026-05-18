@@ -1,4 +1,4 @@
-"""主窗口测试"""
+﻿"""主窗口测试"""
 import pytest
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
@@ -102,8 +102,8 @@ def test_about_text_avoids_absolute_lossless_claim(monkeypatch):
 
 
 def test_file_list_displays_codec_strategy_and_estimated_savings():
-    from leanreel.core.strategy import Strategy
-    from leanreel.data.models import FileSnapshot, HDRType
+    from leanreel.domain.models import Strategy
+    from leanreel.domain.models import FileSnapshot, HDRType
     from leanreel.gui.file_list import FileListPanel, MatchResult
 
     app = get_app()
@@ -128,7 +128,7 @@ def test_file_list_displays_codec_strategy_and_estimated_savings():
 
 
 def test_file_list_shows_unknown_when_codec_missing():
-    from leanreel.data.models import FileSnapshot
+    from leanreel.domain.models import FileSnapshot
     from leanreel.gui.file_list import FileListPanel
 
     app = get_app()
@@ -151,7 +151,7 @@ def test_file_list_columns_are_user_resizable():
     from PySide6.QtWidgets import QHeaderView
     from leanreel.gui.file_list import FileListPanel
 
-    from leanreel.data.models import FileSnapshot as _FS
+    from leanreel.domain.models import FileSnapshot as _FS
     app = get_app()
     panel = FileListPanel()
     panel.populate([_FS(library_folder_id=7, relative_path="a.mkv", file_name="a.mkv", size_bytes=1024, video_codec="h264")], {"a.mkv": None})
@@ -164,8 +164,8 @@ def test_file_list_columns_are_user_resizable():
 
 
 def test_strategy_combo_has_enough_width_to_avoid_text_overlap():
-    from leanreel.core.strategy import Strategy
-    from leanreel.data.models import FileSnapshot
+    from leanreel.domain.models import Strategy
+    from leanreel.domain.models import FileSnapshot
     from leanreel.gui.file_list import FileListPanel, MatchResult
 
     app = get_app()
@@ -182,7 +182,7 @@ def test_strategy_combo_has_enough_width_to_avoid_text_overlap():
 
 
 def test_file_list_can_switch_between_flat_and_tree_modes():
-    from leanreel.data.models import FileSnapshot
+    from leanreel.domain.models import FileSnapshot
     from leanreel.gui.file_list import FileListPanel
 
     app = get_app()
@@ -211,7 +211,7 @@ def test_file_list_can_switch_between_flat_and_tree_modes():
 
 
 def test_file_list_tree_view_columns_are_aligned_with_headers():
-    from leanreel.data.models import FileSnapshot
+    from leanreel.domain.models import FileSnapshot
     from leanreel.gui.file_list import FileListPanel, MatchResult
 
     app = get_app()
@@ -244,7 +244,7 @@ def test_file_list_tree_view_columns_are_aligned_with_headers():
 
 
 def test_file_list_sorts_size_and_estimated_savings_numerically():
-    from leanreel.data.models import FileSnapshot
+    from leanreel.domain.models import FileSnapshot
     from leanreel.gui.file_list import FileListPanel, MatchResult
 
     app = get_app()
@@ -270,7 +270,7 @@ def test_file_list_sorts_size_and_estimated_savings_numerically():
 
 
 def test_file_list_updates_correct_row_after_sorting():
-    from leanreel.data.models import FileSnapshot
+    from leanreel.domain.models import FileSnapshot
     from leanreel.gui.file_list import FileListPanel, MatchResult
 
     app = get_app()
@@ -315,8 +315,8 @@ def test_library_panel_delete_and_remove_actions_emit_signals(monkeypatch):
 
 
 def test_file_list_allows_per_row_strategy_override_and_updates_savings():
-    from leanreel.core.strategy import Strategy
-    from leanreel.data.models import FileSnapshot
+    from leanreel.domain.models import Strategy
+    from leanreel.domain.models import FileSnapshot
     from leanreel.gui.file_list import FileListPanel, MatchResult
 
     app = get_app()
@@ -347,8 +347,8 @@ def test_file_list_allows_per_row_strategy_override_and_updates_savings():
 
 
 def test_file_list_custom_strategy_option_emits_request_signal():
-    from leanreel.core.strategy import Strategy
-    from leanreel.data.models import FileSnapshot
+    from leanreel.domain.models import Strategy
+    from leanreel.domain.models import FileSnapshot
     from leanreel.gui.file_list import FileListPanel, MatchResult
 
     app = get_app()
@@ -374,7 +374,7 @@ def test_file_list_custom_strategy_option_emits_request_signal():
 
 
 def test_file_list_does_not_select_skipped_sources_with_select_all():
-    from leanreel.data.models import FileSnapshot, HDRType
+    from leanreel.domain.models import FileSnapshot, HDRType
     from leanreel.gui.file_list import FileListPanel, MatchResult
 
     app = get_app()
@@ -401,7 +401,7 @@ def test_file_list_does_not_select_skipped_sources_with_select_all():
 
 
 def test_file_list_checked_state_survives_flat_to_tree_switch():
-    from leanreel.data.models import FileSnapshot
+    from leanreel.domain.models import FileSnapshot
     from leanreel.gui.file_list import FileListPanel, MatchResult
 
     app = get_app()
@@ -420,7 +420,7 @@ def test_file_list_checked_state_survives_flat_to_tree_switch():
 
 
 def test_file_list_checked_state_survives_tree_to_flat_switch():
-    from leanreel.data.models import FileSnapshot
+    from leanreel.domain.models import FileSnapshot
     from leanreel.gui.file_list import FileListPanel, MatchResult
 
     app = get_app()
@@ -440,7 +440,7 @@ def test_file_list_checked_state_survives_tree_to_flat_switch():
 
 
 def test_file_list_tree_checked_filter_hides_unchecked_files_and_empty_folders():
-    from leanreel.data.models import FileSnapshot
+    from leanreel.domain.models import FileSnapshot
     from leanreel.gui.file_list import FileListPanel, MatchResult
 
     app = get_app()
@@ -462,7 +462,7 @@ def test_file_list_tree_checked_filter_hides_unchecked_files_and_empty_folders()
 
 
 def test_file_list_distinguishes_duplicate_relative_paths_by_folder_id():
-    from leanreel.data.models import FileSnapshot
+    from leanreel.domain.models import FileSnapshot
     from leanreel.gui.file_list import FileListPanel, MatchResult
 
     app = get_app()
@@ -482,7 +482,7 @@ def test_file_list_distinguishes_duplicate_relative_paths_by_folder_id():
 
 
 def test_file_list_protected_sources_show_skip_reason_and_not_processing():
-    from leanreel.data.models import FileSnapshot, HDRType
+    from leanreel.domain.models import FileSnapshot, HDRType
     from leanreel.gui.file_list import FileListPanel, MatchResult
 
     app = get_app()
@@ -521,7 +521,7 @@ def test_file_list_protected_sources_show_skip_reason_and_not_processing():
 
 
 def test_file_list_unmatched_non_protected_source_still_shows_unmatched():
-    from leanreel.data.models import FileSnapshot, HDRType
+    from leanreel.domain.models import FileSnapshot, HDRType
     from leanreel.gui.file_list import FileListPanel
 
     app = get_app()
@@ -542,7 +542,7 @@ def test_file_list_unmatched_non_protected_source_still_shows_unmatched():
 
 
 def test_file_list_filter_shows_only_protected_rows():
-    from leanreel.data.models import FileSnapshot, HDRType
+    from leanreel.domain.models import FileSnapshot, HDRType
     from leanreel.gui.file_list import FileListPanel, MatchResult
 
     app = get_app()
@@ -569,7 +569,7 @@ def test_file_list_filter_shows_only_protected_rows():
 
 
 def test_file_list_selection_count_uses_processable_total():
-    from leanreel.data.models import FileSnapshot, HDRType
+    from leanreel.domain.models import FileSnapshot, HDRType
     from leanreel.gui.file_list import FileListPanel, MatchResult
 
     app = get_app()
@@ -593,8 +593,8 @@ def test_file_list_selection_count_uses_processable_total():
 
 
 def test_file_list_can_update_row_with_custom_strategy():
-    from leanreel.core.strategy import Strategy
-    from leanreel.data.models import FileSnapshot
+    from leanreel.domain.models import Strategy
+    from leanreel.domain.models import FileSnapshot
     from leanreel.gui.file_list import FileListPanel
 
     app = get_app()

@@ -110,10 +110,37 @@ class FileTableModel(QAbstractTableModel):
         self.layoutAboutToBeChanged.emit()
         self._rebuild_visible()
         self.layoutChanged.emit()
+        # rebuild 后延迟同步复选框列（QTimer 断环：_on_flat_data_changed →
+        # set_checked → checked_changed 仅 state 实际变更时 emit，故无循环）
+        if self.rowCount() > 0:
+            from PySide6.QtCore import QTimer
+            def _sync(m):
+                try:
+                    if m.rowCount() > 0:
+                        m.dataChanged.emit(
+                            m.index(0, _COL_CHECK),
+                            m.index(m.rowCount() - 1, _COL_CHECK),
+                            [Qt.CheckStateRole],
+                        )
+                except RuntimeError:
+                    pass  # model 已被删除
+            QTimer.singleShot(0, lambda m=self: _sync(m))
 
     def _on_row_updated(self, idx: int, row):
         self._edit_values.clear()
-        if self._filter_key != "all" or self._sort_col >= 0:
+        # D 探测期间不自动重排：仅 filter 变更时重建 visible，排序变更不触发重排
+        if self._filter_key != "all":
+            was_visible = idx in self._visible_rows
+            should_be_visible = self._is_visible(idx)
+            if was_visible == should_be_visible:
+                if was_visible:
+                    vis_row = self._to_visual(idx)
+                    if vis_row >= 0:
+                        self.dataChanged.emit(
+                            self.index(vis_row, 0),
+                            self.index(vis_row, _COLUMNS - 1),
+                        )
+                return
             self.layoutAboutToBeChanged.emit()
             self._rebuild_visible()
             self.layoutChanged.emit()
@@ -133,10 +160,9 @@ class FileTableModel(QAbstractTableModel):
             return
         if self.rowCount() == 0:
             return
-        # 只刷新复选框列
         top_left = self.index(0, _COL_CHECK)
         bottom_right = self.index(self.rowCount() - 1, _COL_CHECK)
-        self.dataChanged.emit(top_left, bottom_right)
+        self.dataChanged.emit(top_left, bottom_right, [Qt.CheckStateRole])
 
     # ── 排序 ──
 
@@ -223,7 +249,7 @@ class FileTableModel(QAbstractTableModel):
         return None
 
     def _foreground(self, col, snap, d):
-        from leanreel.gui.file_list import (
+        from leanreel.gui.theme import (
             _COLOR_CODEC_OK, _COLOR_CODEC_MISSING, _COLOR_PROBE_FAILED,
             _COLOR_HDR_DV, _COLOR_HDR_HDR10, _COLOR_HDR_SDR,
         )
@@ -268,6 +294,8 @@ class FileTableModel(QAbstractTableModel):
             self._visible_rows.sort(key=self._sort_key(self._sort_col), reverse=reverse)
 
     def set_filter(self, filter_key: str):
+        if self._filter_key == filter_key:
+            return
         self._filter_key = filter_key
         self._edit_values.clear()
         self.layoutAboutToBeChanged.emit()

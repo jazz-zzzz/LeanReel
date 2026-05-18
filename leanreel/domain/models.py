@@ -1,9 +1,93 @@
-"""策略引擎 — JSON 驱动的压缩策略定义与加载"""
-from __future__ import annotations
+"""数据模型 — 纯 dataclass，无外部依赖"""
 from dataclasses import dataclass, field
-from typing import Optional
-import json
-from pathlib import Path
+from enum import StrEnum
+from typing import Any, Optional
+
+
+class HDRType(StrEnum):
+    SDR = "SDR"
+    HDR10 = "HDR10"
+    HDR10P = "HDR10+"
+    DV_P5 = "DV_P5"
+    DV_P7 = "DV_P7"
+    DV_P8 = "DV_P8"
+
+
+class TaskStatus(StrEnum):
+    """任务/压缩记录的统一状态枚举"""
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    SKIPPED = "skipped"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+@dataclass
+class AudioTrack:
+    codec: str
+    channels: int
+    language: str
+    title: str = ""
+    is_commentary: bool = False
+
+
+@dataclass
+class SubtitleTrack:
+    codec: str
+    language: str
+    title: str = ""
+    is_forced: bool = False
+
+
+@dataclass
+class Library:
+    id: Optional[int] = None
+    name: str = ""
+
+
+@dataclass
+class LibraryFolder:
+    id: Optional[int] = None
+    library_id: int = 0
+    path: str = ""
+
+
+@dataclass
+class FileSnapshot:
+    id: Optional[int] = None
+    library_folder_id: int = 0
+    relative_path: str = ""
+    file_name: str = ""
+    size_bytes: int = 0
+    video_codec: str = ""
+    video_width: int = 0
+    video_height: int = 0
+    hdr_type: HDRType = HDRType.SDR
+    audio_tracks: list[AudioTrack] = field(default_factory=list)
+    subtitle_tracks: list[SubtitleTrack] = field(default_factory=list)
+    duration_seconds: float = 0.0
+    bitrate_bps: int = 0
+    file_mtime: float = 0.0
+    probe_ok: bool = False
+    probe_error: str = ""
+    scanned_at: str = ""
+
+
+@dataclass
+class CompressionRecord:
+    id: Optional[int] = None
+    file_snapshot_id: int = 0
+    strategy_name: str = ""
+    original_size: int = 0
+    compressed_size: int = 0
+    status: TaskStatus = TaskStatus.PENDING
+    duration_seconds: int = 0
+    error_message: str = ""
+    created_at: str = ""
+
+
+# ── 策略模型 ──
 
 
 @dataclass
@@ -22,13 +106,12 @@ class VideoRule:
         return self.gpu or self.encoder in ("hevc_nvenc", "h264_nvenc", "av1_nvenc")
 
     def to_dict(self) -> dict:
-        d = {
+        return {
             "encoder": self.encoder, "crf": self.crf,
             "preset": self.preset, "pix_fmt": self.pix_fmt,
             "gpu": self.gpu, "nv_preset": self.nv_preset,
             "rc": self.rc, "cq": self.cq,
         }
-        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "VideoRule":
@@ -46,8 +129,8 @@ class VideoRule:
 
 @dataclass
 class HDRRule:
-    mode: str = "preserve_hdr10"     # preserve_hdr10 | strip_hdr | pass_through
-    dv_handling: str = "reinject_rpu" # reinject_rpu | degrade_to_hdr10 | pass_through
+    mode: str = "preserve_hdr10"
+    dv_handling: str = "reinject_rpu"
 
     def to_dict(self) -> dict:
         return {"mode": self.mode, "dv_handling": self.dv_handling}
@@ -60,7 +143,7 @@ class HDRRule:
 
 @dataclass
 class AudioRule:
-    mode: str = "keep_original"       # keep_original | strip_commentary | strip_non_preferred
+    mode: str = "keep_original"
     preferred_languages: list[str] = field(default_factory=lambda: ["chi", "zho", "eng"])
     remove_commentary: bool = True
 
@@ -82,7 +165,7 @@ class AudioRule:
 
 @dataclass
 class SubtitleRule:
-    mode: str = "keep_chinese"        # keep_chinese | keep_chinese_english | keep_all | remove_all
+    mode: str = "keep_chinese"
 
     def to_dict(self) -> dict:
         return {"mode": self.mode}
@@ -150,22 +233,69 @@ class Strategy:
         )
 
 
-def load_strategies(directory: str) -> list[Strategy]:
-    """从目录加载所有 JSON 策略文件（损坏文件自动跳过）"""
-    strategies = []
-    d = Path(directory)
-    if not d.exists():
-        return strategies
-    for f in sorted(d.glob("*.json")):
-        try:
-            data = json.loads(f.read_text(encoding="utf-8"))
-            strategies.append(Strategy.from_dict(data))
-        except (json.JSONDecodeError, ValueError, KeyError) as e:
-            import sys
-            print(f"警告：跳过损坏的策略文件 {f.name}: {e}", file=sys.stderr)
-    return strategies
+# ── 行数据容器 ──
 
 
-def get_presets(strategies: list[Strategy]) -> list[Strategy]:
-    """筛选出预设策略"""
-    return [s for s in strategies if s.is_preset]
+@dataclass
+class MatchResult:
+    """匹配结果 — 策略及其估算节省空间"""
+    strategy: Any = None          # Strategy | str | None
+    estimate: dict | None = None
+
+
+@dataclass(frozen=True)
+class FileDecisionDisplay:
+    """预计算的单行显示状态"""
+    status_key: str
+    strategy_text: str
+    result_text: str
+    result_sort: int | float
+    processable: bool
+    tooltip: str
+
+
+@dataclass
+class FileRow:
+    """文件表格中的一行数据。
+
+    ``key`` 是 (library_folder_id, relative_path) 元组，
+    由 ``snap`` 自动推导。
+    """
+    snap: FileSnapshot
+    match: MatchResult | None = field(default=None, repr=False)
+    decision: FileDecisionDisplay | None = field(default=None, repr=False)
+
+    @property
+    def key(self) -> tuple[int, str]:
+        return (self.snap.library_folder_id, self.snap.relative_path)
+
+    @property
+    def folder_name(self) -> str:
+        path = str(self.snap.relative_path).replace("\\", "/")
+        parts = path.rsplit("/", 1)
+        return parts[0] if len(parts) > 1 else "."
+
+
+# ── 跳过原因判断（纯函数，仅依赖 domain 类型）──
+
+PROTECTED_CODECS = {"hevc", "h265"}
+PROTECTED_HDR_TYPES = {HDRType.HDR10, HDRType.HDR10P, HDRType.DV_P5, HDRType.DV_P7, HDRType.DV_P8}
+
+
+def is_protected_source(snapshot: FileSnapshot) -> bool:
+    """HEVC/H.265 和 HDR/Dolby Vision 被视为优质片源，默认完全不处理。"""
+    return get_skip_reason(snapshot) is not None
+
+
+def get_skip_reason(snapshot: FileSnapshot) -> str | None:
+    codec = (snapshot.video_codec or "").lower()
+    if codec in PROTECTED_CODECS:
+        return "跳过：HEVC/H.265 片源"
+    hdr_type = snapshot.hdr_type
+    if hdr_type not in PROTECTED_HDR_TYPES:
+        return None
+    if hdr_type == HDRType.HDR10:
+        return "跳过：HDR10 片源"
+    if hdr_type == HDRType.HDR10P:
+        return "跳过：HDR10+ 片源"
+    return "跳过：Dolby Vision 片源"

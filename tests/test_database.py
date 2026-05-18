@@ -1,8 +1,8 @@
-"""数据库层测试"""
+﻿"""数据库层测试"""
 import pytest
 from pathlib import Path
-from leanreel.data.database import Database
-from leanreel.data.models import Library, LibraryFolder, HDRType, TaskStatus
+from leanreel.infrastructure.database import Database
+from leanreel.domain.models import Library, LibraryFolder, HDRType, TaskStatus
 
 
 @pytest.fixture
@@ -85,7 +85,7 @@ def test_folder_crud(db: Database):
 
 
 def test_compression_history(db: Database):
-    from leanreel.data.models import CompressionRecord
+    from leanreel.domain.models import CompressionRecord
     lib_id = db.insert_library(Library(name="Film"))
     fid = db.insert_folder(LibraryFolder(library_id=lib_id, path="/mnt/f"))
     # Insert a file snapshot

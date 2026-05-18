@@ -1,8 +1,8 @@
-"""PresetCardPanel 单元测试"""
+﻿"""PresetCardPanel 单元测试"""
 import pytest
 from PySide6.QtCore import Qt
 
-from leanreel.core.strategy import Strategy
+from leanreel.domain.models import Strategy
 from leanreel.gui.strategy_panel import PresetCardPanel
 
 

@@ -1,4 +1,4 @@
-"""队列面板 — 任务队列 + 进度，TMM 风格"""
+﻿"""队列面板 — 任务队列 + 进度，TMM 风格"""
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QProgressBar, QLabel,
     QHBoxLayout, QPushButton, QScrollArea
@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QColor
 
-from leanreel.data.models import TaskStatus
+from leanreel.domain.models import TaskStatus
 
 _STATUS_COLORS = {
     TaskStatus.RUNNING: QColor("#c8963e"),

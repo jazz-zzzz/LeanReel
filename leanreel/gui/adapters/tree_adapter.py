@@ -4,15 +4,15 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QTreeWidget, QTreeWidgetItem
 
 from leanreel.gui.utils import _format_bytes
-from leanreel.gui.file_list import (
+from leanreel.gui.theme import (
     _COLOR_CODEC_OK,
     _COLOR_CODEC_MISSING,
     _COLOR_PROBE_FAILED,
     _COLOR_HDR_DV,
     _COLOR_HDR_HDR10,
     _COLOR_HDR_SDR,
-    _SortableTreeItem,
 )
+from leanreel.gui.file_list import _SortableTreeItem
 
 
 class TreeAdapter(QObject):
@@ -24,6 +24,7 @@ class TreeAdapter(QObject):
         self._tree = tree
         self._folder_items: dict[str, QTreeWidgetItem] = {}
         self._child_by_key: dict[tuple[int, str], QTreeWidgetItem] = {}
+        self._dirty = False
         store.rows_rebuilt.connect(self._on_rebuild)
         store.row_updated.connect(self._on_row_updated)
         store.checked_changed.connect(self._on_checked_changed)
@@ -31,10 +32,24 @@ class TreeAdapter(QObject):
     # ── 整表重建 ──
 
     def _on_rebuild(self):
+        if self._tree.parent() is not None and not self._tree.isVisible():
+            self._tree.clear()
+            self._folder_items.clear()
+            self._child_by_key.clear()
+            self._dirty = True
+            return
+        self._rebuild_now()
+
+    def ensure_current(self):
+        if self._dirty:
+            self._rebuild_now()
+
+    def _rebuild_now(self):
         self._tree.blockSignals(True)
         self._tree.clear()
         self._folder_items.clear()
         self._child_by_key.clear()
+        self._dirty = False
         store = self._store
         stats = store.folder_stats()
         for i in range(store.count()):

@@ -1,9 +1,9 @@
-"""Worker 管理器测试"""
+﻿"""Worker 管理器测试"""
 import pytest
 import time
 import threading
 from leanreel.executor.worker import WorkerManager, EncodeTask
-from leanreel.data.models import TaskStatus
+from leanreel.domain.models import TaskStatus
 
 
 class FakeExecutor:
@@ -120,7 +120,7 @@ def test_get_progress_returns_correct_counts():
 
 def test_get_progress_counts_cancelled_as_terminal():
     from leanreel.executor.worker import WorkerManager, EncodeTask
-    from leanreel.data.models import TaskStatus
+    from leanreel.domain.models import TaskStatus
 
     manager = WorkerManager(FakeExecutor())
     manager._tasks = [

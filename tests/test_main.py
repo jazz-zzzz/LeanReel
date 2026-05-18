@@ -1,12 +1,12 @@
-"""Application wiring helpers."""
+﻿"""Application wiring helpers."""
 from pathlib import Path
 import json
 
-from leanreel.core.strategy import Strategy
-from leanreel.data.models import FileSnapshot, HDRType
+from leanreel.domain.models import Strategy
+from leanreel.domain.models import FileSnapshot, HDRType
 from leanreel.executor.worker import EncodeTask
-from leanreel.data.models import TaskStatus
-from leanreel.main import build_encode_tasks, make_output_path, compute_encode_summary
+from leanreel.domain.models import TaskStatus
+from leanreel.controllers.encoding_controller import build_encode_tasks, make_output_path, compute_encode_summary
 
 
 def test_make_output_path_adds_suffix_without_overwriting_original():
@@ -16,9 +16,9 @@ def test_make_output_path_adds_suffix_without_overwriting_original():
 
 
 def test_get_strategies_dir_refreshes_builtin_strategy_files(monkeypatch, tmp_path):
-    import leanreel.main as main_mod
+    from leanreel.utils import paths as paths_mod
 
-    monkeypatch.setattr(main_mod, "get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(paths_mod, "get_data_dir", lambda: tmp_path)
     user_dir = tmp_path / "strategies"
     user_dir.mkdir()
     (user_dir / "balanced.json").write_text(
@@ -30,12 +30,34 @@ def test_get_strategies_dir_refreshes_builtin_strategy_files(monkeypatch, tmp_pa
         encoding="utf-8",
     )
 
-    strategies_dir = main_mod.get_strategies_dir()
+    strategies_dir = paths_mod.get_strategies_dir()
 
     balanced = json.loads((strategies_dir / "balanced.json").read_text(encoding="utf-8"))
     custom = json.loads((strategies_dir / "my_custom.json").read_text(encoding="utf-8"))
     assert balanced["name"] == "x265 HEVC CRF 20 标准转码"
     assert custom["name"] == "我的自定义策略"
+
+def test_init_services_does_not_run_nvenc_detection_synchronously(monkeypatch, tmp_path):
+    import leanreel.main as main_mod
+    from leanreel.utils import gpu as gpu_mod
+
+    strategy_file = tmp_path / "balanced.json"
+    strategy_file.write_text(
+        '{"name": "CPU", "video": {"encoder": "libx265"}, "filters": {}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(main_mod, "get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(main_mod, "get_strategies_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        gpu_mod,
+        "has_nvenc",
+        lambda: (_ for _ in ()).throw(AssertionError("NVENC detection must be deferred")),
+    )
+
+    app_like = type("AppLike", (), {})()
+    main_mod.Application._init_services(app_like)
+
+    assert [s.name for s in app_like.services.strategies] == ["CPU"]
 
 
 def test_build_encode_tasks_uses_strategy_and_reconstructs_input_path():
@@ -157,9 +179,9 @@ def test_compute_encode_summary_counts_completed_and_failed():
 
 
 def test_build_encode_tasks_sets_original_size_from_snapshot():
-    from leanreel.main import build_encode_tasks
-    from leanreel.core.strategy import Strategy
-    from leanreel.data.models import FileSnapshot
+    from leanreel.controllers.encoding_controller import build_encode_tasks
+    from leanreel.domain.models import Strategy
+    from leanreel.domain.models import FileSnapshot
 
     snap = FileSnapshot(
         library_folder_id=1,
@@ -189,7 +211,7 @@ def test_compute_encode_summary_returns_zero_for_all_pending():
 
 def test_remove_folder_state_filters_snapshots_and_paths():
     from leanreel.main import remove_folder_from_current_state
-    from leanreel.data.models import FileSnapshot
+    from leanreel.domain.models import FileSnapshot
 
     snapshots = [
         FileSnapshot(library_folder_id=1, relative_path="a.mkv"),

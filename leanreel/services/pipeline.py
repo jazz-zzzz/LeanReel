@@ -1,4 +1,4 @@
-"""编码管线模型 — 阶段的抽象数据模型，无 UI/IO 依赖"""
+﻿"""编码管线模型 — 阶段的抽象数据模型，无 UI/IO 依赖"""
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
@@ -115,7 +115,7 @@ SLOT_MOVE_OUT = StageSlot("move_out", "移入目标", weight=3, category=SlotCat
 
 def build_pipeline(task) -> PipelinePlan:
     """根据任务构建编码阶段管线。"""
-    from leanreel.data.models import HDRType
+    from leanreel.domain.models import HDRType
 
     stages: list[StageTask] = []
 

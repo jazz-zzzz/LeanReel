@@ -1,4 +1,4 @@
-"""策略面板 — 紧凑单选式预设选择 + 可折叠自定义参数 + 编码设置"""
+﻿"""策略面板 — 紧凑单选式预设选择 + 可折叠自定义参数 + 编码设置"""
 from pathlib import Path
 
 from PySide6.QtWidgets import (
@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal
 
-from leanreel.core.strategy import Strategy
+from leanreel.domain.models import Strategy
 
 _CPU_ENCODERS = ["libx265"]
 _GPU_ENCODERS = ["hevc_nvenc", "h264_nvenc"]

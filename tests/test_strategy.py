@@ -1,7 +1,8 @@
-"""策略引擎测试"""
+﻿"""策略引擎测试"""
 import json
 from pathlib import Path
-from leanreel.core.strategy import Strategy, load_strategies
+from leanreel.domain.models import Strategy
+from leanreel.infrastructure.strategy_loader import load_strategies
 
 SAMPLE_STRATEGY_JSON = """
 {
@@ -64,7 +65,7 @@ def test_load_strategies_from_dir(tmp_path: Path):
     assert "极限压缩" in names
 
 def test_get_presets():
-    from leanreel.core.strategy import get_presets
+    from leanreel.infrastructure.strategy_loader import get_presets
     data = json.loads(SAMPLE_STRATEGY_JSON)
     s1 = Strategy.from_dict(data)
     data2 = json.loads(SAMPLE_STRATEGY_JSON)
@@ -99,7 +100,7 @@ def test_load_strategies_skips_corrupted_json(tmp_path: Path):
 
 def test_video_rule_is_gpu_true_for_nvenc_encoder():
     """NVENC 编码器名自动标记 is_gpu=True"""
-    from leanreel.core.strategy import VideoRule
+    from leanreel.domain.models import VideoRule
 
     rule = VideoRule(encoder="hevc_nvenc")
     assert rule.is_gpu is True
@@ -107,7 +108,7 @@ def test_video_rule_is_gpu_true_for_nvenc_encoder():
 
 def test_video_rule_is_gpu_true_for_h264_nvenc_encoder():
     """h264_nvenc 编码器名自动标记 is_gpu=True"""
-    from leanreel.core.strategy import VideoRule
+    from leanreel.domain.models import VideoRule
 
     rule = VideoRule(encoder="h264_nvenc")
     assert rule.is_gpu is True
@@ -115,7 +116,7 @@ def test_video_rule_is_gpu_true_for_h264_nvenc_encoder():
 
 def test_video_rule_is_gpu_true_for_av1_nvenc_encoder():
     """av1_nvenc 编码器名自动标记 is_gpu=True"""
-    from leanreel.core.strategy import VideoRule
+    from leanreel.domain.models import VideoRule
 
     rule = VideoRule(encoder="av1_nvenc")
     assert rule.is_gpu is True
@@ -123,7 +124,7 @@ def test_video_rule_is_gpu_true_for_av1_nvenc_encoder():
 
 def test_video_rule_is_gpu_true_for_gpu_flag():
     """CPU 编码器 + gpu=True → is_gpu=True"""
-    from leanreel.core.strategy import VideoRule
+    from leanreel.domain.models import VideoRule
 
     rule = VideoRule(encoder="libx265", gpu=True)
     assert rule.is_gpu is True
@@ -131,7 +132,7 @@ def test_video_rule_is_gpu_true_for_gpu_flag():
 
 def test_video_rule_is_gpu_false_for_cpu_encoder():
     """CPU 编码器 + gpu=False → is_gpu=False"""
-    from leanreel.core.strategy import VideoRule
+    from leanreel.domain.models import VideoRule
 
     rule = VideoRule(encoder="libx265", gpu=False)
     assert rule.is_gpu is False
@@ -139,7 +140,7 @@ def test_video_rule_is_gpu_false_for_cpu_encoder():
 
 def test_video_rule_is_gpu_false_for_default():
     """默认 VideoRule() 使用 libx265 + gpu=False → is_gpu=False"""
-    from leanreel.core.strategy import VideoRule
+    from leanreel.domain.models import VideoRule
 
     rule = VideoRule()
     assert rule.is_gpu is False
@@ -147,7 +148,7 @@ def test_video_rule_is_gpu_false_for_default():
 
 def test_video_rule_is_gpu_false_for_h264_cpu():
     """libx264 CPU 编码器 → is_gpu=False"""
-    from leanreel.core.strategy import VideoRule
+    from leanreel.domain.models import VideoRule
 
     rule = VideoRule(encoder="libx264")
     assert rule.is_gpu is False

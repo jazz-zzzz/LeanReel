@@ -4,11 +4,12 @@ import time
 from dataclasses import asdict
 from typing import Optional
 
-from leanreel.data.database import Database
-from leanreel.data.models import FileSnapshot, AudioTrack, SubtitleTrack, HDRType
+from leanreel.infrastructure.database import Database
+from leanreel.domain.models import FileSnapshot, AudioTrack, SubtitleTrack, HDRType
+from leanreel.domain.interfaces import SnapshotStore
 
 
-class SnapshotRepository:
+class SnapshotRepository(SnapshotStore):
     """快照持久层：负责 FileSnapshot 的 JSON 序列化/反序列化与 SQLite 读写。
 
     将数据转换和存储逻辑从 Scanner 中分离出来，保持单一职责。
@@ -36,6 +37,33 @@ class SnapshotRepository:
         if not rows:
             return None
         return self._row_to_snapshot(rows[0])
+
+    # ── 删除 ──
+
+    def delete_orphans(self, folder_id: int, keep_paths: set[str]):
+        """删除不再存在于磁盘上的孤儿缓存记录。
+
+        keep_paths 为磁盘上实际发现的 relative_path 集合，
+        数据库中不属于该集合的记录将被批量删除。
+        """
+        rows = self._db.execute(
+            "SELECT relative_path FROM file_snapshot WHERE library_folder_id=?",
+            [folder_id],
+        )
+        cached_paths = {r["relative_path"] for r in rows}
+        orphans = cached_paths - keep_paths
+        if not orphans:
+            return
+
+        orphans_list = list(orphans)
+        batch_size = 500
+        for i in range(0, len(orphans_list), batch_size):
+            batch = orphans_list[i : i + batch_size]
+            placeholders = ",".join(["?"] * len(batch))
+            self._db.execute(
+                f"DELETE FROM file_snapshot WHERE library_folder_id=? AND relative_path IN ({placeholders})",
+                [folder_id] + batch,
+            )
 
     # ── 写入 ──
 

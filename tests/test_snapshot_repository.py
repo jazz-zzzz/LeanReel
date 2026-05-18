@@ -1,4 +1,4 @@
-"""SnapshotRepository 单元测试 — 覆盖 load_all、get_cached、save（upsert）、JSON 序列化/反序列化往返
+﻿"""SnapshotRepository 单元测试 — 覆盖 load_all、get_cached、save（upsert）、JSON 序列化/反序列化往返
 
 所有测试使用非平凡真实数据，满足 TDD 防逃逸规则。
 """
@@ -6,8 +6,8 @@ import json
 import pytest
 from pathlib import Path
 
-from leanreel.data.database import Database
-from leanreel.data.models import (
+from leanreel.infrastructure.database import Database
+from leanreel.domain.models import (
     AudioTrack,
     FileSnapshot,
     HDRType,
@@ -15,7 +15,7 @@ from leanreel.data.models import (
     LibraryFolder,
     SubtitleTrack,
 )
-from leanreel.core.repository import SnapshotRepository
+from leanreel.infrastructure.repository import SnapshotRepository
 
 
 # ── fixtures ──
@@ -534,6 +534,71 @@ def test_save_probe_error_upserts_on_conflict(repo, folder_id):
     assert loaded.probe_ok is True
     assert loaded.probe_error == ""
     assert loaded.size_bytes == 4096
+
+
+# ── delete_orphans ──
+
+
+def test_delete_orphans_removes_cached_entries_not_on_disk(repo, folder_id):
+    """缓存中有 3 条记录，磁盘上只剩 1 条时，应删除另外 2 条孤儿。"""
+    repo.save(make_snap(folder_id, rel_path="keep.mkv"))
+    repo.save(make_snap(folder_id, rel_path="delete1.mkv"))
+    repo.save(make_snap(folder_id, rel_path="delete2.mkv"))
+
+    repo.delete_orphans(folder_id, {"keep.mkv"})
+
+    remaining = repo.load_all(folder_id)
+    assert len(remaining) == 1
+    assert remaining[0].relative_path == "keep.mkv"
+
+
+def test_delete_orphans_keeps_all_when_no_orphans(repo, folder_id):
+    """磁盘上文件与缓存完全一致时，不应删除任何记录。"""
+    repo.save(make_snap(folder_id, rel_path="a.mkv"))
+    repo.save(make_snap(folder_id, rel_path="b.mkv"))
+
+    repo.delete_orphans(folder_id, {"a.mkv", "b.mkv"})
+
+    assert len(repo.load_all(folder_id)) == 2
+
+
+def test_delete_orphans_removes_all_when_disk_empty(repo, folder_id):
+    """磁盘上没有任何文件时，应删除该目录下的全部缓存。"""
+    repo.save(make_snap(folder_id, rel_path="a.mkv"))
+    repo.save(make_snap(folder_id, rel_path="b.mkv"))
+
+    repo.delete_orphans(folder_id, set())
+
+    assert repo.load_all(folder_id) == []
+
+
+def test_delete_orphans_isolates_by_folder(repo, folder_id, second_folder_id):
+    """只删除指定文件夹的孤儿，不影响其他文件夹。"""
+    repo.save(make_snap(folder_id, rel_path="keep.mkv"))
+    repo.save(make_snap(folder_id, rel_path="orphan.mkv"))
+    repo.save(make_snap(second_folder_id, rel_path="other.mkv"))
+
+    repo.delete_orphans(folder_id, {"keep.mkv"})
+
+    assert len(repo.load_all(folder_id)) == 1
+    assert len(repo.load_all(second_folder_id)) == 1
+    assert repo.load_all(second_folder_id)[0].relative_path == "other.mkv"
+
+
+def test_delete_orphans_empty_folder_noop(repo, folder_id):
+    """对没有任何缓存的目录调用 delete_orphans 不应出错。"""
+    repo.delete_orphans(folder_id, {"anything.mkv"})
+    assert repo.load_all(folder_id) == []
+
+
+def test_delete_orphans_large_batch(repo, folder_id):
+    """超过 500 个孤儿时分批删除仍正确。"""
+    for i in range(600):
+        repo.save(make_snap(folder_id, rel_path=f"orphan_{i:04d}.mkv"))
+
+    repo.delete_orphans(folder_id, {"keep.mkv"})
+
+    assert repo.load_all(folder_id) == []
 
 
 def test_single_track_survives_roundtrip(repo, folder_id):

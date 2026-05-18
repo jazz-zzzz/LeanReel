@@ -1,51 +1,10 @@
-"""文件列表唯一数据源 — 数据类 + FileTableStore"""
+﻿"""文件列表唯一数据源 — FileTableStore 持有所有行数据和勾选状态"""
 import threading
-from dataclasses import dataclass, field
-from typing import Any
 
 from PySide6.QtCore import QObject, Signal
 
-from leanreel.data.models import FileSnapshot
-
-
-@dataclass
-class MatchResult:
-    """匹配结果 — 策略及其估算节省空间"""
-    strategy: Any = None          # Strategy | str | None
-    estimate: dict | None = None
-
-
-@dataclass(frozen=True)
-class FileDecisionDisplay:
-    """预计算的单行显示状态"""
-    status_key: str
-    strategy_text: str
-    result_text: str
-    result_sort: int | float
-    processable: bool
-    tooltip: str
-
-
-@dataclass
-class FileRow:
-    """文件表格中的一行数据。
-
-    ``key`` 是 (library_folder_id, relative_path) 元组，
-    由 ``snap`` 自动推导。
-    """
-    snap: FileSnapshot
-    match: MatchResult | None = field(default=None, repr=False)
-    decision: FileDecisionDisplay | None = field(default=None, repr=False)
-
-    @property
-    def key(self) -> tuple[int, str]:
-        return (self.snap.library_folder_id, self.snap.relative_path)
-
-    @property
-    def folder_name(self) -> str:
-        path = str(self.snap.relative_path).replace("\\", "/")
-        parts = path.rsplit("/", 1)
-        return parts[0] if len(parts) > 1 else "."
+from leanreel.utils.threading_contract import require_main_thread
+from leanreel.domain.models import FileSnapshot, FileRow
 
 
 class FileTableStore(QObject):
@@ -67,6 +26,7 @@ class FileTableStore(QObject):
 
     def rebuild(self, rows: list[FileRow], strategies=None, keep_checked: bool = True):
         """用新行列表全量替换当前数据并发出 ``rows_rebuilt`` 信号。"""
+        require_main_thread("FileTableStore.rebuild")
         with self._lock:
             if not keep_checked:
                 self._checked.clear()
@@ -80,6 +40,7 @@ class FileTableStore(QObject):
 
     def update_row(self, key: tuple[int, str], snap: FileSnapshot, match=None, decision=None):
         """更新单行的快照，发出 ``row_updated`` 信号。线程安全。"""
+        require_main_thread("FileTableStore.update_row")
         with self._lock:
             idx = self._by_key.get(key)
             if idx is None:
@@ -93,15 +54,23 @@ class FileTableStore(QObject):
         self.row_updated.emit(idx, row)
 
     def set_checked(self, key: tuple[int, str], state: bool):
-        """设置单行的勾选状态，发出 ``checked_changed`` 信号。"""
+        """设置单行的勾选状态。仅当状态实际变化时发出 ``checked_changed`` 信号。"""
+        require_main_thread("FileTableStore.set_checked")
+        changed = False
         if state:
-            self._checked.add(key)
+            if key not in self._checked:
+                self._checked.add(key)
+                changed = True
         else:
-            self._checked.discard(key)
-        self.checked_changed.emit()
+            if key in self._checked:
+                self._checked.discard(key)
+                changed = True
+        if changed:
+            self.checked_changed.emit()
 
     def toggle_checked(self, key: tuple[int, str]):
         """翻转单行的勾选状态，发出 ``checked_changed`` 信号。"""
+        require_main_thread("FileTableStore.toggle_checked")
         if key in self._checked:
             self._checked.discard(key)
         else:

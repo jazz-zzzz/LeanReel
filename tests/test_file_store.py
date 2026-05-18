@@ -1,7 +1,8 @@
-"""FileTableStore 测试"""
+﻿"""FileTableStore 测试"""
 import pytest
-from leanreel.data.file_store import FileRow, FileTableStore
-from leanreel.data.models import FileSnapshot, HDRType
+from leanreel.state.file_store import FileTableStore
+from leanreel.domain.models import FileRow
+from leanreel.domain.models import FileSnapshot, HDRType
 
 
 def _snap(library_folder_id=7, relative_path="a.mkv", file_name="a.mkv",

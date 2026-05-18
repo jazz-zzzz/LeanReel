@@ -1,10 +1,11 @@
-"""TreeAdapter 测试"""
+﻿"""TreeAdapter 测试"""
 import pytest
 from PySide6.QtWidgets import QTreeWidget
 from PySide6.QtCore import Qt
 
-from leanreel.data.file_store import FileTableStore, FileRow
-from leanreel.data.models import FileSnapshot, HDRType
+from leanreel.state.file_store import FileTableStore
+from leanreel.domain.models import FileRow
+from leanreel.domain.models import FileSnapshot, HDRType
 from leanreel.gui.file_list import MatchResult, FileDecisionDisplay
 
 

@@ -1,6 +1,6 @@
-from PySide6.QtWidgets import QMessageBox
+﻿from PySide6.QtWidgets import QMessageBox
 
-from leanreel.data.models import Library, LibraryFolder
+from leanreel.domain.models import Library, LibraryFolder
 from leanreel.gui.library_panel import LibraryPanel
 
 

@@ -1,4 +1,4 @@
-"""控制器集成测试 — 验证 _populate_file_list → Store → 表格可见"""
+﻿"""控制器集成测试 — 验证 _populate_file_list → Store → 表格可见"""
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QTableView, QApplication
@@ -22,7 +22,7 @@ def _qapp():
 
 
 def _snap(**kw):
-    from leanreel.data.models import FileSnapshot, HDRType
+    from leanreel.domain.models import FileSnapshot, HDRType
     defaults = dict(library_folder_id=7, relative_path="a.mkv",
                     file_name="a.mkv", size_bytes=1024, video_codec="h264",
                     hdr_type=HDRType.SDR, probe_ok=True)
@@ -35,7 +35,8 @@ def _snap(**kw):
 def test_populate_file_list_shows_table_with_data(qtbot):
     """_populate_file_list → Store → FlatAdapter → 表格可见且有数据"""
     _qapp()
-    from leanreel.data.file_store import FileTableStore, FileRow, MatchResult, FileDecisionDisplay
+    from leanreel.state.file_store import FileTableStore
+    from leanreel.domain.models import FileRow, MatchResult, FileDecisionDisplay
     from leanreel.gui.adapters.flat_adapter import FlatAdapter
     from leanreel.gui.file_list import FileListPanel
 
@@ -68,7 +69,7 @@ def test_populate_file_list_shows_table_with_data(qtbot):
 def test_populate_file_list_empty_shows_table(qtbot):
     """空列表时 _show_table 仍切换到表格（探测进行中）"""
     _qapp()
-    from leanreel.data.file_store import FileTableStore
+    from leanreel.state.file_store import FileTableStore
     from leanreel.gui.adapters.flat_adapter import FlatAdapter
     from leanreel.gui.file_list import FileListPanel
 
@@ -91,7 +92,8 @@ def test_populate_file_list_empty_shows_table(qtbot):
 
 def test_store_rebuild_triggers_flat_adapter(qtbot):
     """store.rebuild 应触发 FlatAdapter 更新表格"""
-    from leanreel.data.file_store import FileTableStore, FileRow
+    from leanreel.state.file_store import FileTableStore
+    from leanreel.domain.models import FileRow
     from leanreel.gui.adapters.flat_adapter import FlatAdapter
     
     store = FileTableStore()
@@ -113,7 +115,8 @@ def test_store_rebuild_triggers_flat_adapter(qtbot):
 
 def test_store_update_row_triggers_flat_adapter(qtbot):
     """store.update_row 应更新表格对应单元格"""
-    from leanreel.data.file_store import FileTableStore, FileRow
+    from leanreel.state.file_store import FileTableStore
+    from leanreel.domain.models import FileRow
     from leanreel.gui.adapters.flat_adapter import FlatAdapter
     
     store = FileTableStore()
@@ -135,7 +138,8 @@ def test_store_update_row_triggers_flat_adapter(qtbot):
 
 def test_store_checked_propagates_to_both_adapters(qtbot):
     """store.set_checked 应同步更新 FlatAdapter 和 TreeAdapter"""
-    from leanreel.data.file_store import FileTableStore, FileRow
+    from leanreel.state.file_store import FileTableStore
+    from leanreel.domain.models import FileRow
     from leanreel.gui.adapters.flat_adapter import FlatAdapter
     from leanreel.gui.adapters.tree_adapter import TreeAdapter
     from PySide6.QtWidgets import QTableWidget, QTreeWidget
@@ -187,7 +191,8 @@ def test_stack_switches_to_table_on_populate(qtbot):
 def test_stack_visible_after_store_rebuild_anti_regression(qtbot):
     """自检：store.rebuild 后如果没调 _show_table，stack 仍指向 empty_label"""
     _qapp()
-    from leanreel.data.file_store import FileTableStore, FileRow, FileDecisionDisplay
+    from leanreel.state.file_store import FileTableStore
+    from leanreel.domain.models import FileRow, FileDecisionDisplay
     from leanreel.gui.file_list import FileListPanel
 
     # 场景：store.rebuild 完成了，但忘记调 _show_table（回归）

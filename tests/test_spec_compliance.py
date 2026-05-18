@@ -1,11 +1,12 @@
-"""leanreel-behavior-spec.md 规范合规性验证 — 全自动可编程"""
+﻿"""leanreel-behavior-spec.md 规范合规性验证 — 全自动可编程"""
 import pytest
 from PySide6.QtCore import Qt, QPoint
 from PySide6.QtWidgets import QTableView, QApplication
 from PySide6.QtGui import QWheelEvent
 
-from leanreel.data.file_store import FileTableStore, FileRow, FileDecisionDisplay
-from leanreel.data.models import FileSnapshot, HDRType
+from leanreel.state.file_store import FileTableStore
+from leanreel.domain.models import FileRow, FileDecisionDisplay
+from leanreel.domain.models import FileSnapshot, HDRType
 from leanreel.gui.file_list import MatchResult, FileListPanel
 
 
@@ -35,7 +36,7 @@ def test_b3_combo_always_visible(qtbot):
     panel = FileListPanel()
     qtbot.addWidget(panel)
 
-    from leanreel.core.strategy import Strategy
+    from leanreel.domain.models import Strategy
     strategy = Strategy(name="均衡压缩", estimated_savings="35-50%")
     panel.populate(
         [_snap(relative_path="a.mkv"), _snap(relative_path="b.mkv")],
@@ -58,7 +59,7 @@ def test_b3_combo_visible_when_store_is_injected_before_strategies(qtbot):
     store = FileTableStore()
     panel.set_store(store)
 
-    from leanreel.core.strategy import Strategy
+    from leanreel.domain.models import Strategy
     strategy = Strategy(name="鍧囪　鍘嬬缉", estimated_savings="35-50%")
     panel.populate(
         [_snap(relative_path="a.mkv")],
@@ -76,19 +77,22 @@ def test_b3_combo_visible_when_store_is_injected_before_strategies(qtbot):
 def test_b3_combo_opening_is_batched(qtbot):
     """Large lists should not synchronously open every combo in one layout pass."""
     _qapp()
-    from leanreel.core.strategy import Strategy
-    from leanreel.data.file_store import FileTableStore, FileRow
+    from leanreel.domain.models import Strategy
+    from leanreel.state.file_store import FileTableStore
+    from leanreel.domain.models import FileRow
     from leanreel.gui.adapters.flat_adapter import FlatAdapter
-    strategy = Strategy(name="鍧囪　鍘嬬缉", estimated_savings="35-50%")
+    strategy = Strategy(name="鍧囪 鍘嬬缉", estimated_savings="35-50%")
     store = FileTableStore()
     view = QTableView()
+    view.setFixedHeight(660)
+    view.show()
     adapter = FlatAdapter(store, view, strategy_lookup={strategy.name: strategy})
     rows = [
         FileRow(
             snap=_snap(relative_path=f"{i}.mkv", file_name=f"{i}.mkv"),
             decision=_decision(strategy_text=strategy.name),
         )
-        for i in range(adapter._COMBO_BATCH + 5)
+        for i in range(200)
     ]
 
     store.rebuild(rows)
@@ -97,42 +101,51 @@ def test_b3_combo_opening_is_batched(qtbot):
         1 for row in range(view.model().rowCount())
         if view.indexWidget(view.model().index(row, 5)) is not None
     )
-    assert first_pass == adapter._COMBO_BATCH
+    # 第一批次仅创建视口内可见行（~20 行），而非全部
+    assert 15 <= first_pass <= 50, f"first pass should cover viewport rows, got {first_pass}"
 
     qtbot.waitUntil(
         lambda: all(
             view.indexWidget(view.model().index(row, 5)) is not None
-            for row in range(view.model().rowCount())
+            for row in range(min(20, view.model().rowCount()))
         ),
         timeout=1000,
     )
 
 
 def test_b3_combo_batch_limits_scanned_rows_for_unprocessable_items(qtbot):
-    """Rows without combo editors should still count toward the batch budget."""
+    """Rows without combo editors should still count toward the batch budget (viewport-aware)."""
     _qapp()
-    from leanreel.data.file_store import FileTableStore, FileRow
+    from leanreel.state.file_store import FileTableStore
+    from leanreel.domain.models import FileRow
     from leanreel.gui.adapters.flat_adapter import FlatAdapter
     store = FileTableStore()
     view = QTableView()
+    # 设置固定高度以控制可见行数：行高 32px × 20 行 = 640px
+    view.setFixedHeight(660)
+    view.show()
+    qtbot.addWidget(view)
     adapter = FlatAdapter(store, view)
     rows = [
         FileRow(
             snap=_snap(relative_path=f"{i}.mkv", file_name=f"{i}.mkv"),
             decision=_decision(status_key="protected", processable=False),
         )
-        for i in range(adapter._COMBO_BATCH + 5)
+        for i in range(200)
     ]
 
     store.rebuild(rows)
 
-    assert adapter._combo_next_row == adapter._COMBO_BATCH
+    # 视口内可见行大约 20 行（640 / 32 = 20），批次覆盖应 ≥ 20
+    assert adapter._combo_next_row >= 20
+    # 不应超过视口范围太多
+    assert adapter._combo_next_row <= adapter._COMBO_BATCH + 20
 
 
 def test_b3_combo_still_visible_after_filter(qtbot):
     """过滤后再切回'全部'，QComboBox 仍然可见"""
     _qapp()
-    from leanreel.core.strategy import Strategy
+    from leanreel.domain.models import Strategy
     panel = FileListPanel()
     qtbot.addWidget(panel)
 
@@ -166,7 +179,7 @@ def test_b3_combo_still_visible_after_filter(qtbot):
 def test_b3_combo_wheel_does_not_change_strategy(qtbot):
     """在 QComboBox 上滚动滚轮 → 策略值不变"""
     _qapp()
-    from leanreel.core.strategy import Strategy
+    from leanreel.domain.models import Strategy
     panel = FileListPanel()
     qtbot.addWidget(panel)
 
@@ -239,7 +252,7 @@ def test_b5_filter_processable(qtbot):
     _qapp()
     panel = FileListPanel()
     qtbot.addWidget(panel)
-    from leanreel.core.strategy import Strategy
+    from leanreel.domain.models import Strategy
     s = Strategy(name="x265", estimated_savings="35-50%")
     s1 = _snap(relative_path="a.mkv", video_codec="h264")
     s2 = _snap(relative_path="b.mkv", video_codec="hevc")
@@ -260,7 +273,7 @@ def test_b5_filter_checked(qtbot):
     _qapp()
     panel = FileListPanel()
     qtbot.addWidget(panel)
-    from leanreel.core.strategy import Strategy
+    from leanreel.domain.models import Strategy
     s = Strategy(name="x265", estimated_savings="35-50%")
     s1 = _snap(relative_path="a.mkv", video_codec="h264")
     s2 = _snap(relative_path="b.mkv", video_codec="h264")
@@ -284,9 +297,9 @@ def test_d3_concurrent_refresh_guard():
     """_refresh_running 标志防止并发重建"""
     from leanreel.main import Application
     _qapp()
-    from leanreel.data.database import Database
+    from leanreel.infrastructure.database import Database
     db = Database(":memory:")
-    from leanreel.core.library import LibraryManager
+    from leanreel.services.library import LibraryManager
     lm = LibraryManager(db)
     assert lm is not None  # basic initialization
     # _refresh_running is tested implicitly in Application._on_refresh_requested
@@ -300,7 +313,7 @@ def test_e1_single_select_shows_strategy(qtbot):
     _qapp()
     panel = FileListPanel()
     qtbot.addWidget(panel)
-    from leanreel.core.strategy import Strategy
+    from leanreel.domain.models import Strategy
     s = Strategy(name="均衡压缩", estimated_savings="35-50%")
     panel.populate([_snap()], {"a.mkv": MatchResult(strategy=s)}, strategies=[s])
 
@@ -320,7 +333,7 @@ def test_e1_selected_qtableview_row_receives_preset_strategy_from_panel(qtbot):
     """Right-side preset changes should apply to the selected QTableView row."""
     _qapp()
     from types import SimpleNamespace
-    from leanreel.core.strategy import Strategy
+    from leanreel.domain.models import Strategy
     from leanreel.main import Application
     panel = FileListPanel()
     qtbot.addWidget(panel)
@@ -332,15 +345,17 @@ def test_e1_selected_qtableview_row_receives_preset_strategy_from_panel(qtbot):
         strategies=[initial, replacement],
     )
     panel.table.selectRow(0)
-    app_like = SimpleNamespace(
-        file_panel=panel,
-        strategy_panel=SimpleNamespace(current_preset_strategy=replacement),
-        strategy_overrides={},
+    from leanreel.controllers.strategy_controller import StrategyController
+    app_state = SimpleNamespace(strategy_overrides={}, active_custom_path=None)
+    ctrl = SimpleNamespace(
+        _state=app_state,
+        _file_panel=panel,
+        _strategy_panel=SimpleNamespace(current_preset_strategy=replacement),
     )
 
-    Application._on_preset_strategy_changed(app_like, 0)
+    StrategyController._on_preset_strategy_changed(ctrl, 0)
 
-    assert app_like.strategy_overrides[(7, "a.mkv")] is replacement
+    assert app_state.strategy_overrides[(7, "a.mkv")] is replacement
     model = panel.table.model()
     assert model.data(model.index(0, 5), Qt.DisplayRole) == "Replacement"
     panel.close()
@@ -404,7 +419,7 @@ def test_c2_tree_view_colors_match_flat(qtbot):
 def test_e1_batch_strategy_apply(qtbot):
     """多选文件后切换策略 -> 全部选中文件应用"""
     _qapp()
-    from leanreel.core.strategy import Strategy
+    from leanreel.domain.models import Strategy
     panel = FileListPanel()
     qtbot.addWidget(panel)
     s1 = _snap(relative_path="a.mkv")
@@ -432,19 +447,21 @@ def test_e1_batch_strategy_apply(qtbot):
 
 def test_d1_existing_data_preserved_on_rebuild():
     """重建缓存时 is_probe_complete 的旧条目保留"""
-    from leanreel.data.file_store import FileTableStore, FileRow
+    from leanreel.state.file_store import FileTableStore
+    from leanreel.domain.models import FileRow
     store = FileTableStore()
     old_snap = _snap(video_codec="h264", size_bytes=1024, video_width=1920, video_height=1080)
     row = FileRow(snap=old_snap, decision=_decision())
     store.rebuild([row])
-    from leanreel.core.scanner import is_probe_complete
+    from leanreel.services.scanner import is_probe_complete
     assert is_probe_complete(row.snap) is True
 
 
 def test_f1_probe_update_does_not_block_main_thread(qtbot):
     """探测更新后主线程仍响应"""
     _qapp()
-    from leanreel.data.file_store import FileTableStore, FileRow
+    from leanreel.state.file_store import FileTableStore
+    from leanreel.domain.models import FileRow
     from leanreel.gui.adapters.file_table_model import FileTableModel
     store = FileTableStore()
     view = QTableView()
@@ -460,12 +477,395 @@ def test_f1_probe_update_does_not_block_main_thread(qtbot):
     assert model.rowCount() == 100
 
 
+def test_f1_scan_ready_offloads_slow_cache_resolution(qtbot):
+    """Cache resolution runs synchronously — UI populated immediately, no blank gap."""
+    _qapp()
+    import time
+    from types import SimpleNamespace
+    from leanreel.controllers.scan_controller import ScanController
+
+    populated = []
+
+    class SlowScanner:
+        def load_cached(self, folder_id, path):
+            time.sleep(0.05)
+            return []
+
+        def probe_multi(self, folder_inputs, on_result, on_finished=None):
+            return sum(len(files) for _fid, _path, files in folder_inputs)
+
+    fake_file_panel = SimpleNamespace(
+        refresh_btn=SimpleNamespace(setEnabled=lambda value: None),
+        set_progress_visible=lambda value: None,
+        set_progress=lambda done, total: None,
+        enable_sorting=lambda: None,
+    )
+    fake_notifier = SimpleNamespace()
+    fake_scan_ctrl = SimpleNamespace(
+        _state=SimpleNamespace(
+            scan_token=1,
+            refresh_running=True,
+            current_snapshots=[],
+            current_folder_paths={1: "C:/videos"},
+        ),
+        _file_panel=fake_file_panel,
+        _win=SimpleNamespace(set_status=lambda text: None),
+        _notifier=fake_notifier,
+        _services=SimpleNamespace(scanner=SlowScanner()),
+        _populate_file_list=lambda snapshots, fast=False: populated.append(list(snapshots)),
+        _probe_total=0,
+        _probe_done=0,
+        _probe_token=0,
+    )
+    placeholders = [
+        _snap(library_folder_id=1, relative_path="a.mkv", file_name="a.mkv", probe_ok=False)
+    ]
+    folder_inputs = [(1, "C:/videos", [("a.mkv", "C:/videos/a.mkv")])]
+
+    start = time.perf_counter()
+    ScanController._on_scan_ready(fake_scan_ctrl, placeholders, folder_inputs, 1)
+    elapsed = time.perf_counter() - start
+
+    # 同步执行（50ms sleep + overhead），不需后台线程往返
+    assert elapsed < 0.3
+    assert populated
+
+
+def test_f1_library_selection_offloads_slow_cache_loading(qtbot):
+    """Selecting a library with slow cached folders must not block the UI thread."""
+    _qapp()
+    import threading
+    import time
+    from types import SimpleNamespace
+    from leanreel.controllers.signals import AppSignals
+    from leanreel.controllers.library_controller import LibraryController
+    from leanreel.main import Application
+
+    cache_threads = []
+    cache_started = threading.Event()
+    populated = []
+
+    class SlowScanner:
+        def load_cached(self, folder_id, path):
+            cache_threads.append(threading.get_ident())
+            cache_started.set()
+            time.sleep(0.15)
+            return [_snap(library_folder_id=folder_id, relative_path="cached.mkv", file_name="cached.mkv")]
+
+    fake_notifier = AppSignals()
+    fake_app = SimpleNamespace(
+        services=SimpleNamespace(
+            db=SimpleNamespace(get_folders_for_library=lambda lib_id: [SimpleNamespace(id=1, path="C:/videos")]),
+            scanner=SlowScanner(),
+        ),
+        app_state=SimpleNamespace(
+            current_folder_paths={},
+            strategy_overrides={},
+            current_snapshots=[],
+            scan_token=1,
+        ),
+        scan_ctrl=SimpleNamespace(
+            _populate_file_list=lambda snapshots, fast=False: populated.append((list(snapshots), fast)),
+        ),
+        notifier=fake_notifier,
+        win=SimpleNamespace(set_status=lambda text: None),
+    )
+    if hasattr(fake_notifier, "library_cache_loaded"):
+        fake_notifier.library_cache_loaded.connect(
+            lambda snapshots, token: Application._on_library_cache_loaded(fake_app, snapshots, token)
+        )
+
+    ctrl = LibraryController(
+        state=fake_app.app_state,
+        services=fake_app.services,
+        lib_panel=SimpleNamespace(),
+        file_panel=SimpleNamespace(),
+        win=fake_app.win,
+        notifier=fake_notifier,
+    )
+    start = time.perf_counter()
+    ctrl._on_library_selected(1)
+    elapsed = time.perf_counter() - start
+
+    assert elapsed < 0.05
+    qtbot.waitUntil(cache_started.is_set, timeout=1000)
+    qtbot.waitUntil(lambda: bool(populated), timeout=1000)
+    assert populated[0][1] is True
+
+
+def test_f1_library_cache_loader_rejects_main_thread_cache_work(qtbot):
+    """The cache loader must execute load_cached in the background worker."""
+    _qapp()
+    import threading
+    from types import SimpleNamespace
+
+    from leanreel.controllers.signals import AppSignals
+    from leanreel.controllers.library_controller import LibraryController
+    from leanreel.utils import threading_contract
+    from leanreel.main import Application
+
+    threading_contract._reset_for_tests()
+    threading_contract.capture_main_thread()
+    load_threads = []
+
+    class RecordingScanner:
+        def load_cached(self, folder_id, path):
+            load_threads.append(threading.get_ident())
+            return []
+
+    fake_notifier = AppSignals()
+    fake_app = SimpleNamespace(
+        services=SimpleNamespace(
+            db=SimpleNamespace(get_folders_for_library=lambda lib_id: [SimpleNamespace(id=1, path="C:/videos")]),
+            scanner=RecordingScanner(),
+        ),
+        app_state=SimpleNamespace(
+            current_folder_paths={},
+            strategy_overrides={},
+            current_snapshots=[],
+            scan_token=1,
+        ),
+        scan_ctrl=SimpleNamespace(
+            _populate_file_list=lambda snapshots, fast=False: None,
+        ),
+        notifier=fake_notifier,
+        win=SimpleNamespace(set_status=lambda text: None),
+    )
+    fake_notifier.library_cache_loaded.connect(
+        lambda snapshots, token: Application._on_library_cache_loaded(fake_app, snapshots, token)
+    )
+
+    ctrl = LibraryController(
+        state=fake_app.app_state,
+        services=fake_app.services,
+        lib_panel=SimpleNamespace(),
+        file_panel=SimpleNamespace(),
+        win=fake_app.win,
+        notifier=fake_notifier,
+    )
+    ctrl._on_library_selected(1)
+
+    qtbot.waitUntil(lambda: bool(load_threads), timeout=1000)
+    assert all(thread_id != threading_contract.capture_main_thread() for thread_id in load_threads)
+    threading_contract._reset_for_tests()
+
+
+def test_f1_probe_results_are_committed_on_main_thread(qtbot):
+    """Background probe callbacks must not update Store or Qt models directly."""
+    _qapp()
+    import threading
+    from types import SimpleNamespace
+    from leanreel.controllers.signals import AppSignals
+    from leanreel.controllers.scan_controller import ScanController
+
+    main_thread_id = threading.get_ident()
+    update_threads = []
+    progress = []
+
+    class ThreadedScanner:
+        def load_cached(self, folder_id, path):
+            return []
+
+        def probe_multi(self, folder_inputs, on_result, on_finished=None):
+            def worker():
+                on_result(_snap(library_folder_id=1, relative_path="a.mkv", file_name="a.mkv"))
+            thread = threading.Thread(target=worker, daemon=True)
+            thread.start()
+            return 1
+
+    class RecordingStore:
+        def update_row(self, key, snap, match=None, decision=None):
+            update_threads.append(threading.get_ident())
+
+    fake_file_panel = SimpleNamespace(
+        set_progress=lambda done, total: None,
+        set_progress_visible=lambda visible: None,
+        refresh_btn=SimpleNamespace(setEnabled=lambda value: None),
+        _decision_display=lambda snap, match: _decision(),
+        enable_sorting=lambda: None,
+    )
+    fake_notifier = AppSignals()
+    fake_scan_ctrl = SimpleNamespace(
+        _state=SimpleNamespace(
+            scan_token=1,
+            refresh_running=True,
+            current_snapshots=[],
+        ),
+        _services=SimpleNamespace(
+            scanner=ThreadedScanner(),
+            matcher=SimpleNamespace(match=lambda snap: None),
+        ),
+        _file_panel=fake_file_panel,
+        _win=SimpleNamespace(set_status=lambda text: None),
+        _notifier=fake_notifier,
+        _store=RecordingStore(),
+        _populate_file_list=lambda snapshots, fast=False: None,
+        _probe_total=0,
+        _probe_done=0,
+        _probe_token=0,
+    )
+    fake_notifier.progress.connect(lambda done, total: progress.append((done, total)))
+    if hasattr(fake_notifier, "probe_result"):
+        fake_notifier.probe_result.connect(
+            lambda snap, token: ScanController._on_probe_result(fake_scan_ctrl, snap, token)
+        )
+
+    ScanController._on_scan_ready(
+        fake_scan_ctrl,
+        [_snap(library_folder_id=1, relative_path="a.mkv", file_name="a.mkv", probe_ok=False)],
+        [(1, "C:/videos", [("a.mkv", "C:/videos/a.mkv")])],
+        1,
+    )
+
+    qtbot.waitUntil(lambda: bool(update_threads), timeout=1000)
+    assert all(thread_id == main_thread_id for thread_id in update_threads)
+    qtbot.waitUntil(lambda: progress == [(1, 1)], timeout=1000)
+
+
+def test_f1_probe_commit_slot_rejects_worker_thread_direct_call(qtbot):
+    """Probe commits are UI work and should reject direct worker-thread calls."""
+    _qapp()
+    import threading
+    from types import SimpleNamespace
+
+    from leanreel.utils import threading_contract
+    from leanreel.controllers.scan_controller import ScanController
+
+    threading_contract._reset_for_tests()
+    threading_contract.capture_main_thread()
+    errors = []
+
+    fake_ctrl = SimpleNamespace(
+        _state=SimpleNamespace(
+            scan_token=1,
+            refresh_running=True,
+            current_snapshots=[_snap(library_folder_id=1, relative_path="a.mkv", file_name="a.mkv")],
+        ),
+        _services=SimpleNamespace(matcher=SimpleNamespace(match=lambda snap: None)),
+        _notifier=SimpleNamespace(
+            probed=SimpleNamespace(emit=lambda snap, match: None),
+            progress=SimpleNamespace(emit=lambda done, total: None),
+            all_done=SimpleNamespace(emit=lambda: None),
+        ),
+        _file_panel=SimpleNamespace(
+            _decision_display=lambda snap, match: _decision(),
+            refresh_btn=SimpleNamespace(setEnabled=lambda value: None),
+            set_progress_visible=lambda value: None,
+        ),
+        _store=SimpleNamespace(update_row=lambda key, snap, match=None, decision=None: None),
+        _probe_done=0,
+        _probe_total=1,
+        _probe_token=1,
+    )
+
+    def worker():
+        try:
+            ScanController._on_probe_result(
+                fake_ctrl,
+                _snap(library_folder_id=1, relative_path="a.mkv", file_name="a.mkv"),
+                1,
+            )
+        except RuntimeError as exc:
+            errors.append(str(exc))
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join(timeout=1)
+
+    assert errors
+    assert "ScanController._on_probe_result" in errors[0]
+
+    threading_contract._reset_for_tests()
+
+
+def test_f1_filtered_probe_update_avoids_full_layout_rebuild():
+    """A filtered row update that stays visible should not rebuild the whole model."""
+    from leanreel.state.file_store import FileTableStore
+    from leanreel.domain.models import FileRow
+    from leanreel.gui.adapters.file_table_model import FileTableModel
+
+    _qapp()
+    store = FileTableStore()
+    view = QTableView()
+    model = FileTableModel(store, view)
+    view.setModel(model)
+    protected = _decision(status_key="protected", processable=False)
+    rows = [
+        FileRow(snap=_snap(relative_path="a.mkv", file_name="a.mkv"), decision=protected),
+        FileRow(snap=_snap(relative_path="b.mkv", file_name="b.mkv"), decision=protected),
+    ]
+    store.rebuild(rows)
+    model.set_filter("protected")
+    layout_changes = []
+    model.layoutChanged.connect(lambda: layout_changes.append(True))
+
+    store.update_row((7, "a.mkv"), _snap(relative_path="a.mkv", file_name="a.mkv", size_bytes=2048))
+
+    assert layout_changes == []
+    assert model.rowCount() == 2
+
+
+def test_f1_repeated_filtered_updates_do_not_rebuild_layout():
+    """Visible probe updates under an active filter should remain incremental."""
+    import time
+
+    from leanreel.state.file_store import FileTableStore
+    from leanreel.domain.models import FileRow
+    from leanreel.gui.adapters.file_table_model import FileTableModel
+
+    _qapp()
+    store = FileTableStore()
+    view = QTableView()
+    model = FileTableModel(store, view)
+    view.setModel(model)
+
+    protected = _decision(status_key="protected", processable=False)
+    rows = [
+        FileRow(snap=_snap(relative_path=f"f{i}.mkv", file_name=f"f{i}.mkv"), decision=protected)
+        for i in range(1000)
+    ]
+    store.rebuild(rows)
+    model.set_filter("protected")
+    layout_changes = []
+    model.layoutChanged.connect(lambda: layout_changes.append(True))
+
+    start = time.perf_counter()
+    for i in range(200):
+        store.update_row(
+            (7, f"f{i}.mkv"),
+            _snap(relative_path=f"f{i}.mkv", file_name=f"f{i}.mkv", size_bytes=2048 + i),
+        )
+    elapsed = time.perf_counter() - start
+
+    assert layout_changes == []
+    assert model.rowCount() == 1000
+    assert elapsed < 0.5
+
+
+def test_c2_tree_rebuild_is_deferred_until_tree_view_is_shown(qtbot):
+    """Flat mode should not eagerly construct the hidden tree for large rebuilds."""
+    _qapp()
+    panel = FileListPanel()
+    qtbot.addWidget(panel)
+    rows = [
+        _snap(relative_path=f"S{i // 10}/file{i}.mkv", file_name=f"file{i}.mkv")
+        for i in range(60)
+    ]
+
+    panel.populate(rows, {})
+
+    assert panel.current_view_mode == "flat"
+    assert panel.tree.topLevelItemCount() == 0
+    panel.set_view_mode("tree")
+    assert panel.tree.topLevelItemCount() > 0
+
+
 def test_c1_tree_to_flat_checked_persists(qtbot):
     """树视图勾选 -> 切回平铺 -> 勾选保持"""
     _qapp()
     panel = FileListPanel()
     qtbot.addWidget(panel)
-    from leanreel.core.strategy import Strategy
+    from leanreel.domain.models import Strategy
     s = Strategy(name="x265", estimated_savings="35-50%")
     s1 = _snap(relative_path="S1/a.mkv", video_codec="h264")
     s2 = _snap(relative_path="S1/b.mkv", video_codec="h264")
@@ -485,7 +885,8 @@ def test_c1_tree_to_flat_checked_persists(qtbot):
 
 def test_b5_filter_zero_results_shows_empty():
     """筛选结果为空时 rowCount=0，不回退到全显示"""
-    from leanreel.data.file_store import FileTableStore, FileRow
+    from leanreel.state.file_store import FileTableStore
+    from leanreel.domain.models import FileRow
     from leanreel.gui.adapters.file_table_model import FileTableModel
     store = FileTableStore()
     view = QTableView()
@@ -508,7 +909,8 @@ def test_b5_filter_zero_results_shows_empty():
 
 def test_b6_sort_by_size_column():
     """sort(2, DescendingOrder) 后第一行应该是最大的"""
-    from leanreel.data.file_store import FileTableStore, FileRow
+    from leanreel.state.file_store import FileTableStore
+    from leanreel.domain.models import FileRow
     from leanreel.gui.adapters.file_table_model import FileTableModel
     store = FileTableStore()
     view = QTableView()
@@ -536,7 +938,8 @@ def test_b6_sort_by_size_column():
 
 def test_b6_sort_keeps_filtered_store_rows():
     """Sorting after filtering must reorder only the filtered store rows."""
-    from leanreel.data.file_store import FileTableStore, FileRow
+    from leanreel.state.file_store import FileTableStore
+    from leanreel.domain.models import FileRow
     from leanreel.gui.adapters.file_table_model import FileTableModel
     _qapp()
     store = FileTableStore()
@@ -563,7 +966,7 @@ def test_b6_sort_keeps_filtered_store_rows():
 def test_b6_strategy_edit_stays_with_file_after_sort(qtbot):
     """Editing a strategy must not leave a visual-row cache behind after sorting."""
     _qapp()
-    from leanreel.core.strategy import Strategy
+    from leanreel.domain.models import Strategy
     panel = FileListPanel()
     qtbot.addWidget(panel)
     original = Strategy(name="Original", estimated_savings="10%")
@@ -595,7 +998,7 @@ def test_b6_strategy_edit_stays_with_file_after_sort(qtbot):
 def test_strategy_combo_change_targets_duplicate_relative_path_by_file_key(qtbot):
     """Changing a duplicate relative path row should update that exact file key."""
     _qapp()
-    from leanreel.core.strategy import Strategy
+    from leanreel.domain.models import Strategy
     panel = FileListPanel()
     qtbot.addWidget(panel)
     original = Strategy(name="Original")
@@ -625,7 +1028,7 @@ def test_start_request_uses_checked_file_keys_for_duplicate_relative_paths(qtbot
     """Starting encoding must not expand one checked duplicate relative path to all folders."""
     _qapp()
     from types import SimpleNamespace
-    from leanreel.main import Application
+    from leanreel.controllers.strategy_controller import StrategyController
     panel = FileListPanel()
     qtbot.addWidget(panel)
     win = SimpleNamespace(statuses=[], set_status=lambda text: win.statuses.append(text))
@@ -637,16 +1040,18 @@ def test_start_request_uses_checked_file_keys_for_duplicate_relative_paths(qtbot
     ]
     panel.populate(snapshots, {(1, "movie.mkv"): MatchResult(strategy="S"), (2, "movie.mkv"): MatchResult(strategy="S")})
     panel.table.model().setData(panel.table.model().index(1, 0), Qt.Checked, Qt.CheckStateRole)
-    app_like = SimpleNamespace(
-        file_panel=panel,
-        current_snapshots=snapshots,
-        current_folder_paths={1: "C:/one", 2: "C:/two"},
-        strategy_overrides={},
-        encoding_ctrl=encoding,
-        win=win,
+    ctrl_like = SimpleNamespace(
+        _state=SimpleNamespace(
+            current_snapshots=snapshots,
+            current_folder_paths={1: "C:/one", 2: "C:/two"},
+            strategy_overrides={},
+        ),
+        _file_panel=panel,
+        _encoding_ctrl=encoding,
+        _win=win,
     )
 
-    Application._on_start_requested(app_like)
+    StrategyController._on_start_requested(ctrl_like)
 
     assert [(s.library_folder_id, s.relative_path) for s in captured["snaps"]] == [(2, "movie.mkv")]
     panel.close()

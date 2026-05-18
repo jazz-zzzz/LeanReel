@@ -361,3 +361,14 @@ QToolButton:hover {{
 def apply_theme(app: QApplication):
     app.setStyle("Fusion")
     app.setStyleSheet(QSS)
+
+
+# ── 列配色 (QColor, 供表格/树控件使用) ──
+from PySide6.QtGui import QColor
+
+_COLOR_CODEC_OK = QColor("#8db87c")
+_COLOR_CODEC_MISSING = QColor("#6b6560")
+_COLOR_PROBE_FAILED = QColor("#c8675e")
+_COLOR_HDR_DV = QColor("#6ba8d6")
+_COLOR_HDR_HDR10 = QColor("#d4a853")
+_COLOR_HDR_SDR = QColor("#6b6560")

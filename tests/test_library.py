@@ -1,8 +1,8 @@
-"""库管理测试"""
+﻿"""库管理测试"""
 import os as _os
 import pytest
-from leanreel.data.database import Database
-from leanreel.core.library import LibraryManager
+from leanreel.infrastructure.database import Database
+from leanreel.services.library import LibraryManager
 
 @pytest.fixture
 def mgr(tmp_path):
