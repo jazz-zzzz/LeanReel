@@ -43,7 +43,7 @@ class ScanController:
 
     # ── 文件列表填充 ──
 
-    def _populate_file_list(self, snapshots, fast: bool = False) -> dict[str, MatchResult]:
+    def _populate_file_list(self, snapshots) -> dict[str, MatchResult]:
         matched: dict[str, MatchResult] = {}
         for s in snapshots:
             strategy = self._services.matcher.match(s)
@@ -62,9 +62,8 @@ class ScanController:
             m = matched.get(s.relative_path)
             d = self._file_panel._decision_display(s, m)
             rows.append(FileRow(snap=s, match=m, decision=d))
-        keep_checked = not fast
         self._file_panel.set_strategy_lookup(self._services.strategies)
-        self._store.rebuild(rows, strategies=self._services.strategies, keep_checked=keep_checked)
+        self._store.rebuild(rows, strategies=self._services.strategies, keep_checked=False)
         self._file_panel._show_table()
         # D QComboBox 立即开始创建（视口内懒加载，不会阻塞）
         if self._services.strategies and self._file_panel._flat_adapter:
@@ -179,7 +178,7 @@ class ScanController:
         else:
             self._state.current_snapshots = resolved
 
-        self._populate_file_list(self._state.current_snapshots, fast=False)
+        self._populate_file_list(self._state.current_snapshots, )
 
         # D 缓存加载后策略下拉立即可用；排序通过手动表头点击支持，不启原生（防自动重排）
         self._file_panel.set_progress(0, total)

@@ -212,7 +212,7 @@ class Application:
         if self.app_state.scan_token != my_token:
             return
         self.app_state.current_snapshots = snapshots
-        self.scan_ctrl._populate_file_list(snapshots, fast=True)
+        self.scan_ctrl._populate_file_list(snapshots, )
         self.win.set_status(f"已加载 {len(snapshots)} 个文件")
 
     # ── 入口 ──

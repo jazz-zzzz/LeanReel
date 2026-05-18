@@ -512,7 +512,7 @@ def test_f1_scan_ready_offloads_slow_cache_resolution(qtbot):
         _win=SimpleNamespace(set_status=lambda text: None),
         _notifier=fake_notifier,
         _services=SimpleNamespace(scanner=SlowScanner()),
-        _populate_file_list=lambda snapshots, fast=False: populated.append(list(snapshots)),
+        _populate_file_list=lambda snapshots: populated.append(list(snapshots)),
         _probe_total=0,
         _probe_done=0,
         _probe_token=0,
@@ -565,7 +565,7 @@ def test_f1_library_selection_offloads_slow_cache_loading(qtbot):
             scan_token=1,
         ),
         scan_ctrl=SimpleNamespace(
-            _populate_file_list=lambda snapshots, fast=False: populated.append((list(snapshots), fast)),
+            _populate_file_list=lambda snapshots: populated.append((list(snapshots), False)),
         ),
         notifier=fake_notifier,
         win=SimpleNamespace(set_status=lambda text: None),
@@ -590,7 +590,7 @@ def test_f1_library_selection_offloads_slow_cache_loading(qtbot):
     assert elapsed < 0.05
     qtbot.waitUntil(cache_started.is_set, timeout=1000)
     qtbot.waitUntil(lambda: bool(populated), timeout=1000)
-    assert populated[0][1] is True
+    assert populated[0][1] is False
 
 
 def test_f1_library_cache_loader_rejects_main_thread_cache_work(qtbot):
@@ -626,7 +626,7 @@ def test_f1_library_cache_loader_rejects_main_thread_cache_work(qtbot):
             scan_token=1,
         ),
         scan_ctrl=SimpleNamespace(
-            _populate_file_list=lambda snapshots, fast=False: None,
+            _populate_file_list=lambda snapshots: None,
         ),
         notifier=fake_notifier,
         win=SimpleNamespace(set_status=lambda text: None),
@@ -699,7 +699,7 @@ def test_f1_probe_results_are_committed_on_main_thread(qtbot):
         _win=SimpleNamespace(set_status=lambda text: None),
         _notifier=fake_notifier,
         _store=RecordingStore(),
-        _populate_file_list=lambda snapshots, fast=False: None,
+        _populate_file_list=lambda snapshots: None,
         _probe_total=0,
         _probe_done=0,
         _probe_token=0,

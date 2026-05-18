@@ -110,21 +110,6 @@ class FileTableModel(QAbstractTableModel):
         self.layoutAboutToBeChanged.emit()
         self._rebuild_visible()
         self.layoutChanged.emit()
-        # rebuild 后延迟同步复选框列（QTimer 断环：_on_flat_data_changed →
-        # set_checked → checked_changed 仅 state 实际变更时 emit，故无循环）
-        if self.rowCount() > 0:
-            from PySide6.QtCore import QTimer
-            def _sync(m):
-                try:
-                    if m.rowCount() > 0:
-                        m.dataChanged.emit(
-                            m.index(0, _COL_CHECK),
-                            m.index(m.rowCount() - 1, _COL_CHECK),
-                            [Qt.CheckStateRole],
-                        )
-                except RuntimeError:
-                    pass  # model 已被删除
-            QTimer.singleShot(0, lambda m=self: _sync(m))
 
     def _on_row_updated(self, idx: int, row):
         self._edit_values.clear()

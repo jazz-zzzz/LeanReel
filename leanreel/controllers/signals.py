@@ -27,9 +27,6 @@ class AppSignals(QObject):
     scan_ready = Signal(list, list, int)
     """文件遍历完成 — (placeholders: list[FileSnapshot], folder_inputs: list, token: int)"""
 
-    scan_resolved = Signal(list, list, int)
-    """缓存解析完成 — (resolved_snapshots: list[FileSnapshot], folder_inputs: list, token: int)"""
-
     library_cache_loaded = Signal(list, int)
     """库缓存加载完成 — (snapshots: list[FileSnapshot], token: int)"""
 
