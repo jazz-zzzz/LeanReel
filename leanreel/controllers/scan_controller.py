@@ -134,9 +134,13 @@ class ScanController:
         self._state.scan_token += 1
         my_token = self._state.scan_token
         folders_at_call = list(self._state.current_folder_paths.items())
-        # 以第一个文件夹为锚点关联扫描状态
+        # 取消同库的旧扫描状态
         if folders_at_call:
-            self._start_scan(folders_at_call[0][0], 0, my_token)
+            first_fid = folders_at_call[0][0]
+            for st in self._state.scan_states.values():
+                if st.running and st.anchor_folder_id == first_fid:
+                    st.running = False
+            self._start_scan(first_fid, 0, my_token)
 
         def _scan_in_background():
             """后台线程：遍历目录（I/O 不阻塞主线程）"""
@@ -240,11 +244,9 @@ class ScanController:
 
     def _on_probe_result(self, snap, my_token):
         require_main_thread("ScanController._on_probe_result")
-        if self._state.scan_token != my_token:
-            return
         st = self._state.scan_states.get(my_token)
-        if st is None:
-            return
+        if st is None or not st.running:
+            return  # 扫描已取消或完成
         # 更新内存列表（仅当该文件属于当前活跃库时）
         for i, s in enumerate(self._state.current_snapshots):
             if s.relative_path == snap.relative_path and s.library_folder_id == snap.library_folder_id:
