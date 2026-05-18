@@ -33,7 +33,7 @@ class AppSignals(QObject):
     library_cache_loaded = Signal(list, int)
     """库缓存加载完成 — (snapshots: list[FileSnapshot], token: int)"""
 
-    probe_result = Signal(FileSnapshot, int)
+    probe_result = Signal(object, int)
     """单个探测结果 — (snapshot: FileSnapshot, token: int)"""
 
     strategies_ready = Signal(list)

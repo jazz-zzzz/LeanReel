@@ -48,6 +48,9 @@ class LibraryController:
         except ValueError as e:
             self._win.set_status(str(e))
             return
+        # 同步更新状态，和 _on_library_selected 保持一致
+        self._state.current_folder_paths[folder.id] = folder.path
+        self._state.strategy_overrides = {}
         self._refresh_libraries()
         self._on_folder_probe(folder.id, path)
 

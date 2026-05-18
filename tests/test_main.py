@@ -290,6 +290,43 @@ def test_folder_removed_accepts_scan_populate_callback_signature():
     assert [s.relative_path for s in refreshed[0]] == ["b.mkv"]
 
 
+def test_folder_added_switches_current_state_to_target_library_and_triggers_probe():
+    from types import SimpleNamespace
+
+    from leanreel.controllers.library_controller import LibraryController
+    from leanreel.domain.models import FileSnapshot, LibraryFolder
+
+    probed = []
+    old_snapshot = FileSnapshot(library_folder_id=1, relative_path="old.mkv")
+    new_folder = LibraryFolder(id=20, library_id=2, path="C:/new")
+    state = SimpleNamespace(
+        current_snapshots=[old_snapshot],
+        current_folder_paths={1: "C:/old"},
+        strategy_overrides={(1, "old.mkv"): object()},
+    )
+    ctrl = LibraryController(
+        state=state,
+        services=SimpleNamespace(
+            lib_mgr=SimpleNamespace(
+                add_folder=lambda lib_id, path: new_folder,
+                get_all_libraries=lambda: [],
+                get_folders=lambda lib_id: [new_folder],
+            )
+        ),
+        lib_panel=SimpleNamespace(populate=lambda libs, folders: None),
+        file_panel=SimpleNamespace(),
+        win=SimpleNamespace(set_status=lambda text: None),
+        notifier=SimpleNamespace(),
+        on_folder_probe=lambda folder_id, path: probed.append((folder_id, path)),
+    )
+
+    ctrl._on_folder_added(2, "C:/new")
+
+    assert state.current_folder_paths == {1: "C:/old", 20: "C:/new"}
+    assert state.strategy_overrides == {}
+    assert probed == [(20, "C:/new")]
+
+
 def test_clear_current_state_returns_empty_collections():
     from leanreel.main import clear_current_state
 
