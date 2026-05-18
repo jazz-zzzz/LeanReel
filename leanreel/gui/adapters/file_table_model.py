@@ -108,8 +108,10 @@ class FileTableModel(QAbstractTableModel):
 
     def _on_rebuilt(self):
         self._edit_values.clear()
-        self.layoutAboutToBeChanged.emit()
+        # 先重建 _visible_rows，再发信号：防止 layoutAboutToBeChanged
+        # 的回调（如 _on_scroll）读到旧索引映射到新 _rows 越界
         self._rebuild_visible()
+        self.layoutAboutToBeChanged.emit()
         self.layoutChanged.emit()
 
     def _on_row_updated(self, idx: int, row):
