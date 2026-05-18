@@ -522,10 +522,9 @@ def test_f1_scan_ready_offloads_slow_cache_resolution(qtbot):
     fake_notifier = AppSignals()
     fake_scan_ctrl = SimpleNamespace(
         _state=SimpleNamespace(
-            scan_token=1, scan_states={}, active_scan_folder_id=0,
+            scan_token=1, library_token=1, scan_states={}, active_scan_folder_id=0,
             refresh_running=True,
-            current_snapshots=[],
-            current_folder_paths={1: "C:/videos"},
+            current_snapshots=[], current_folder_paths={1: "C:/videos"},
         ),
         _file_panel=fake_file_panel,
         _win=SimpleNamespace(set_status=lambda text: None),
@@ -595,7 +594,7 @@ def test_f1_library_selection_offloads_slow_cache_loading(qtbot):
             current_folder_paths={},
             strategy_overrides={},
             current_snapshots=[],
-            scan_token=1, scan_states={}, active_scan_folder_id=0,
+            scan_token=1, library_token=1, scan_states={}, active_scan_folder_id=0,
         ),
         scan_ctrl=SimpleNamespace(
             _populate_file_list=lambda snapshots: populated.append((list(snapshots), False)),
@@ -660,7 +659,7 @@ def test_f1_library_cache_loader_rejects_main_thread_cache_work(qtbot):
             current_folder_paths={},
             strategy_overrides={},
             current_snapshots=[],
-            scan_token=1, scan_states={}, active_scan_folder_id=0,
+            scan_token=1, library_token=1, scan_states={}, active_scan_folder_id=0,
         ),
         scan_ctrl=SimpleNamespace(
             _populate_file_list=lambda snapshots: None,
@@ -728,9 +727,9 @@ def test_f1_probe_results_are_committed_on_main_thread(qtbot):
     fake_notifier = AppSignals()
     fake_scan_ctrl = SimpleNamespace(
         _state=SimpleNamespace(
-            scan_token=1, scan_states={}, active_scan_folder_id=0,
+            scan_token=1, library_token=1, scan_states={}, active_scan_folder_id=0,
             refresh_running=True,
-            current_snapshots=[],
+            current_snapshots=[], current_folder_paths={1: "C:/videos"},
         ),
         _services=SimpleNamespace(
             scanner=ThreadedScanner(),
@@ -786,7 +785,7 @@ def test_f1_probe_commit_slot_rejects_worker_thread_direct_call(qtbot):
 
     fake_ctrl = SimpleNamespace(
         _state=SimpleNamespace(
-            scan_token=1, scan_states={}, active_scan_folder_id=0,
+            scan_token=1, library_token=1, scan_states={}, active_scan_folder_id=0,
             refresh_running=True,
             current_snapshots=[_snap(library_folder_id=1, relative_path="a.mkv", file_name="a.mkv")],
         ),
@@ -840,7 +839,7 @@ def test_f1_scan_resolved_commit_slot_rejects_worker_thread_direct_call(qtbot):
     threading_contract.capture_main_thread()
     errors = []
 
-    fake_ctrl = SimpleNamespace(_state=SimpleNamespace(scan_token=1, scan_states={}, active_scan_folder_id=0))
+    fake_ctrl = SimpleNamespace(_state=SimpleNamespace(scan_token=1, library_token=1, scan_states={}, active_scan_folder_id=0))
 
     def worker():
         try:
@@ -867,7 +866,7 @@ def test_f1_stale_scan_resolved_result_is_ignored(qtbot):
     populated = []
     probed = []
     fake_ctrl = SimpleNamespace(
-        _state=SimpleNamespace(scan_token=2, scan_states={}, active_scan_folder_id=0, current_snapshots=[]),
+        _state=SimpleNamespace(scan_token=2, library_token=1, scan_states={}, active_scan_folder_id=0, current_snapshots=[]),
         _populate_file_list=lambda snapshots: populated.append(list(snapshots)),
         _services=SimpleNamespace(scanner=SimpleNamespace(probe_multi=lambda *args, **kwargs: probed.append(args))),
     )

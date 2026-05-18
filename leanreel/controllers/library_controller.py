@@ -48,9 +48,8 @@ class LibraryController:
         except ValueError as e:
             self._win.set_status(str(e))
             return
-        # 同步更新状态，和 _on_library_selected 保持一致
+        # 同步更新状态
         self._state.current_folder_paths[folder.id] = folder.path
-        self._state.strategy_overrides = {}
         self._refresh_libraries()
         self._on_folder_probe(folder.id, path)
 
@@ -59,13 +58,12 @@ class LibraryController:
         folder_paths: dict[int, str] = {}
         for folder in folders:
             folder_paths[folder.id] = folder.path
-        # 同步设置 folder_paths，避免选库后空窗期
+        # 同步设置状态，避免选库后空窗期
         self._state.current_folder_paths = folder_paths
-        self._state.strategy_overrides = {}
         # 切换活跃扫描锚点（切库时恢复该库的扫描状态）
         self._state.active_scan_folder_id = next(iter(folder_paths), 0)
-        self._state.scan_token += 1
-        my_token = self._state.scan_token
+        self._state.library_token += 1
+        my_token = self._state.library_token
         self._win.set_status("加载缓存中...")
 
         def _load_cache_in_background():
@@ -74,7 +72,7 @@ class LibraryController:
             snapshots: list = []
             try:
                 for folder in folders:
-                    if self._state.scan_token != my_token:
+                    if self._state.library_token != my_token:
                         return
                     snapshots.extend(self._services.scanner.load_cached(folder.id, folder.path))
             except Exception:

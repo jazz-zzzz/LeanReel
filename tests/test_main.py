@@ -323,8 +323,8 @@ def test_folder_added_switches_current_state_to_target_library_and_triggers_prob
     ctrl._on_folder_added(2, "C:/new")
 
     assert state.current_folder_paths == {1: "C:/old", 20: "C:/new"}
-    assert state.strategy_overrides == {}
     assert probed == [(20, "C:/new")]
+    # strategy_overrides 不再清空（per-library 持久化）
 
 
 def test_clear_current_state_returns_empty_collections():

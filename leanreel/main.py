@@ -210,13 +210,20 @@ class Application:
 
     def _on_library_cache_loaded(self, snapshots, my_token):
         require_main_thread("Application._on_library_cache_loaded")
-        if self.app_state.scan_token != my_token:
+        if self.app_state.library_token != my_token:
             return
         self.app_state.current_snapshots = snapshots
         self.scan_ctrl._populate_file_list(snapshots)
-        # 根据该库的扫描状态恢复 UI
-        st = self.app_state.scan_states.get(self.app_state.active_scan_folder_id) if self.app_state.active_scan_folder_id else None
-        if st and st.running:
+        # 根据该库的扫描状态恢复 UI（查找属于当前库的 running scan）
+        st = None
+        for s in self.app_state.scan_states.values():
+            if s.running and any(
+                fid in self.app_state.current_folder_paths
+                for fid in (self.app_state.active_scan_folder_id,)
+            ):
+                st = s
+                break
+        if st:
             self.file_panel.refresh_btn.setEnabled(False)
             self.file_panel.set_progress_visible(True)
             self.file_panel.set_progress(st.done_files, st.total_files)
