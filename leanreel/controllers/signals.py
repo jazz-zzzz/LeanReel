@@ -1,8 +1,7 @@
 """应用信号定义 — 集中管理所有跨组件信号契约"""
 from PySide6.QtCore import QObject, Signal
 
-from leanreel.domain.models import FileSnapshot, MatchResult, Strategy
-from leanreel.executor.worker import EncodeTask
+from leanreel.domain.models import FileSnapshot
 
 
 class AppSignals(QObject):
@@ -24,24 +23,24 @@ class AppSignals(QObject):
 
     # ── 预扫描信号 ──
 
-    scan_ready = Signal(list, list, int)
-    """文件遍历完成 — (placeholders: list[FileSnapshot], folder_inputs: list, token: int)"""
+    scan_ready = Signal(object, object, int)
+    """文件遍历完成 — (placeholders, folder_inputs, token)"""
 
-    scan_resolved = Signal(list, list, int)
-    """缓存解析完成 — (snapshots: list[FileSnapshot], folder_inputs: list, token: int)"""
+    scan_resolved = Signal(object, object, int)
+    """缓存解析完成 — (snapshots, folder_inputs, token)"""
 
-    library_cache_loaded = Signal(list, int)
-    """库缓存加载完成 — (snapshots: list[FileSnapshot], token: int)"""
+    library_cache_loaded = Signal(object, int)
+    """库缓存加载完成 — (snapshots, token)"""
 
     probe_result = Signal(object, int)
-    """单个探测结果 — (snapshot: FileSnapshot, token: int)"""
+    """单个探测结果 — (snapshot, token)"""
 
-    strategies_ready = Signal(list)
-    """后台策略排序完成 — (strategies: list[Strategy])"""
+    strategies_ready = Signal(object)
+    """后台策略排序完成 — (strategies)"""
 
     # ── 编码信号 ──
 
-    task_updated = Signal(EncodeTask)
+    task_updated = Signal(object)
     """编码任务状态更新 — (EncodeTask)"""
 
     encoding_done = Signal()
