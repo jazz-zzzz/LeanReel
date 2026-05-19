@@ -309,7 +309,7 @@ def test_d3_concurrent_refresh_guard():
 # ── E1: 策略面板同步 ──
 
 def test_e1_single_select_shows_strategy(qtbot):
-    """选中一行后，策略面板通过 row_selected 信号传递路径"""
+    """选中一行后，策略面板通过 row_selected 信号传递文件 key"""
     _qapp()
     panel = FileListPanel()
     qtbot.addWidget(panel)
@@ -323,7 +323,7 @@ def test_e1_single_select_shows_strategy(qtbot):
     # 模拟选中第 0 行
     panel.table.selectRow(0)
     assert len(received) > 0
-    assert "a.mkv" in received[0]
+    assert received[0] == (7, "a.mkv")
     panel.close()
 
 
@@ -1439,6 +1439,44 @@ def test_strategy_combo_change_targets_duplicate_relative_path_by_file_key(qtbot
     decisions = {row.key: row.decision.strategy_text for row in panel._store._rows}
     assert decisions[(1, "movie.mkv")] == "Original"
     assert decisions[(2, "movie.mkv")] == "Replacement"
+    panel.close()
+
+
+def test_strategy_override_signal_uses_file_key_for_duplicate_relative_path(qtbot):
+    """Strategy overrides from the file list must not collapse duplicate relative paths."""
+    _qapp()
+    from types import SimpleNamespace
+    from leanreel.controllers.strategy_controller import StrategyController
+    from leanreel.domain.models import Strategy
+
+    panel = FileListPanel()
+    qtbot.addWidget(panel)
+    original = Strategy(name="Original")
+    replacement = Strategy(name="Replacement")
+    panel.populate(
+        [
+            _snap(library_folder_id=1, relative_path="movie.mkv", file_name="movie.mkv"),
+            _snap(library_folder_id=2, relative_path="movie.mkv", file_name="movie.mkv"),
+        ],
+        {
+            (1, "movie.mkv"): MatchResult(strategy=original),
+            (2, "movie.mkv"): MatchResult(strategy=original),
+        },
+        strategies=[original, replacement],
+    )
+    state = SimpleNamespace(strategy_overrides={}, active_custom_path=None)
+    ctrl_like = SimpleNamespace(
+        _state=state,
+        _strategy_panel=SimpleNamespace(show_preset_strategy=lambda: None),
+        _services=SimpleNamespace(strategies=[original, replacement]),
+    )
+    panel.strategy_override_changed.connect(
+        lambda key, name: StrategyController._on_strategy_override_changed(ctrl_like, key, name)
+    )
+
+    panel.table.model().setData(panel.table.model().index(1, 5), "Replacement", Qt.EditRole)
+
+    assert state.strategy_overrides == {(2, "movie.mkv"): replacement}
     panel.close()
 
 

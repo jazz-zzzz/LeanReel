@@ -33,31 +33,49 @@ class StrategyController:
 
     # ── 策略信号处理 ──
 
-    def _on_strategy_override_changed(self, relative_path, strategy_name):
+    @staticmethod
+    def _file_key(value):
+        if isinstance(value, tuple) and len(value) == 2:
+            return (int(value[0] or 0), str(value[1]))
+        if isinstance(value, str) and value:
+            return value
+        return None
+
+    @staticmethod
+    def _row_matches_key(row_obj, key) -> bool:
+        if isinstance(key, tuple):
+            return row_obj.key == key
+        return row_obj.snap.relative_path == key
+
+    def _on_strategy_override_changed(self, file_key, strategy_name):
+        key = StrategyController._file_key(file_key)
+        if key is None:
+            return
         if strategy_name == "自定义":
-            self._state.active_custom_path = relative_path
+            self._state.active_custom_path = key
             return
         self._strategy_panel.show_preset_strategy()
         self._state.active_custom_path = None
         strategy = next((s for s in self._services.strategies if s.name == strategy_name), None)
         if strategy is None:
-            self._state.strategy_overrides.pop(relative_path, None)
+            self._state.strategy_overrides.pop(key, None)
         else:
-            self._state.strategy_overrides[relative_path] = strategy
+            self._state.strategy_overrides[key] = strategy
 
-    def _on_file_row_selected(self, relative_path):
+    def _on_file_row_selected(self, file_key):
         """单个文件行被选中时，右侧策略面板同步显示该文件的策略。"""
-        if not relative_path:
+        key = StrategyController._file_key(file_key)
+        if key is None:
             return
         # 优先用用户手动选择的覆盖策略，其次用自动匹配的策略
-        override = self._state.strategy_overrides.get(relative_path)
+        override = self._state.strategy_overrides.get(key)
         if override:
             self._strategy_panel.show_preset_strategy()
             self._strategy_panel.preset_panel.select_by_strategy(override.name)
             return
         # 从 Store 中查找该文件的匹配策略
         for row_obj in self._store.rows():
-            if row_obj.snap.relative_path == relative_path:
+            if StrategyController._row_matches_key(row_obj, key):
                 match = row_obj.match
                 strategy = getattr(match, "strategy", None) if match else None
                 if strategy:
@@ -87,8 +105,8 @@ class StrategyController:
             self._state.strategy_overrides[key] = strategy
             self._file_panel.apply_strategy_to_row(key, strategy)
 
-    def _on_custom_strategy_requested(self, relative_path):
-        self._state.active_custom_path = relative_path
+    def _on_custom_strategy_requested(self, file_key):
+        self._state.active_custom_path = StrategyController._file_key(file_key)
         self._strategy_panel.show_custom_strategy()
 
     def _on_custom_strategy_changed(self, strategy):

@@ -90,11 +90,11 @@ def _parse_savings_range(percent_text: str) -> tuple[float, float] | None:
 
 class FileListPanel(QWidget):
     file_selection_changed = Signal(list)  # 预留：选中文件变化时通知外部（当前无人连接）
-    strategy_override_changed = Signal(str, str)
-    custom_strategy_requested = Signal(str)
+    strategy_override_changed = Signal(object, str)
+    custom_strategy_requested = Signal(object)
     refresh_requested = Signal()
     tree_folder_refresh_requested = Signal(int)  # 树视图右键刷新文件夹，传 folder_id
-    row_selected = Signal(str)  # 某行被选中时发出 relative_path 或空串
+    row_selected = Signal(object)  # 单行选中时发出 (library_folder_id, relative_path) 或 None
 
     def __init__(self):
         super().__init__()
@@ -527,9 +527,10 @@ class FileListPanel(QWidget):
             pass
 
         rel = target_row.snap.relative_path if target_row else (relative_path if isinstance(relative_path, str) else relative_path[1])
-        self.strategy_override_changed.emit(rel, strategy_name)
+        signal_key = target_key if target_key is not None else rel
+        self.strategy_override_changed.emit(signal_key, strategy_name)
         if strategy_name == "自定义":
-            self.custom_strategy_requested.emit(rel)
+            self.custom_strategy_requested.emit(signal_key)
         self._apply_filter()
 
     def apply_strategy_to_row(self, path_or_key, strategy: Any):
@@ -622,11 +623,11 @@ class FileListPanel(QWidget):
             m = self.table.model()
             key = m.data(m.index(row, 1), Qt.UserRole) if m else None
             if isinstance(key, tuple) and len(key) == 2:
-                self.row_selected.emit(key[1])
+                self.row_selected.emit(key)
             else:
-                self.row_selected.emit("")
+                self.row_selected.emit(None)
         else:
-            self.row_selected.emit("")  # 多选或取消选中 → 清空右面板绑定
+            self.row_selected.emit(None)  # 多选或取消选中 -> 清空右面板绑定
 
     def _on_tree_item_changed(self, item: QTreeWidgetItem, column: int):
         """旧树复选框回调 — 在 set_store 后会被 _on_tree_checkbox_changed 替换。"""
@@ -653,10 +654,9 @@ class FileListPanel(QWidget):
         if len(items) == 1 and items[0].childCount() == 0:
             data = items[0].data(0, Qt.UserRole)
             key = self._coerce_key(data) if data else None
-            rel = key[1] if key else ""
-            self.row_selected.emit(rel)
+            self.row_selected.emit(key)
         else:
-            self.row_selected.emit("")
+            self.row_selected.emit(None)
 
     def _apply_filter(self):
         filter_key = self.filter_combo.currentData() if hasattr(self, "filter_combo") else "all"

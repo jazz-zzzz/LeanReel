@@ -340,7 +340,7 @@ def test_file_list_allows_per_row_strategy_override_and_updates_savings():
     combo.setCurrentText("轻量压缩")
     delegate.setModelData(combo, m, m.index(0, 5))
 
-    assert changes == [("movie.mkv", "轻量压缩")]
+    assert changes == [((0, "movie.mkv"), "轻量压缩")]
     assert combo.currentText() == "轻量压缩"
     combo.deleteLater()
     panel.close()
@@ -367,7 +367,7 @@ def test_file_list_custom_strategy_option_emits_request_signal():
     combo.setCurrentText("自定义")
     delegate.setModelData(combo, m, m.index(0, 5))
 
-    assert requests == ["movie.mkv"]
+    assert requests == [(0, "movie.mkv")]
     assert combo.currentText() == "自定义"
     combo.deleteLater()
     panel.close()
