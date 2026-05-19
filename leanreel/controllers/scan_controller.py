@@ -115,6 +115,13 @@ class ScanController:
         elif hasattr(self._file_panel, "set_progress"):
             self._file_panel.set_progress(0, 0)
 
+    def _sync_visible_scan_progress(self, st: ScanState):
+        """Update visible progress only for the active library."""
+        if not ScanController._scan_is_current(self, st):
+            return
+        self._file_panel.set_progress(st.done_files, st.total_files)
+        self._win.set_status(f"探测中：{st.done_files}/{st.total_files}...")
+
     def _populate_file_list(self, snapshots) -> dict[str, MatchResult]:
         matched: dict[str, MatchResult] = {}
         for s in snapshots:
@@ -307,8 +314,7 @@ class ScanController:
             else:
                 self._state.current_snapshots = list(resolved)
             self._populate_file_list(self._state.current_snapshots)
-            self._file_panel.set_progress(0, total)
-            self._win.set_status(f"探测中：0/{total}...")
+            ScanController._sync_visible_scan_progress(self, st)
 
         def _on_result(snap):
             self._notifier.probe_result.emit(snap, my_token)
@@ -347,6 +353,7 @@ class ScanController:
             self._notifier.probed.emit(snap, match)
             decision = self._file_panel._decision_display(snap, match)
             self._store.update_row((snap.library_folder_id, snap.relative_path), snap, match, decision=decision)
+            ScanController._sync_visible_scan_progress(self, st)
             self._notifier.progress.emit(st.done_files, st.total_files)
 
         if st.finished:

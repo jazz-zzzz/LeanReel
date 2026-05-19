@@ -1005,6 +1005,61 @@ def test_background_library_probe_result_does_not_mutate_current_ui(qtbot):
     assert progress == []
 
 
+def test_current_probe_result_syncs_visible_progress_without_global_wiring(qtbot):
+    """The scan controller owns visible scan progress for the current library."""
+    _qapp()
+    from types import SimpleNamespace
+
+    from leanreel.controllers.scan_controller import ScanController
+    from leanreel.state.scan_state import ScanState
+
+    progress_updates = []
+    status_updates = []
+    ctrl = SimpleNamespace(
+        _state=SimpleNamespace(
+            current_library_id=1,
+            current_folder_paths={101: "C:/lib1"},
+            current_snapshots=[
+                _snap(library_folder_id=101, relative_path="visible.mkv", file_name="visible.mkv")
+            ],
+            scan_states={
+                1: ScanState(
+                    running=True,
+                    token=1,
+                    library_id=1,
+                    folder_ids={101},
+                    total_files=2,
+                    done_files=0,
+                    anchor_folder_id=101,
+                )
+            },
+        ),
+        _services=SimpleNamespace(matcher=SimpleNamespace(match=lambda snap: None)),
+        _notifier=SimpleNamespace(
+            probed=SimpleNamespace(emit=lambda snap, match: None),
+            progress=SimpleNamespace(emit=lambda done, total: None),
+            all_done=SimpleNamespace(emit=lambda: None),
+        ),
+        _win=SimpleNamespace(set_status=lambda text: status_updates.append(text)),
+        _file_panel=SimpleNamespace(
+            _decision_display=lambda snap, match: _decision(),
+            refresh_btn=SimpleNamespace(setEnabled=lambda value: None),
+            set_progress=lambda done, total: progress_updates.append((done, total)),
+            set_progress_visible=lambda value: None,
+        ),
+        _store=SimpleNamespace(update_row=lambda *args, **kwargs: None),
+    )
+
+    ScanController._on_probe_result(
+        ctrl,
+        _snap(library_folder_id=101, relative_path="visible.mkv", file_name="visible.mkv"),
+        1,
+    )
+
+    assert progress_updates == [(1, 2)]
+    assert status_updates == ["探测中：1/2..."]
+
+
 def test_background_scan_resolved_starts_probe_without_current_ui_mutation(qtbot):
     """A non-current library scan should continue in the background without replacing the visible list."""
     _qapp()

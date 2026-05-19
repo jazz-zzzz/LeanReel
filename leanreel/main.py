@@ -175,12 +175,6 @@ class Application:
         self.notifier.library_cache_loaded.connect(self._on_library_cache_loaded)
         self.notifier.probe_result.connect(self.scan_ctrl._on_probe_result)
         self.notifier.strategies_ready.connect(self._on_strategies_ready)
-        self.notifier.progress.connect(
-            lambda done, total: (
-                self.win.set_status(f"探测中：{done}/{total}..."),
-                self.file_panel.set_progress(done, total)
-            )
-        )
         self.notifier.all_done.connect(
             lambda: (self.win.set_status("编码信息探测完成"),
                      self.file_panel.enable_sorting())
