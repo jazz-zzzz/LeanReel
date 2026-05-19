@@ -472,6 +472,70 @@ def test_load_cached_returns_all_complete(tmp_path: Path):
     assert len(results) == 5
 
 
+def test_probe_multi_reports_cache_hits_before_slow_probes(tmp_path: Path):
+    """Cached files should advance progress immediately, even if uncached probes are slow."""
+    import threading
+
+    from leanreel.services.scanner import Scanner
+    from leanreel.infrastructure.repository import SnapshotRepository
+
+    db = Database(str(tmp_path / "test.db"))
+    lib_id = db.insert_library(Library(name="Test"))
+    folder_id = db.insert_folder(LibraryFolder(library_id=lib_id, path=str(tmp_path)))
+    cached_path = tmp_path / "cached.mkv"
+    slow_path = tmp_path / "slow.mkv"
+    cached_path.write_text("cached")
+    slow_path.write_text("slow")
+
+    repo = SnapshotRepository(db)
+    st = cached_path.stat()
+    repo.save(FileSnapshot(
+        library_folder_id=folder_id,
+        relative_path="cached.mkv",
+        file_name="cached.mkv",
+        size_bytes=st.st_size,
+        video_codec="h264",
+        video_width=1920,
+        video_height=1080,
+        file_mtime=st.st_mtime,
+        probe_ok=True,
+    ))
+
+    first_result = threading.Event()
+    release_slow_probe = threading.Event()
+    results = []
+
+    class SlowProbe:
+        def probe(self, abs_path, folder_id):
+            release_slow_probe.wait(timeout=2)
+            return FileSnapshot(
+                library_folder_id=folder_id,
+                relative_path="slow.mkv",
+                file_name="slow.mkv",
+                size_bytes=slow_path.stat().st_size,
+                video_codec="h264",
+                video_width=1920,
+                video_height=1080,
+            )
+
+    def on_result(snap):
+        results.append(snap.relative_path)
+        first_result.set()
+
+    scanner = Scanner(repo=repo, probe=SlowProbe(), max_workers=1)
+    scanner.probe_multi(
+        [(folder_id, str(tmp_path), [
+            ("slow.mkv", str(slow_path)),
+            ("cached.mkv", str(cached_path)),
+        ])],
+        on_result,
+    )
+
+    assert first_result.wait(timeout=0.5)
+    assert results == ["cached.mkv"]
+    release_slow_probe.set()
+
+
 # ── 孤儿清理 ──
 
 

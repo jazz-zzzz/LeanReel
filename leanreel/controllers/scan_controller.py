@@ -109,6 +109,12 @@ class ScanController:
             for st in self._state.scan_states.values()
         )
 
+    def _set_progress_indeterminate(self):
+        if hasattr(self._file_panel, "set_progress_indeterminate"):
+            self._file_panel.set_progress_indeterminate()
+        elif hasattr(self._file_panel, "set_progress"):
+            self._file_panel.set_progress(0, 0)
+
     def _populate_file_list(self, snapshots) -> dict[str, MatchResult]:
         matched: dict[str, MatchResult] = {}
         for s in snapshots:
@@ -155,6 +161,7 @@ class ScanController:
         self._win.set_status(f"扫描 {path}...")
         self._file_panel.refresh_btn.setEnabled(False)
         self._file_panel.set_progress_visible(True)
+        ScanController._set_progress_indeterminate(self)
 
         def _prepare_in_background():
             forbid_main_thread("single-folder file discovery")
@@ -188,6 +195,7 @@ class ScanController:
         self._win.set_status("扫描中...")
         self._file_panel.refresh_btn.setEnabled(False)
         self._file_panel.set_progress_visible(True)
+        ScanController._set_progress_indeterminate(self)
         self._state.scan_token += 1
         my_token = self._state.scan_token
         folders_at_call = list(current_paths.items())

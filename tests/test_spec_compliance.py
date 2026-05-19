@@ -1059,6 +1059,37 @@ def test_background_scan_resolved_starts_probe_without_current_ui_mutation(qtbot
     assert probe_calls == [[(101, "C:/lib1", [("hidden.mkv", "C:/lib1/hidden.mkv")])]]
 
 
+def test_refresh_shows_indeterminate_progress_during_file_discovery(qtbot):
+    """Recursive discovery has no known total yet, so the progress bar should show busy state."""
+    _qapp()
+    from types import SimpleNamespace
+
+    from leanreel.controllers.scan_controller import ScanController
+
+    progress_modes = []
+    ctrl = SimpleNamespace(
+        _state=SimpleNamespace(
+            current_library_id=1,
+            current_folder_paths={101: "C:/lib1"},
+            scan_states={},
+            scan_token=0,
+            active_scan_folder_id=0,
+        ),
+        _win=SimpleNamespace(set_status=lambda text: None),
+        _file_panel=SimpleNamespace(
+            refresh_btn=SimpleNamespace(setEnabled=lambda value: None),
+            set_progress_visible=lambda value: None,
+            set_progress_indeterminate=lambda: progress_modes.append("busy"),
+        ),
+        _notifier=SimpleNamespace(scan_ready=SimpleNamespace(emit=lambda *args: None)),
+        _discover=lambda path: [],
+    )
+
+    ScanController._on_refresh_requested(ctrl)
+
+    assert progress_modes == ["busy"]
+
+
 def test_file_table_store_private_state_is_not_read_outside_store():
     """GUI/controllers should use FileTableStore's public API, not private containers."""
     from pathlib import Path
@@ -1175,6 +1206,22 @@ def test_c1_tree_to_flat_checked_persists(qtbot):
     m = panel.table.model()
     assert m.data(m.index(0, 0), Qt.CheckStateRole) == Qt.Checked
     assert m.data(m.index(1, 0), Qt.CheckStateRole) == Qt.Unchecked
+    panel.close()
+
+
+def test_scan_placeholders_show_discovered_not_completed_summary(qtbot):
+    """Rows still being probed should not be described as fully scanned."""
+    _qapp()
+    panel = FileListPanel()
+    qtbot.addWidget(panel)
+
+    panel.populate([
+        _snap(relative_path="pending.mkv", file_name="pending.mkv", video_codec="", probe_ok=False)
+    ], {})
+
+    assert panel.summary_label.text().startswith("发现 1 个文件")
+    assert "正在探测" in panel.summary_label.text()
+    assert "已扫描" not in panel.summary_label.text()
     panel.close()
 
 

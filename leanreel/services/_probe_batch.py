@@ -114,6 +114,18 @@ class ProbeBatch:
                         fsize, fmtime = st.st_size, st.st_mtime
                     except OSError:
                         fsize, fmtime = 0, 0.0
+                    existing = cache_by_folder.get(fid, {}).get(rel_path)
+                    if (
+                        existing
+                        and existing.size_bytes == fsize
+                        and existing.file_mtime == fmtime
+                        and is_probe_complete(existing)
+                    ):
+                        try:
+                            on_result(existing)
+                        except Exception:
+                            pass
+                        continue
                     f = pool.submit(
                         probe_one, abs_path, rel_path, fid,
                         fsize, fmtime, cache_by_folder, repo, probe,
