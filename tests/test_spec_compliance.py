@@ -1225,6 +1225,25 @@ def test_scan_placeholders_show_discovered_not_completed_summary(qtbot):
     panel.close()
 
 
+def test_scan_summary_can_be_recomputed_after_probe_completion(qtbot):
+    """After pending rows are resolved, the summary should no longer say it is probing."""
+    _qapp()
+    panel = FileListPanel()
+    qtbot.addWidget(panel)
+    snapshots = [
+        _snap(relative_path="done.mkv", file_name="done.mkv", video_codec="h264", probe_ok=True)
+    ]
+
+    panel.populate([
+        _snap(relative_path="done.mkv", file_name="done.mkv", video_codec="", probe_ok=False)
+    ], {})
+    panel.refresh_summary(snapshots)
+
+    assert panel.summary_label.text().startswith("已扫描 1 个文件")
+    assert "正在探测" not in panel.summary_label.text()
+    panel.close()
+
+
 # ── B5: 过滤 0 结果时 rowCount 必须为 0 ──
 
 def test_b5_filter_zero_results_shows_empty():

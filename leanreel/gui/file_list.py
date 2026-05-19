@@ -153,6 +153,20 @@ class FileListPanel(QWidget):
         self.progress_bar.setMaximum(0)
         self.progress_bar.setValue(0)
 
+    def refresh_summary(self, snapshots: list):
+        """Recompute the list summary from the current snapshot data."""
+        total_size = sum(getattr(s, "size_bytes", 0) or 0 for s in snapshots)
+        total_tb = total_size / (1024**4) if total_size else 0
+        processable = sum(1 for s in snapshots if getattr(s, "video_codec", "") and not get_skip_reason(s))
+        pending = sum(
+            1 for s in snapshots
+            if getattr(s, "probe_ok", None) is False
+            and not getattr(s, "probe_error", "")
+            and not getattr(s, "video_codec", "")
+        )
+        prefix = f"发现 {len(snapshots)} 个文件 · 正在探测 {pending}" if pending else f"已扫描 {len(snapshots)} 个文件"
+        self.summary_label.setText(f"{prefix} · 可处理 {processable} · 总计 {total_tb:.2f} TB")
+
     def get_checked_file_keys(self) -> list[tuple[int, str]]:
         """返回所有勾中文件的 (library_folder_id, relative_path) key 列表（已排序）。"""
         if self._store:
@@ -390,18 +404,7 @@ class FileListPanel(QWidget):
         # Store.rebuild 通过信号驱动 Model/Adapter 自动更新 UI
         self._show_table()
 
-        # 更新摘要。占位行已经发现但尚未完成探测，不能描述为“已扫描”。
-        total_size = sum(getattr(s, 'size_bytes', 0) or 0 for s in snapshots)
-        total_tb = total_size / (1024**4) if total_size else 0
-        processable = sum(1 for s in snapshots if getattr(s, 'video_codec', '') and not get_skip_reason(s))
-        pending = sum(
-            1 for s in snapshots
-            if getattr(s, "probe_ok", None) is False
-            and not getattr(s, "probe_error", "")
-            and not getattr(s, "video_codec", "")
-        )
-        prefix = f"发现 {len(snapshots)} 个文件 · 正在探测 {pending}" if pending else f"已扫描 {len(snapshots)} 个文件"
-        self.summary_label.setText(f"{prefix} · 可处理 {processable} · 总计 {total_tb:.2f} TB")
+        self.refresh_summary(snapshots)
         self._update_selection_count()
 
 

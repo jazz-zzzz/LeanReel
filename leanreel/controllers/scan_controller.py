@@ -352,6 +352,8 @@ class ScanController:
         if st.finished:
             st.running = False
             if is_current:
+                if hasattr(self._file_panel, "refresh_summary"):
+                    self._file_panel.refresh_summary(self._state.current_snapshots)
                 self._file_panel.refresh_btn.setEnabled(True)
                 self._file_panel.set_progress_visible(False)
                 self._notifier.all_done.emit()
