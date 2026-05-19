@@ -300,6 +300,7 @@ def test_folder_added_switches_current_state_to_target_library_and_triggers_prob
     old_snapshot = FileSnapshot(library_folder_id=1, relative_path="old.mkv")
     new_folder = LibraryFolder(id=20, library_id=2, path="C:/new")
     state = SimpleNamespace(
+        current_library_id=1,
         current_snapshots=[old_snapshot],
         current_folder_paths={1: "C:/old"},
         strategy_overrides={(1, "old.mkv"): object()},
@@ -322,9 +323,11 @@ def test_folder_added_switches_current_state_to_target_library_and_triggers_prob
 
     ctrl._on_folder_added(2, "C:/new")
 
-    assert state.current_folder_paths == {1: "C:/old", 20: "C:/new"}
+    assert state.current_library_id == 2
+    assert state.current_folder_paths == {20: "C:/new"}
+    assert state.current_snapshots == []
     assert probed == [(20, "C:/new")]
-    # strategy_overrides 不再清空（per-library 持久化）
+    assert (1, "old.mkv") in state.strategy_overrides
 
 
 def test_clear_current_state_returns_empty_collections():

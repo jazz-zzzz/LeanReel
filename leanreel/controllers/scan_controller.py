@@ -1,7 +1,6 @@
-"""扫描控制器 — 管理文件遍历、缓存解析、探测调度和文件列表填充"""
+"""Scan controller: file discovery, cache resolution, probing, and list updates."""
 import os
 import threading
-from pathlib import Path
 
 from leanreel.domain.models import FileSnapshot, FileRow, MatchResult, get_skip_reason
 from leanreel.services.matcher import estimate_savings
@@ -10,12 +9,12 @@ from leanreel.utils.threading_contract import require_main_thread, forbid_main_t
 
 
 def clear_current_state():
-    """返回空状态三元组，用于库删除后完全重置。"""
+    """Return empty state triples used after deleting the active library."""
     return [], {}, {}
 
 
 def remove_folder_from_current_state(snapshots, folder_paths, strategy_overrides, folder_id: int):
-    """从当前状态中移除指定文件夹的所有数据，返回新的三元组。"""
+    """Remove all visible state that belongs to one folder."""
     remaining_snapshots = [s for s in snapshots if s.library_folder_id != folder_id]
     remaining_paths = {fid: path for fid, path in folder_paths.items() if fid != folder_id}
     remaining_relative_paths = {s.relative_path for s in remaining_snapshots}
@@ -33,7 +32,7 @@ def remove_folder_from_current_state(snapshots, folder_paths, strategy_overrides
 
 
 class ScanController:
-    """扫描控制器 — 管理文件遍历、缓存解析、探测调度和文件列表填充"""
+    """Owns scan batches while only updating UI for the current library."""
 
     def __init__(self, state, services, file_panel, win, store, notifier, file_discoverer=None):
         self._state = state
@@ -42,21 +41,73 @@ class ScanController:
         self._win = win
         self._store = store
         self._notifier = notifier
-        self._discover = file_discoverer  # 注入：避免 controller import infrastructure
+        self._discover = file_discoverer
 
-    def _start_scan(self, anchor_folder_id: int, total_files: int, token: int) -> "ScanState":
-        """创建新的扫描状态。token 为本次扫描的唯一标识。"""
-        from leanreel.state.scan_state import ScanState
-        st = ScanState(running=True, total_files=total_files, token=token, anchor_folder_id=anchor_folder_id)
-        self._state.active_scan_folder_id = anchor_folder_id
+    def _current_library_id(self) -> int | None:
+        return getattr(self._state, "current_library_id", None)
+
+    def _current_folder_ids(self) -> set[int]:
+        return set(getattr(self._state, "current_folder_paths", {}).keys())
+
+    def _folder_ids_from_inputs(self, folder_inputs) -> set[int]:
+        return {folder_id for folder_id, _path, _files in folder_inputs}
+
+    def _scan_is_current(self, st: ScanState) -> bool:
+        current_library_id = ScanController._current_library_id(self)
+        if current_library_id is not None and st.library_id is not None:
+            return st.library_id == current_library_id
+        current_folder_ids = ScanController._current_folder_ids(self)
+        if current_folder_ids:
+            return st.owns_any_folder(current_folder_ids)
+        return current_library_id is None
+
+    def _state_for_token(self, token: int, folder_inputs=None) -> ScanState | None:
+        st = self._state.scan_states.get(token)
+        if st is not None:
+            return st
+        if getattr(self._state, "scan_token", None) != token:
+            return None
+        folder_ids = ScanController._folder_ids_from_inputs(self, folder_inputs or [])
+        anchor = next(iter(folder_ids), 0)
+        st = ScanState(
+            running=True,
+            token=token,
+            library_id=ScanController._current_library_id(self),
+            folder_ids=folder_ids,
+            anchor_folder_id=anchor,
+        )
+        self._state.scan_states[token] = st
+        if anchor:
+            self._state.active_scan_folder_id = anchor
+        return st
+
+    def _start_scan(
+        self,
+        library_id: int | None,
+        folder_ids: set[int],
+        total_files: int,
+        token: int,
+        anchor_folder_id: int = 0,
+    ) -> ScanState:
+        anchor = anchor_folder_id or next(iter(folder_ids), 0)
+        st = ScanState(
+            running=True,
+            token=token,
+            library_id=library_id,
+            folder_ids=set(folder_ids),
+            total_files=total_files,
+            anchor_folder_id=anchor,
+        )
+        self._state.active_scan_folder_id = anchor
         self._state.scan_states[token] = st
         return st
 
     def _is_scanning(self, folder_ids: set[int]) -> bool:
-        """检查是否有正在进行的扫描（通过 scan_states 中是否有 running=True）。"""
-        return any(st.running for st in self._state.scan_states.values())
-
-    # ── 文件列表填充 ──
+        """Return True only when an active scan owns any of these folders."""
+        return any(
+            st.running and st.owns_any_folder(folder_ids)
+            for st in self._state.scan_states.values()
+        )
 
     def _populate_file_list(self, snapshots) -> dict[str, MatchResult]:
         matched: dict[str, MatchResult] = {}
@@ -80,21 +131,27 @@ class ScanController:
         self._file_panel.set_strategy_lookup(self._services.strategies)
         self._store.rebuild(rows, strategies=self._services.strategies, keep_checked=False)
         self._file_panel._show_table()
-        # D QComboBox 立即开始创建（视口内懒加载，不会阻塞）
         if self._services.strategies and self._file_panel._flat_adapter:
             self._file_panel._flat_adapter.create_combo_cells(self._file_panel._create_strategy_combo)
         return matched
 
-    # ── 单文件夹流式探测 ──
-
     def _probe_folder_streaming(self, folder_id: int, path: str):
-        """流式探测单个文件夹 — I/O 在后台，UI 在主线程。"""
-        if self._state.scan_states.get(folder_id, ScanState()).running:
+        """Probe one folder without blocking the UI thread."""
+        if ScanController._is_scanning(self, {folder_id}):
             return
         self._state.scan_token += 1
         my_token = self._state.scan_token
-        self._state.current_folder_paths[folder_id] = path
-        self._start_scan(folder_id, 0, my_token)
+        current_paths = getattr(self._state, "current_folder_paths", None)
+        if current_paths is not None:
+            current_paths[folder_id] = path
+        ScanController._start_scan(
+            self,
+            ScanController._current_library_id(self),
+            {folder_id},
+            0,
+            my_token,
+            folder_id,
+        )
         self._win.set_status(f"扫描 {path}...")
         self._file_panel.refresh_btn.setEnabled(False)
         self._file_panel.set_progress_visible(True)
@@ -102,30 +159,30 @@ class ScanController:
         def _prepare_in_background():
             forbid_main_thread("single-folder file discovery")
             files = self._discover(path)
-            if not files:
-                self._notifier.scan_ready.emit([], [(folder_id, path, [])], my_token)
-                return
-            placeholders = []
-            for rel_path, abs_path in files:
-                placeholders.append(FileSnapshot(
-                    library_folder_id=folder_id, relative_path=rel_path,
-                    file_name=os.path.basename(abs_path), size_bytes=0, probe_ok=False))
-            self._notifier.scan_ready.emit(placeholders,
-                [(folder_id, path, files)], my_token)
+            placeholders = [
+                FileSnapshot(
+                    library_folder_id=folder_id,
+                    relative_path=rel_path,
+                    file_name=os.path.basename(abs_path),
+                    size_bytes=0,
+                    probe_ok=False,
+                )
+                for rel_path, abs_path in files
+            ]
+            self._notifier.scan_ready.emit(placeholders, [(folder_id, path, files)], my_token)
 
         threading.Thread(target=_prepare_in_background, daemon=True).start()
 
-    # ── 全量刷新 ──
-
     def _on_refresh_requested(self):
-        """重建缓存：后台遍历文件 + 主线程即时展示占位 + 共享线程池探测。"""
-        if not self._state.current_folder_paths:
+        """Rebuild cache for the visible library."""
+        current_paths = getattr(self._state, "current_folder_paths", {})
+        if not current_paths:
             self._win.set_status("没有已添加的文件夹，请先添加文件夹")
             return
 
-        folder_ids = set(self._state.current_folder_paths.keys())
-        if self._is_scanning(folder_ids):
-            self._win.set_status("扫描已在进行中，请等待完成")
+        folder_ids = set(current_paths.keys())
+        if ScanController._is_scanning(self, folder_ids):
+            self._win.set_status("当前库扫描已在进行中，请等待完成")
             return
 
         self._win.set_status("扫描中...")
@@ -133,17 +190,18 @@ class ScanController:
         self._file_panel.set_progress_visible(True)
         self._state.scan_token += 1
         my_token = self._state.scan_token
-        folders_at_call = list(self._state.current_folder_paths.items())
-        # 取消同库的旧扫描状态
-        if folders_at_call:
-            first_fid = folders_at_call[0][0]
-            for st in self._state.scan_states.values():
-                if st.running and st.anchor_folder_id == first_fid:
-                    st.running = False
-            self._start_scan(first_fid, 0, my_token)
+        folders_at_call = list(current_paths.items())
+        first_fid = folders_at_call[0][0] if folders_at_call else 0
+        ScanController._start_scan(
+            self,
+            ScanController._current_library_id(self),
+            folder_ids,
+            0,
+            my_token,
+            first_fid,
+        )
 
         def _scan_in_background():
-            """后台线程：遍历目录（I/O 不阻塞主线程）"""
             forbid_main_thread("file discovery")
             try:
                 placeholders = []
@@ -153,8 +211,12 @@ class ScanController:
                     folder_inputs.append((folder_id, path, files))
                     for rel_path, abs_path in files:
                         placeholders.append(FileSnapshot(
-                            library_folder_id=folder_id, relative_path=rel_path,
-                            file_name=os.path.basename(abs_path), size_bytes=0, probe_ok=False))
+                            library_folder_id=folder_id,
+                            relative_path=rel_path,
+                            file_name=os.path.basename(abs_path),
+                            size_bytes=0,
+                            probe_ok=False,
+                        ))
                 self._notifier.scan_ready.emit(placeholders, folder_inputs, my_token)
             except Exception:
                 import traceback
@@ -164,33 +226,39 @@ class ScanController:
         threading.Thread(target=_scan_in_background, daemon=True).start()
 
     def _on_scan_ready(self, placeholders, folder_inputs, my_token):
-        """主线程：缓存解析（同步，毫秒级）→ 填充列表 → 启动探测。"""
+        """Resolve cached rows in a worker, then commit visible rows on the main thread."""
         require_main_thread("ScanController._on_scan_ready")
-        if self._state.scan_token != my_token:
+        st = ScanController._state_for_token(self, my_token, folder_inputs)
+        if st is None or not st.running:
             return
         total = len(placeholders)
+        is_current = ScanController._scan_is_current(self, st)
 
         if total == 0:
-            self._state.scan_states.pop(my_token, None)
-            if self._state.active_scan_folder_id == (folder_inputs[0][0] if folder_inputs else 0):
+            st.running = False
+            if self._state.active_scan_folder_id == st.anchor_folder_id:
                 self._state.active_scan_folder_id = 0
-            self._file_panel.refresh_btn.setEnabled(True)
-            self._file_panel.set_progress_visible(False)
-            if not folder_inputs:
-                self._win.set_status("扫描失败，请检查网络连接后重试")
-            else:
-                self._win.set_status("未找到视频文件")
+            if is_current:
+                self._file_panel.refresh_btn.setEnabled(True)
+                self._file_panel.set_progress_visible(False)
+                self._win.set_status("未找到视频文件" if folder_inputs else "扫描失败，请检查后重试")
             return
 
-        # Cache resolution may touch slow storage, so keep it off the UI thread.
-        self._win.set_status("加载缓存中...")
+        st.total_files = total
+        st.done_files = 0
+        if is_current:
+            self._win.set_status("加载缓存中...")
 
         def _resolve_cache_in_background():
             forbid_main_thread("scan cache resolution")
+            latest = self._state.scan_states.get(my_token)
+            if latest is None or not latest.running:
+                return
             cache_by_folder: dict[int, dict[str, FileSnapshot]] = {}
             try:
                 for folder_id, path, _files in folder_inputs:
-                    if self._state.scan_token != my_token:
+                    latest = self._state.scan_states.get(my_token)
+                    if latest is None or not latest.running:
                         return
                     cache_by_folder[folder_id] = {
                         s.relative_path: s
@@ -210,32 +278,29 @@ class ScanController:
 
     def _on_scan_resolved(self, resolved, folder_inputs, my_token):
         require_main_thread("ScanController._on_scan_resolved")
-        if self._state.scan_token != my_token:
+        st = ScanController._state_for_token(self, my_token, folder_inputs)
+        if st is None or not st.running:
             return
         total = len(resolved)
+        st.total_files = total
+        st.done_files = 0
+        st.folder_ids = ScanController._folder_ids_from_inputs(self, folder_inputs) or st.folder_ids
+        if not st.anchor_folder_id and st.folder_ids:
+            st.anchor_folder_id = next(iter(st.folder_ids))
 
-        if len(folder_inputs) == 1:
-            fid = folder_inputs[0][0]
-            self._state.current_snapshots = [s for s in self._state.current_snapshots if s.library_folder_id != fid]
-            self._state.current_snapshots.extend(resolved)
-        else:
-            self._state.current_snapshots = resolved
-
-        self._populate_file_list(self._state.current_snapshots)
-
-        self._file_panel.set_progress(0, total)
-        self._win.set_status(f"探测中：0/{total}...")
-
-        # 用 token 查找/创建 scan state（跨文件夹共享）
-        first_fid = folder_inputs[0][0] if folder_inputs else 0
-        st = self._state.scan_states.get(my_token)
-        if st is None:
-            st = ScanState(running=True, total_files=total, token=my_token, anchor_folder_id=first_fid)
-            self._state.scan_states[my_token] = st
-            self._state.active_scan_folder_id = first_fid
-        else:
-            st.total_files = total
-            st.done_files = 0
+        if ScanController._scan_is_current(self, st):
+            if len(folder_inputs) == 1:
+                fid = folder_inputs[0][0]
+                self._state.current_snapshots = [
+                    s for s in self._state.current_snapshots
+                    if s.library_folder_id != fid
+                ]
+                self._state.current_snapshots.extend(resolved)
+            else:
+                self._state.current_snapshots = list(resolved)
+            self._populate_file_list(self._state.current_snapshots)
+            self._file_panel.set_progress(0, total)
+            self._win.set_status(f"探测中：0/{total}...")
 
         def _on_result(snap):
             self._notifier.probe_result.emit(snap, my_token)
@@ -246,34 +311,46 @@ class ScanController:
         require_main_thread("ScanController._on_probe_result")
         st = self._state.scan_states.get(my_token)
         if st is None or not st.running:
-            return  # 扫描已取消或完成
-        # 更新内存列表（仅当该文件属于当前活跃库时）
-        for i, s in enumerate(self._state.current_snapshots):
-            if s.relative_path == snap.relative_path and s.library_folder_id == snap.library_folder_id:
-                self._state.current_snapshots[i] = snap
-                break
-        if snap.probe_ok:
-            strategy = self._services.matcher.match(snap)
-            match = MatchResult(strategy=strategy, estimate=estimate_savings(snap, strategy) if strategy else None) if strategy else None
-        else:
-            match = None
-        self._notifier.probed.emit(snap, match)
-        d = self._file_panel._decision_display(snap, match)
-        self._store.update_row((snap.library_folder_id, snap.relative_path), snap, match, decision=d)
+            return
+        if not st.owns_any_folder({snap.library_folder_id}):
+            return
+
         st.done_files += 1
-        # 进度仅当该文件夹属于活跃库时才更新 UI
-        if snap.library_folder_id in self._state.current_folder_paths:
+        is_current = (
+            ScanController._scan_is_current(self, st)
+            and snap.library_folder_id in ScanController._current_folder_ids(self)
+        )
+        if is_current:
+            for i, s in enumerate(self._state.current_snapshots):
+                if s.relative_path == snap.relative_path and s.library_folder_id == snap.library_folder_id:
+                    self._state.current_snapshots[i] = snap
+                    break
+            if snap.probe_ok:
+                strategy = self._services.matcher.match(snap)
+                match = (
+                    MatchResult(
+                        strategy=strategy,
+                        estimate=estimate_savings(snap, strategy) if strategy else None,
+                    )
+                    if strategy else None
+                )
+            else:
+                match = None
+            self._notifier.probed.emit(snap, match)
+            decision = self._file_panel._decision_display(snap, match)
+            self._store.update_row((snap.library_folder_id, snap.relative_path), snap, match, decision=decision)
             self._notifier.progress.emit(st.done_files, st.total_files)
+
         if st.finished:
             st.running = False
-            if snap.library_folder_id in self._state.current_folder_paths:
+            if is_current:
                 self._file_panel.refresh_btn.setEnabled(True)
                 self._file_panel.set_progress_visible(False)
                 self._notifier.all_done.emit()
 
     def _on_single_folder_refresh(self, folder_id):
-        """流式刷新单个文件夹（库面板或树视图右键触发）。"""
-        if folder_id not in self._state.current_folder_paths:
+        """Refresh one visible folder."""
+        current_paths = getattr(self._state, "current_folder_paths", {})
+        if folder_id not in current_paths:
             return
-        # A 懒切换：保留旧数据，等新数据就绪后 _on_scan_ready 替换
-        self._probe_folder_streaming(folder_id, self._state.current_folder_paths[folder_id])
+        self._probe_folder_streaming(folder_id, current_paths[folder_id])

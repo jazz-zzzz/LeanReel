@@ -215,9 +215,14 @@ class Application:
         self.app_state.current_snapshots = snapshots
         self.scan_ctrl._populate_file_list(snapshots)
         # 查找属于当前库的 running scan（anchor_folder_id 在 current_folder_paths 中）
+        current_library_id = getattr(self.app_state, "current_library_id", None)
+        current_folder_ids = set(self.app_state.current_folder_paths)
         st = next(
             (s for s in self.app_state.scan_states.values()
-             if s.running and s.anchor_folder_id in self.app_state.current_folder_paths),
+             if s.running and (
+                 (current_library_id is not None and s.library_id == current_library_id)
+                 or s.owns_any_folder(current_folder_ids)
+             )),
             None,
         )
         if st:

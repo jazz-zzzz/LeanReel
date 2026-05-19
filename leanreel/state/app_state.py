@@ -1,29 +1,32 @@
-"""应用共享状态 — 所有 Controller 通过此对象共享可变状态"""
+"""Shared mutable application state for controllers."""
 from dataclasses import dataclass, field
-from leanreel.domain.models import FileSnapshot, Strategy
+
+from leanreel.domain.models import FileSnapshot
 from leanreel.state.scan_state import ScanState
 
 
 @dataclass
 class AppState:
-    """应用级共享状态。Controller 通过此对象读写。"""
+    """State shared by controllers.
+
+    current_* fields describe the visible library/UI context.
+    scan_states describes independent background scan batches by token.
+    """
 
     current_snapshots: list[FileSnapshot] = field(default_factory=list)
+    current_library_id: int | None = None
     current_folder_paths: dict[int, str] = field(default_factory=dict)
     strategy_overrides: dict = field(default_factory=dict)
     active_custom_path: str | None = None
 
-    # 多库扫描隔离
-    scan_token: int = 0         # 扫描流程控制（per-scan，切库不动）
-    library_token: int = 0      # 库切换控制（per-library）
+    scan_token: int = 0
+    library_token: int = 0
     active_scan_folder_id: int = 0
-    scan_states: dict[int, ScanState] = field(default_factory=dict)  # token → ScanState
-
-    # 策略覆盖：按 library_folder_id 隔离
-    strategy_overrides: dict = field(default_factory=dict)
+    scan_states: dict[int, ScanState] = field(default_factory=dict)
 
     def reset(self):
         self.current_snapshots = []
+        self.current_library_id = None
         self.current_folder_paths = {}
         self.strategy_overrides = {}
         self.active_custom_path = None

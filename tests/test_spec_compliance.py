@@ -883,6 +883,182 @@ def test_f1_stale_scan_resolved_result_is_ignored(qtbot):
     assert probed == []
 
 
+def test_multi_library_refresh_is_not_blocked_by_other_library_scan():
+    """A running scan in one library must not disable refresh in another library."""
+    from types import SimpleNamespace
+
+    from leanreel.controllers.scan_controller import ScanController
+    from leanreel.state.scan_state import ScanState
+
+    fake_ctrl = SimpleNamespace(
+        _state=SimpleNamespace(
+            scan_states={
+                7: ScanState(
+                    running=True,
+                    token=7,
+                    library_id=1,
+                    folder_ids={101},
+                    anchor_folder_id=101,
+                )
+            },
+        ),
+    )
+
+    assert ScanController._is_scanning(fake_ctrl, {202}) is False
+    assert ScanController._is_scanning(fake_ctrl, {101}) is True
+
+
+def test_same_folder_streaming_scan_is_not_started_twice():
+    """Duplicate single-folder scans should be rejected by folder ownership, not token lookup."""
+    from types import SimpleNamespace
+
+    from leanreel.controllers.scan_controller import ScanController
+    from leanreel.state.scan_state import ScanState
+
+    statuses = []
+    ctrl = SimpleNamespace(
+        _state=SimpleNamespace(
+            current_library_id=1,
+            scan_token=7,
+            scan_states={
+                7: ScanState(
+                    running=True,
+                    token=7,
+                    library_id=1,
+                    folder_ids={101},
+                    anchor_folder_id=101,
+                )
+            },
+            current_folder_paths={101: "C:/lib1"},
+            active_scan_folder_id=101,
+        ),
+        _win=SimpleNamespace(set_status=lambda text: statuses.append(text)),
+        _file_panel=SimpleNamespace(
+            refresh_btn=SimpleNamespace(setEnabled=lambda value: None),
+            set_progress_visible=lambda value: None,
+        ),
+        _notifier=SimpleNamespace(scan_ready=SimpleNamespace(emit=lambda *args: None)),
+        _discover=lambda path: (_ for _ in ()).throw(AssertionError("must not discover")),
+    )
+
+    ScanController._probe_folder_streaming(ctrl, 101, "C:/lib1")
+
+    assert ctrl._state.scan_token == 7
+    assert statuses == []
+
+
+def test_background_library_probe_result_does_not_mutate_current_ui(qtbot):
+    """Probe results from a background library may advance their state but cannot touch current UI/store."""
+    _qapp()
+    from types import SimpleNamespace
+
+    from leanreel.controllers.scan_controller import ScanController
+    from leanreel.state.scan_state import ScanState
+
+    updated = []
+    probed = []
+    progress = []
+    ctrl = SimpleNamespace(
+        _state=SimpleNamespace(
+            current_library_id=2,
+            current_folder_paths={202: "C:/lib2"},
+            current_snapshots=[
+                _snap(library_folder_id=202, relative_path="visible.mkv", file_name="visible.mkv")
+            ],
+            scan_states={
+                1: ScanState(
+                    running=True,
+                    token=1,
+                    library_id=1,
+                    folder_ids={101},
+                    total_files=1,
+                    done_files=0,
+                    anchor_folder_id=101,
+                )
+            },
+        ),
+        _services=SimpleNamespace(matcher=SimpleNamespace(match=lambda snap: None)),
+        _notifier=SimpleNamespace(
+            probed=SimpleNamespace(emit=lambda snap, match: probed.append((snap, match))),
+            progress=SimpleNamespace(emit=lambda done, total: progress.append((done, total))),
+            all_done=SimpleNamespace(emit=lambda: None),
+        ),
+        _file_panel=SimpleNamespace(
+            _decision_display=lambda snap, match: _decision(),
+            refresh_btn=SimpleNamespace(setEnabled=lambda value: None),
+            set_progress_visible=lambda value: None,
+        ),
+        _store=SimpleNamespace(update_row=lambda *args, **kwargs: updated.append((args, kwargs))),
+    )
+
+    ScanController._on_probe_result(
+        ctrl,
+        _snap(library_folder_id=101, relative_path="hidden.mkv", file_name="hidden.mkv"),
+        1,
+    )
+
+    assert ctrl._state.scan_states[1].done_files == 1
+    assert ctrl._state.scan_states[1].running is False
+    assert [s.relative_path for s in ctrl._state.current_snapshots] == ["visible.mkv"]
+    assert updated == []
+    assert probed == []
+    assert progress == []
+
+
+def test_background_scan_resolved_starts_probe_without_current_ui_mutation(qtbot):
+    """A non-current library scan should continue in the background without replacing the visible list."""
+    _qapp()
+    from types import SimpleNamespace
+
+    from leanreel.controllers.scan_controller import ScanController
+    from leanreel.state.scan_state import ScanState
+
+    populated = []
+    progress = []
+    probe_calls = []
+    ctrl = SimpleNamespace(
+        _state=SimpleNamespace(
+            current_library_id=2,
+            current_folder_paths={202: "C:/lib2"},
+            current_snapshots=[
+                _snap(library_folder_id=202, relative_path="visible.mkv", file_name="visible.mkv")
+            ],
+            scan_token=2,
+            scan_states={
+                1: ScanState(
+                    running=True,
+                    token=1,
+                    library_id=1,
+                    folder_ids={101},
+                    anchor_folder_id=101,
+                )
+            },
+            active_scan_folder_id=202,
+        ),
+        _populate_file_list=lambda snapshots: populated.append(list(snapshots)),
+        _file_panel=SimpleNamespace(set_progress=lambda done, total: progress.append((done, total))),
+        _win=SimpleNamespace(set_status=lambda text: None),
+        _notifier=SimpleNamespace(probe_result=SimpleNamespace(emit=lambda snap, token: None)),
+        _services=SimpleNamespace(
+            scanner=SimpleNamespace(
+                probe_multi=lambda folder_inputs, on_result, on_finished=None: probe_calls.append(folder_inputs) or 1
+            )
+        ),
+    )
+
+    ScanController._on_scan_resolved(
+        ctrl,
+        [_snap(library_folder_id=101, relative_path="hidden.mkv", file_name="hidden.mkv")],
+        [(101, "C:/lib1", [("hidden.mkv", "C:/lib1/hidden.mkv")])],
+        1,
+    )
+
+    assert [s.relative_path for s in ctrl._state.current_snapshots] == ["visible.mkv"]
+    assert populated == []
+    assert progress == []
+    assert probe_calls == [[(101, "C:/lib1", [("hidden.mkv", "C:/lib1/hidden.mkv")])]]
+
+
 def test_file_table_store_private_state_is_not_read_outside_store():
     """GUI/controllers should use FileTableStore's public API, not private containers."""
     from pathlib import Path
