@@ -148,7 +148,7 @@ def test_store_checked_propagates_to_both_adapters(qtbot):
     store = FileTableStore()
     table = QTableView()
     tree = QTreeWidget()
-    tree.setColumnCount(6)
+    tree.setColumnCount(7)
     fa = FlatAdapter(store, table)
     ta = TreeAdapter(store, tree)
 

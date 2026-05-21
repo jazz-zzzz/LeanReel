@@ -105,7 +105,7 @@ def test_build_encode_tasks_supports_per_file_strategy_overrides():
         snapshots,
         {7: "D:/Movies"},
         default_strategy,
-        {"b.mkv": custom_strategy},
+        {(7, "b.mkv"): custom_strategy},
     )
 
     assert [task.strategy_name for task in tasks] == ["均衡压缩", "自定义"]

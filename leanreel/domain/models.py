@@ -254,6 +254,10 @@ class FileDecisionDisplay:
     tooltip: str
 
 
+FileKey = tuple[int, str]
+DirectoryKey = tuple[int, str]
+
+
 @dataclass
 class FileRow:
     """文件表格中的一行数据。
@@ -266,8 +270,12 @@ class FileRow:
     decision: FileDecisionDisplay | None = field(default=None, repr=False)
 
     @property
-    def key(self) -> tuple[int, str]:
-        return (self.snap.library_folder_id, self.snap.relative_path)
+    def key(self) -> FileKey:
+        return (int(self.snap.library_folder_id or 0), str(self.snap.relative_path))
+
+    @property
+    def directory_key(self) -> DirectoryKey:
+        return (int(self.snap.library_folder_id or 0), self.folder_name)
 
     @property
     def folder_name(self) -> str:

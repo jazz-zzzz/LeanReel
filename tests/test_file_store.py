@@ -32,6 +32,30 @@ def test_file_row_folder_name_root():
     assert row.folder_name == "."
 
 
+def test_file_row_identity_keys_include_library_folder_id():
+    row = FileRow(snap=_snap(
+        library_folder_id=42,
+        relative_path="Season 1/E01.mkv",
+        file_name="E01.mkv",
+    ))
+
+    assert row.key == (42, "Season 1/E01.mkv")
+    assert row.directory_key == (42, "Season 1")
+    assert row.folder_name == "Season 1"
+
+
+def test_file_row_root_directory_key_includes_library_folder_id():
+    row = FileRow(snap=_snap(
+        library_folder_id=77,
+        relative_path="movie.mkv",
+        file_name="movie.mkv",
+    ))
+
+    assert row.key == (77, "movie.mkv")
+    assert row.directory_key == (77, ".")
+    assert row.folder_name == "."
+
+
 def test_store_rebuild():
     store = FileTableStore()
     snap = _snap()
@@ -111,13 +135,13 @@ def test_store_rebuild_keep_checked_false():
     assert not store.is_checked((7, "a.mkv"))
 
 
-def test_store_folder_stats():
+def test_store_folder_stats_keyed_by_directory_identity():
     store = FileTableStore()
     store.rebuild([
-        FileRow(snap=_snap(relative_path="S1/a.mkv", size_bytes=1000)),
-        FileRow(snap=_snap(relative_path="S1/b.mkv", size_bytes=2000)),
-        FileRow(snap=_snap(relative_path="S2/c.mkv", size_bytes=500)),
+        FileRow(snap=_snap(library_folder_id=1, relative_path="S1/a.mkv", size_bytes=1000)),
+        FileRow(snap=_snap(library_folder_id=1, relative_path="S1/b.mkv", size_bytes=2000)),
+        FileRow(snap=_snap(library_folder_id=2, relative_path="S1/c.mkv", size_bytes=500)),
     ])
     stats = store.folder_stats()
-    assert stats["S1"] == 3000
-    assert stats["S2"] == 500
+    assert stats[(1, "S1")] == (3000, 2)
+    assert stats[(2, "S1")] == (500, 1)

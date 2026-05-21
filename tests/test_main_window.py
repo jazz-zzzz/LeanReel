@@ -233,13 +233,13 @@ def test_file_list_tree_view_columns_are_aligned_with_headers():
 
     folder = panel.tree.topLevelItem(0)
     child = folder.child(0)
-    assert panel.tree.headerItem().text(0) == "文件名"
+    assert panel.tree.headerItem().text(0) == "文件夹名"
     assert child.text(0) == "Episode 01.mkv"
     assert "GB" in child.text(1)
-    assert "h264" in child.text(2)
-    assert child.text(3) == "SDR"
-    assert child.text(4) == "x265 HEVC CRF 20 标准转码"
-    assert "GB" in child.text(5)
+    assert "h264" in child.text(3)
+    assert child.text(4) == "SDR"
+    assert child.text(5) == "x265 HEVC CRF 20 标准转码"
+    assert "GB" in child.text(6)
     panel.close()
 
 

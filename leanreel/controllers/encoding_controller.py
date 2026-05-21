@@ -23,7 +23,7 @@ def build_encode_tasks(
     snapshots,
     folder_paths: dict[int, str],
     strategy: Strategy,
-    strategy_overrides: dict[str, Strategy] | None = None,
+    strategy_overrides: dict[tuple[int, str], Strategy] | None = None,
 ) -> list[EncodeTask]:
     tasks: list[EncodeTask] = []
     strategy_overrides = strategy_overrides or {}
@@ -34,7 +34,7 @@ def build_encode_tasks(
         if not folder_path:
             continue
         file_key = (int(snap.library_folder_id or 0), str(snap.relative_path))
-        selected_strategy = strategy_overrides.get(file_key, strategy_overrides.get(snap.relative_path, strategy))
+        selected_strategy = strategy_overrides.get(file_key, strategy)
         input_path = Path(folder_path) / snap.relative_path
         tasks.append(EncodeTask(
             file_name=snap.file_name,

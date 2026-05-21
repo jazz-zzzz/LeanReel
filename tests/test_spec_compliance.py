@@ -411,8 +411,8 @@ def test_c2_tree_view_colors_match_flat(qtbot):
     panel.set_view_mode("tree")
     folder = panel.tree.topLevelItem(0)
     child = folder.child(0)
-    assert child.foreground(2).color().name() == "#8db87c"
-    assert child.foreground(3).color().name() == "#6b6560"
+    assert child.foreground(3).color().name() == "#8db87c"
+    assert child.foreground(4).color().name() == "#6b6560"
     panel.close()
 
 
@@ -1114,6 +1114,42 @@ def test_background_scan_resolved_starts_probe_without_current_ui_mutation(qtbot
     assert probe_calls == [[(101, "C:/lib1", [("hidden.mkv", "C:/lib1/hidden.mkv")])]]
 
 
+def test_scan_populate_matches_duplicate_relative_paths_by_file_key(qtbot):
+    """Scan population must not let one folder's match leak to another folder."""
+    _qapp()
+    from types import SimpleNamespace
+    from leanreel.controllers.scan_controller import ScanController
+    from leanreel.domain.models import Strategy
+    from leanreel.state.file_store import FileTableStore
+
+    strategy = Strategy(name="Only Folder 2")
+
+    class Matcher:
+        def match(self, snap):
+            return strategy if snap.library_folder_id == 2 else None
+
+    panel = FileListPanel()
+    qtbot.addWidget(panel)
+    store = FileTableStore()
+    panel.set_store(store)
+    ctrl = SimpleNamespace(
+        _services=SimpleNamespace(matcher=Matcher(), strategies=[strategy]),
+        _file_panel=panel,
+        _store=store,
+    )
+    snapshots = [
+        _snap(library_folder_id=1, relative_path="movie.mkv", file_name="movie.mkv"),
+        _snap(library_folder_id=2, relative_path="movie.mkv", file_name="movie.mkv"),
+    ]
+
+    ScanController._populate_file_list(ctrl, snapshots)
+
+    decisions = {row.key: row.decision.strategy_text for row in store.rows()}
+    assert decisions[(1, "movie.mkv")] == "跳过"
+    assert decisions[(2, "movie.mkv")] == "Only Folder 2"
+    panel.close()
+
+
 def test_refresh_shows_indeterminate_progress_during_file_discovery(qtbot):
     """Recursive discovery has no known total yet, so the progress bar should show busy state."""
     _qapp()
@@ -1511,3 +1547,21 @@ def test_start_request_uses_checked_file_keys_for_duplicate_relative_paths(qtbot
 
     assert [(s.library_folder_id, s.relative_path) for s in captured["snaps"]] == [(2, "movie.mkv")]
     panel.close()
+
+
+def test_identity_sensitive_maps_do_not_use_display_only_keys():
+    """Multi-library maps must use explicit identities, not display-only names."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+
+    scan_source = (root / "leanreel" / "controllers" / "scan_controller.py").read_text(encoding="utf-8")
+    assert "matched[s.relative_path]" not in scan_source
+    assert "matched.get(s.relative_path)" not in scan_source
+
+    tree_source = (root / "leanreel" / "gui" / "adapters" / "tree_adapter.py").read_text(encoding="utf-8")
+    assert "self._folder_items.get(fname)" not in tree_source
+    assert "self._folder_items[fname]" not in tree_source
+
+    encoding_source = (root / "leanreel" / "controllers" / "encoding_controller.py").read_text(encoding="utf-8")
+    assert "strategy_overrides.get(snap.relative_path" not in encoding_source

@@ -122,28 +122,31 @@ class ScanController:
         self._file_panel.set_progress(st.done_files, st.total_files)
         self._win.set_status(f"探测中：{st.done_files}/{st.total_files}...")
 
-    def _populate_file_list(self, snapshots) -> dict[str, MatchResult]:
-        matched: dict[str, MatchResult] = {}
+    def _populate_file_list(self, snapshots) -> dict[tuple[int, str], MatchResult]:
+        matched: dict[tuple[int, str], MatchResult] = {}
         for s in snapshots:
+            key = (int(s.library_folder_id or 0), str(s.relative_path))
             strategy = self._services.matcher.match(s)
             if strategy is None:
-                matched[s.relative_path] = MatchResult(
+                matched[key] = MatchResult(
                     strategy=get_skip_reason(s) or "跳过",
                     estimate={},
                 )
                 continue
-            matched[s.relative_path] = MatchResult(
+            matched[key] = MatchResult(
                 strategy=strategy,
                 estimate=estimate_savings(s, strategy),
             )
         rows = []
         for s in snapshots:
-            m = matched.get(s.relative_path)
+            key = (int(s.library_folder_id or 0), str(s.relative_path))
+            m = matched.get(key)
             d = self._file_panel._decision_display(s, m)
             rows.append(FileRow(snap=s, match=m, decision=d))
         self._file_panel.set_strategy_lookup(self._services.strategies)
         self._store.rebuild(rows, strategies=self._services.strategies, keep_checked=False)
-        self._file_panel._show_table()
+        self._file_panel._show_current_view()
+        self._file_panel.refresh_summary(snapshots)
         if self._services.strategies and self._file_panel._flat_adapter:
             self._file_panel._flat_adapter.create_combo_cells(self._file_panel._create_strategy_combo)
         return matched

@@ -37,7 +37,7 @@ def test_tree_adapter_rebuild_creates_folders(qtbot):
     store = FileTableStore()
     tree = QTreeWidget()
     qtbot.addWidget(tree)
-    tree.setColumnCount(6)
+    tree.setColumnCount(7)
 
     adapter = TreeAdapter(store, tree)
     s1 = _snap(relative_path="S1/a.mkv", file_name="a.mkv")
@@ -50,13 +50,41 @@ def test_tree_adapter_rebuild_creates_folders(qtbot):
     assert folder1.childCount() == 2
 
 
+def test_tree_adapter_keeps_duplicate_directory_names_separate(qtbot):
+    from leanreel.gui.adapters.tree_adapter import TreeAdapter
+
+    store = FileTableStore()
+    tree = QTreeWidget()
+    qtbot.addWidget(tree)
+    tree.setColumnCount(7)
+    adapter = TreeAdapter(store, tree)
+
+    store.rebuild([
+        _row(
+            _snap(library_folder_id=1, relative_path="Season 1/E01.mkv", file_name="E01.mkv", size_bytes=1000),
+            _make_decision(),
+        ),
+        _row(
+            _snap(library_folder_id=2, relative_path="Season 1/E02.mkv", file_name="E02.mkv", size_bytes=2000),
+            _make_decision(),
+        ),
+    ])
+
+    assert tree.topLevelItemCount() == 2
+    folder_ids = {
+        tree.topLevelItem(0).data(0, Qt.UserRole),
+        tree.topLevelItem(1).data(0, Qt.UserRole),
+    }
+    assert folder_ids == {1, 2}
+
+
 def test_tree_adapter_folder_total_size(qtbot):
     from leanreel.gui.adapters.tree_adapter import TreeAdapter
 
     store = FileTableStore()
     tree = QTreeWidget()
     qtbot.addWidget(tree)
-    tree.setColumnCount(6)
+    tree.setColumnCount(7)
     adapter = TreeAdapter(store, tree)
 
     s1 = _snap(relative_path="S1/a.mkv", size_bytes=1000)
@@ -73,7 +101,7 @@ def test_tree_adapter_row_update(qtbot):
     store = FileTableStore()
     tree = QTreeWidget()
     qtbot.addWidget(tree)
-    tree.setColumnCount(6)
+    tree.setColumnCount(7)
     adapter = TreeAdapter(store, tree)
 
     snap = _snap(video_codec="", size_bytes=0, probe_ok=False)
@@ -83,7 +111,7 @@ def test_tree_adapter_row_update(qtbot):
     store.update_row((7, "Season 1/E01.mkv"), new_snap)
 
     child = tree.topLevelItem(0).child(0)
-    assert "h264" in child.text(2)
+    assert "h264" in child.text(3)
 
 
 def test_tree_adapter_child_checkbox(qtbot):
@@ -92,7 +120,7 @@ def test_tree_adapter_child_checkbox(qtbot):
     store = FileTableStore()
     tree = QTreeWidget()
     qtbot.addWidget(tree)
-    tree.setColumnCount(6)
+    tree.setColumnCount(7)
     adapter = TreeAdapter(store, tree)
 
     store.rebuild([_row(_snap(), _make_decision())])

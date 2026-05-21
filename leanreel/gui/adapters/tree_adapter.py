@@ -22,7 +22,7 @@ class TreeAdapter(QObject):
         super().__init__()
         self._store = store
         self._tree = tree
-        self._folder_items: dict[str, QTreeWidgetItem] = {}
+        self._folder_items: dict[tuple[int, str], QTreeWidgetItem] = {}
         self._child_by_key: dict[tuple[int, str], QTreeWidgetItem] = {}
         self._dirty = False
         store.rows_rebuilt.connect(self._on_rebuild)
@@ -54,17 +54,18 @@ class TreeAdapter(QObject):
         stats = store.folder_stats()
         for i in range(store.count()):
             row = store.row_at(i)
-            fname = row.folder_name
-            folder = self._folder_items.get(fname)
+            folder_key = row.directory_key
+            folder = self._folder_items.get(folder_key)
             if folder is None:
-                total = stats.get(fname, 0)
-                folder = _SortableTreeItem([fname, _format_bytes(total), "", "", "", ""])
+                total, count = stats.get(folder_key, (0, 0))
+                folder = _SortableTreeItem([row.folder_name, _format_bytes(total), str(count), "", "", "", ""])
                 folder.setData(1, Qt.UserRole, total)
+                folder.setData(2, Qt.UserRole, count)
                 folder.setData(0, Qt.UserRole, row.key[0])  # folder_id for context menu
                 font = folder.font(0)
                 font.setBold(True)
                 folder.setFont(0, font)
-                self._folder_items[fname] = folder
+                self._folder_items[folder_key] = folder
                 self._tree.addTopLevelItem(folder)
             child = self._render_child(row)
             self._child_by_key[row.key] = child
@@ -77,6 +78,7 @@ class TreeAdapter(QObject):
         child = QTreeWidgetItem([
             snap.file_name,
             _format_bytes(snap.size_bytes),
+            "",
             self._format_codec(snap),
             self._hdr_text(snap),
             d.strategy_text if d else "—",
@@ -92,16 +94,16 @@ class TreeAdapter(QObject):
             child.setToolTip(0, d.tooltip if d else "")
         # 颜色
         if snap.video_codec:
-            child.setForeground(2, _COLOR_CODEC_OK)
+            child.setForeground(3, _COLOR_CODEC_OK)
         elif d and d.status_key == "probe_failed":
-            child.setForeground(2, _COLOR_PROBE_FAILED)
+            child.setForeground(3, _COLOR_PROBE_FAILED)
         else:
-            child.setForeground(2, _COLOR_CODEC_MISSING)
-        child.setForeground(3, self._hdr_color(snap))
+            child.setForeground(3, _COLOR_CODEC_MISSING)
+        child.setForeground(4, self._hdr_color(snap))
         if d and d.status_key == "protected":
-            child.setForeground(4, _COLOR_HDR_DV)
+            child.setForeground(5, _COLOR_HDR_DV)
         elif d and d.status_key == "probe_failed":
-            child.setForeground(4, _COLOR_PROBE_FAILED)
+            child.setForeground(5, _COLOR_PROBE_FAILED)
         return child
 
     # ── 单行更新 ──
@@ -110,18 +112,18 @@ class TreeAdapter(QObject):
         d = row.decision
         snap = row.snap
         child.setText(1, _format_bytes(snap.size_bytes))
-        child.setText(2, self._format_codec(snap))
-        child.setText(3, self._hdr_text(snap))
-        child.setText(4, d.strategy_text if d else "—")
-        child.setText(5, d.result_text if d else "—")
-        child.setForeground(2, _COLOR_CODEC_OK if snap.video_codec else _COLOR_CODEC_MISSING)
-        child.setForeground(3, self._hdr_color(snap))
+        child.setText(3, self._format_codec(snap))
+        child.setText(4, self._hdr_text(snap))
+        child.setText(5, d.strategy_text if d else "—")
+        child.setText(6, d.result_text if d else "—")
+        child.setForeground(3, _COLOR_CODEC_OK if snap.video_codec else _COLOR_CODEC_MISSING)
+        child.setForeground(4, self._hdr_color(snap))
         if d and d.status_key == "protected":
-            child.setForeground(4, _COLOR_HDR_DV)
+            child.setForeground(5, _COLOR_HDR_DV)
         elif d and d.status_key == "probe_failed":
-            child.setForeground(4, _COLOR_PROBE_FAILED)
+            child.setForeground(5, _COLOR_PROBE_FAILED)
         else:
-            child.setForeground(4, QColor())
+            child.setForeground(5, QColor())
         if d and d.processable:
             child.setFlags(child.flags() | Qt.ItemIsEnabled)
         else:
@@ -132,13 +134,15 @@ class TreeAdapter(QObject):
         if child is None:
             return
         self._update_child(child, row)
-        fname = row.folder_name
-        folder = self._folder_items.get(fname)
+        folder_key = row.directory_key
+        folder = self._folder_items.get(folder_key)
         if folder:
             stats = self._store.folder_stats()
-            total = stats.get(fname, 0)
+            total, count = stats.get(folder_key, (0, 0))
             folder.setText(1, _format_bytes(total))
             folder.setData(1, Qt.UserRole, total)
+            folder.setText(2, str(count))
+            folder.setData(2, Qt.UserRole, count)
 
     # ── 勾选同步 ──
 
@@ -152,7 +156,7 @@ class TreeAdapter(QObject):
     # ── 过滤 ──
 
     def apply_tree_filter(self, filter_key: str):
-        for fname, folder in self._folder_items.items():
+        for _folder_key, folder in self._folder_items.items():
             visible = 0
             for i in range(folder.childCount()):
                 child = folder.child(i)

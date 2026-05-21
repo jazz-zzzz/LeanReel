@@ -104,9 +104,10 @@ class FileTableStore(QObject):
                 return row
         return None
 
-    def folder_stats(self) -> dict[str, int]:
-        """返回 文件夹名 -> 总大小 的映射。"""
-        stats: dict[str, int] = {}
+    def folder_stats(self) -> dict[tuple[int, str], tuple[int, int]]:
+        """返回 目录身份 -> (总大小, 文件数) 的映射。"""
+        stats: dict[tuple[int, str], tuple[int, int]] = {}
         for row in self._rows:
-            stats[row.folder_name] = stats.get(row.folder_name, 0) + row.snap.size_bytes
+            size, count = stats.get(row.directory_key, (0, 0))
+            stats[row.directory_key] = (size + row.snap.size_bytes, count + 1)
         return stats

@@ -216,7 +216,7 @@ class TestEncodingControllerStart:
         sample_snapshots, sample_folder_paths, default_strategy, hq_strategy,
     ):
         """正向用例 2：per-file 策略覆盖 — 覆盖策略的文件使用对应策略，其余用默认"""
-        overrides = {"Movies/Action.mkv": hq_strategy}
+        overrides = {(1, "Movies/Action.mkv"): hq_strategy}
         result = controller.start(sample_snapshots, sample_folder_paths, overrides)
 
         assert result is True
@@ -238,6 +238,24 @@ class TestEncodingControllerStart:
         assert tasks_by_name["Action.mkv"].strategy is hq_strategy
         # Drama.mkv 使用默认策略
         assert tasks_by_name["Drama.mkv"].strategy_name == "均衡压缩"
+
+    def test_build_encode_tasks_ignores_bare_relative_path_override_when_file_key_absent(
+        self, default_strategy, hq_strategy,
+    ):
+        """边界用例：不同库同名相对路径不能被裸 relative_path 覆盖串联。"""
+        snapshots = [
+            FileSnapshot(library_folder_id=1, relative_path="movie.mkv", file_name="movie.mkv", video_codec="h264"),
+            FileSnapshot(library_folder_id=2, relative_path="movie.mkv", file_name="movie.mkv", video_codec="h264"),
+        ]
+
+        tasks = build_encode_tasks(
+            snapshots,
+            {1: "C:/one", 2: "C:/two"},
+            default_strategy,
+            {"movie.mkv": hq_strategy},
+        )
+
+        assert [task.strategy_name for task in tasks] == ["均衡压缩", "均衡压缩"]
 
     def test_start_returns_false_when_already_encoding(self, controller, sample_snapshots, sample_folder_paths):
         """负向用例 1：编码进行中时再次调用 start() 返回 False"""

@@ -13,7 +13,7 @@ from PySide6.QtCore import QEvent, Signal, Qt
 from PySide6.QtGui import QColor
 
 _HEADERS = ["", "文件名", "体积", "编码信息", "HDR", "处理策略", "预计结果"]
-_TREE_HEADERS = ["文件名", "体积", "编码信息", "HDR", "处理策略", "预计结果"]
+_TREE_HEADERS = ["文件夹名", "体积", "文件数", "编码信息", "HDR", "处理策略", "预计结果"]
 
 from leanreel.gui.theme import (
     _COLOR_CODEC_OK,
@@ -128,6 +128,15 @@ class FileListPanel(QWidget):
 
     def _show_tree(self):
         self.stack.setCurrentWidget(self.tree)
+
+    def _show_current_view(self):
+        """根据 current_view_mode 切换到正确视图（用于数据刷新后恢复视图状态）。"""
+        if self.current_view_mode == "tree":
+            self._show_tree()
+            if self._tree_adapter:
+                self._tree_adapter.ensure_current()
+        else:
+            self._show_table()
 
     def _show_empty(self, message="未扫描"):
         self.summary_label.setText(message)
@@ -386,6 +395,7 @@ class FileListPanel(QWidget):
             self._show_empty()
             if self._store:
                 self._store.rebuild([], strategies=strategies, keep_checked=False)
+            self.summary_label.setText("未扫描")
             self._update_selection_count()
             return
 
@@ -402,7 +412,7 @@ class FileListPanel(QWidget):
         self._store.rebuild(rows, strategies=strategies, keep_checked=not fast)
 
         # Store.rebuild 通过信号驱动 Model/Adapter 自动更新 UI
-        self._show_table()
+        self._show_current_view()
 
         self.refresh_summary(snapshots)
         self._update_selection_count()
