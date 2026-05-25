@@ -217,7 +217,7 @@ class FFmpegExecutor:
                     plan.mark_stage_completed(i)
 
                 elif slot_id == "inject_rpu":
-                    dv_output = task_temp_dir / f"{final_output.stem}_dv{final_output.suffix}"
+                    dv_output = Path(str(staging_output) + ".dv_tmp")
                     if dv_output.exists():
                         try:
                             dv_output.unlink()
@@ -226,9 +226,8 @@ class FFmpegExecutor:
                     ok, stderr = DoviTool.inject_rpu(str(staging_output), str(rpu_file), str(dv_output))
                     if not ok:
                         raise RuntimeError(f"Dolby Vision RPU injection failed: {task.file_name}\n{stderr[:500]}")
-                    if staging_output.exists():
-                        staging_output.unlink()
-                    staging_output = dv_output
+                    staging_output.unlink()
+                    os.replace(str(dv_output), str(staging_output))
                     plan.mark_stage_completed(i)
 
                 elif slot_id == "move_out":
@@ -320,6 +319,8 @@ class FFmpegExecutor:
             task.status = TaskStatus.CANCELLED
             task.progress = plan.compute_overall_progress()
             self._emit_progress(task)
+            if staging_output.exists():
+                staging_output.unlink()
             raise
         except Exception as e:
             current_idx = task.current_stage_index
