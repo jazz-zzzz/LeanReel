@@ -7,6 +7,8 @@ from leanreel.domain.models import Strategy
 from leanreel.executor.resources import bundled_resource_path
 from leanreel.executor._config import _config
 
+_VERSION_TIMEOUT = 5
+
 
 def get_ffmpeg_path() -> str:
     """获取 ffmpeg 路径，优先使用内置版本"""
@@ -168,12 +170,13 @@ def run_ffmpeg(cmd: list[str], progress_callback=None,
 
 def get_ffmpeg_version() -> str:
     """返回 FFmpeg 版本字符串，例如 'ffmpeg version 7.1...'"""
-    import subprocess
     try:
         proc = subprocess.run(
             [get_ffmpeg_path(), "-version"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+            timeout=_VERSION_TIMEOUT,
         )
-        return proc.stdout.split("\n")[0].strip() if proc.returncode == 0 else "unknown"
+        return proc.stdout.strip().split("\n")[0] if proc.returncode == 0 else "unknown"
     except Exception:
         return "unknown"
