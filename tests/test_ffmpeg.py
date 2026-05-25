@@ -329,7 +329,7 @@ def test_ffmpeg_executor_runs_built_command(monkeypatch, balanced_strategy, tmp_
         snapshot=FileSnapshot(video_codec="h264"),
     )
 
-    FFmpegExecutor(temp_dir=str(temp_dir), sync_output=True).encode(task)
+    FFmpegExecutor(temp_dir=str(temp_dir)).encode(task)
 
     assert len(calls) == 1
     cmd = calls[0]
@@ -349,9 +349,9 @@ def test_ffmpeg_executor_runs_built_command(monkeypatch, balanced_strategy, tmp_
     assert "-map_metadata 0" in cmd_joined
     assert "-map_chapters 0" in cmd_joined
 
-    # I/O 分离：命令输出到临时目录
-    assert str(temp_dir) in str(cmd[-1])
-    # 最终文件在目标路径
+    # I/O 分离：命令输出到暂存文件（.staging 后缀）
+    assert str(cmd[-1]).endswith(".staging")
+    # 最终文件在目标路径（原子提交后）
     assert (tmp_path / "sample.out.mkv").exists()
 
 
@@ -370,7 +370,7 @@ def test_ffmpeg_executor_raises_when_command_fails(monkeypatch, balanced_strateg
     )
 
     with pytest.raises(RuntimeError):
-        FFmpegExecutor(temp_dir=str(temp_dir), sync_output=True).encode(task)
+        FFmpegExecutor(temp_dir=str(temp_dir)).encode(task)
 
     # 失败时临时文件应被清理
     temps = list(temp_dir.glob("sample.out.mkv"))
@@ -583,7 +583,7 @@ def test_ffmpeg_executor_uses_unique_temp_paths_for_same_output_names(monkeypatc
             strategy=balanced_strategy,
             snapshot=FileSnapshot(video_codec="h264", size_bytes=1000),
         )
-        FFmpegExecutor(temp_dir=str(temp_dir), sync_output=True).encode(task)
+        FFmpegExecutor(temp_dir=str(temp_dir)).encode(task)
         assert task.compressed_size == len("encoded")
 
     assert len(commands) == 2
@@ -641,7 +641,7 @@ def test_ffmpeg_executor_dovi_flow(monkeypatch, tmp_path):
         snapshot=snap,
     )
 
-    FFmpegExecutor(temp_dir=str(temp_dir), sync_output=True).encode(task)
+    FFmpegExecutor(temp_dir=str(temp_dir)).encode(task)
 
     assert len(dovi_extract_calls) == 1
     assert len(dovi_inject_calls) == 1
@@ -684,7 +684,7 @@ def test_ffmpeg_executor_dovi_cleanup_rpu_on_failure(monkeypatch, tmp_path):
     )
 
     with pytest.raises(RuntimeError):
-        FFmpegExecutor(temp_dir=str(temp_dir), sync_output=True).encode(task)
+        FFmpegExecutor(temp_dir=str(temp_dir)).encode(task)
 
     # RPU 临时文件应该被清理
     rpu_files = list(temp_dir.glob("*.rpu"))
@@ -1139,7 +1139,7 @@ def test_ffmpeg_executor_progress_callback_clamped_to_one(monkeypatch, tmp_path)
     )
 
     # 不设置 progress_callback — 仅验证内部 task.progress
-    FFmpegExecutor(temp_dir=str(tmp_path / "temp"), sync_output=True).encode(task)
+    FFmpegExecutor(temp_dir=str(tmp_path / "temp")).encode(task)
 
     # 所有阶段完成后，总进度应为 1.0
     assert task.progress == pytest.approx(1.0)
@@ -1267,7 +1267,7 @@ def test_encode_cleans_up_dv_output_on_inject_failure(monkeypatch, tmp_path):
     )
 
     with pytest.raises(RuntimeError) as exc_info:
-        FFmpegExecutor(temp_dir=str(temp_dir), sync_output=True).encode(task)
+        FFmpegExecutor(temp_dir=str(temp_dir)).encode(task)
 
     assert "inject" in str(exc_info.value).lower()
 
@@ -1279,9 +1279,9 @@ def test_encode_cleans_up_dv_output_on_inject_failure(monkeypatch, tmp_path):
     rpu_files = list(temp_dir.glob("*.rpu"))
     assert len(rpu_files) == 0, f"rpu files leaked: {rpu_files}"
 
-    # 编码输出临时文件也应被清理
-    temp_outputs = list(temp_dir.glob("dv_fail_SS.mkv"))
-    assert len(temp_outputs) == 0, f"temp output files leaked: {temp_outputs}"
+    # 暂存输出文件也应被清理（不再在 temp_dir 内，而在输出路径旁）
+    staging_output = tmp_path / "dv_fail_SS.mkv.staging"
+    assert not staging_output.exists(), f"staging output leaked: {staging_output}"
 
 
 # ============================================================

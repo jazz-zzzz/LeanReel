@@ -134,7 +134,7 @@ class FFmpegExecutor:
 
                 elif slot_id == "transcode":
                     # 使用本地副本进行编码（如果已复制到本地，否则直接用源文件）
-                    encode_input = str(local_input) if local_input else task.input_path
+                    encode_input = task.input_path
 
                     # 自适应 CQ：低比特率源 → 提高 CQ 避免体积反超
                     cq = strategy.video.cq if hasattr(strategy, "video") else 26
@@ -159,7 +159,7 @@ class FFmpegExecutor:
                     import copy
                     adjusted = copy.deepcopy(strategy)
                     adjusted.video.cq = cq
-                    cmd = FFmpegBuilder.build(snap, adjusted, encode_input, str(temp_output))
+                    cmd = FFmpegBuilder.build(snap, adjusted, encode_input, str(staging_output))
                     # Store for audit
                     task._ffmpeg_command = list(cmd)
                     task._adaptive_cq = {
@@ -195,10 +195,10 @@ class FFmpegExecutor:
                                 stage.internal_progress = max(stage.internal_progress, pct)
                             except (ValueError, IndexError):
                                 pass
-                        elif temp_output.exists() and estimated_output > 0:
+                        elif staging_output.exists() and estimated_output > 0:
                             # 回退：输出文件大小 / 估算输出大小
                             try:
-                                pct = min(temp_output.stat().st_size / estimated_output, 0.98)
+                                pct = min(staging_output.stat().st_size / estimated_output, 0.98)
                                 stage.internal_progress = max(stage.internal_progress, pct)
                             except OSError:
                                 pass
@@ -211,8 +211,8 @@ class FFmpegExecutor:
                         cancel_event=cancel_event,
                     )
                     if exit_code != 0:
-                        if temp_output.exists():
-                            temp_output.unlink()
+                        if staging_output.exists():
+                            staging_output.unlink()
                         raise RuntimeError(f"FFmpeg failed ({exit_code}): {task.file_name}\n{stderr_tail.strip()}")
                     plan.mark_stage_completed(i)
 
@@ -223,38 +223,29 @@ class FFmpegExecutor:
                             dv_output.unlink()
                         except OSError:
                             pass
-                    ok, stderr = DoviTool.inject_rpu(str(temp_output), str(rpu_file), str(dv_output))
+                    ok, stderr = DoviTool.inject_rpu(str(staging_output), str(rpu_file), str(dv_output))
                     if not ok:
                         raise RuntimeError(f"Dolby Vision RPU injection failed: {task.file_name}\n{stderr[:500]}")
-                    if temp_output.exists():
-                        temp_output.unlink()
-                    temp_output = dv_output
+                    if staging_output.exists():
+                        staging_output.unlink()
+                    staging_output = dv_output
                     plan.mark_stage_completed(i)
 
                 elif slot_id == "move_out":
-                    if self.sync_output:
-                        if temp_output.resolve() == final_output.resolve():
-                            if final_output.exists():
-                                task.compressed_size = final_output.stat().st_size
-                        else:
-                            final_output.parent.mkdir(parents=True, exist_ok=True)
-                            _safe_replace_output(temp_output, final_output)
-                            if final_output.exists():
-                                task.compressed_size = final_output.stat().st_size
-                    else:
-                        final_output.parent.mkdir(parents=True, exist_ok=True)
-                        _safe_replace_output(temp_output, final_output)
-                        if final_output.exists():
-                            task.compressed_size = final_output.stat().st_size
+                    if staging_output.exists():
+                        task.compressed_size = staging_output.stat().st_size
                     plan.mark_stage_completed(i)
 
                 task.progress = plan.compute_overall_progress()
                 self._emit_progress(task)
 
             # ── 体积反超检查（写完输出后再判断） ──
+            if staging_output.exists():
+                task.compressed_size = staging_output.stat().st_size
+
             if task.compressed_size > 0 and task.original_size > 0 and task.compressed_size >= task.original_size:
-                if final_output.exists():
-                    final_output.unlink()
+                if staging_output.exists():
+                    staging_output.unlink()
                 task.compressed_size = task.original_size
                 if plan.stages:
                     for s in plan.stages:
@@ -262,6 +253,10 @@ class FFmpegExecutor:
                             s.detail = "跳过（输出 ≥ 原体积）"
                             break
                 task._output_discarded = True
+            else:
+                # 原子提交：将暂存文件移动到最终位置
+                final_output.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(str(staging_output), str(final_output))
 
             # ── 审计双写（仅当输出未被丢弃） ──
             if not getattr(task, "_output_discarded", False):
@@ -335,9 +330,9 @@ class FFmpegExecutor:
             task.error_message = str(e)
             task.progress = plan.compute_overall_progress()
             self._emit_progress(task)
-            if temp_output.exists():
-                temp_output.unlink()
-            if dv_output and dv_output.exists() and dv_output != temp_output:
+            if staging_output.exists():
+                staging_output.unlink()
+            if dv_output and dv_output.exists() and dv_output != staging_output:
                 try:
                     dv_output.unlink()
                 except OSError:
@@ -346,15 +341,9 @@ class FFmpegExecutor:
         finally:
             with self._cancel_lock:
                 self._cancel_events.pop(task.input_path, None)
-            if not self.keep_temp:
-                if rpu_file and rpu_file.exists():
-                    try:
-                        rpu_file.unlink()
-                    except OSError:
-                        pass
-                if local_input and local_input.exists():
-                    try:
-                        local_input.unlink()
-                    except OSError:
-                        pass
-                shutil.rmtree(str(task_temp_dir), ignore_errors=True)
+            if rpu_file and rpu_file.exists():
+                try:
+                    rpu_file.unlink()
+                except OSError:
+                    pass
+            shutil.rmtree(str(task_temp_dir), ignore_errors=True)
