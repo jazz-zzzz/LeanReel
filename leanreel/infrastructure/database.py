@@ -123,6 +123,7 @@ class Database(LibraryStore):
             ("ffmpeg_command", "TEXT DEFAULT ''"),
             ("sidecar_path", "TEXT DEFAULT ''"),
             ("leanreel_version", "TEXT DEFAULT ''"),
+            ("source_deleted", "INTEGER DEFAULT 0"),
         ]
         for col_name, col_def in ch_migrations:
             if col_name not in existing_ch:
@@ -213,6 +214,7 @@ class Database(LibraryStore):
             "output_path", "output_size_bytes", "savings_pct",
             "encoder", "cq_value", "preset", "pix_fmt",
             "audio_mode", "sub_mode", "ffmpeg_command", "sidecar_path", "leanreel_version",
+            "source_deleted",
         ]
         values = [
             record.file_snapshot_id, record.strategy_name, record.original_size,
@@ -230,6 +232,7 @@ class Database(LibraryStore):
             getattr(record, "ffmpeg_command", ""),
             getattr(record, "sidecar_path", ""),
             getattr(record, "leanreel_version", ""),
+            getattr(record, "source_deleted", 0),
         ]
         placeholders = ",".join("?" * len(cols))
         self.execute(

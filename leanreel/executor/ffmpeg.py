@@ -308,6 +308,14 @@ class FFmpegExecutor:
 
                     if getattr(task, "_delete_source", False) and task.status.value == "completed" and 0 < task.compressed_size < task.original_size:
                         _delete_source_file(task.input_path)
+                        rec.source_deleted = 1
+                        try:
+                            db.execute(
+                                "UPDATE compression_history SET source_deleted = 1 WHERE id = ?",
+                                [db_id],
+                            )
+                        except Exception:
+                            pass
                 except Exception:
                     import traceback
                     traceback.print_exc()
