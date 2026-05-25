@@ -273,14 +273,7 @@ class FFmpegExecutor:
                             _safe_replace_output(temp_output, final_output)
                             if final_output.exists():
                                 task.compressed_size = final_output.stat().st_size
-                        # 压缩后体积变大 → 丢弃结果，保留原文件
-                        if task.compressed_size > 0 and task.original_size > 0 and task.compressed_size >= task.original_size:
-                            if final_output.exists():
-                                final_output.unlink()
-                            task.compressed_size = task.original_size
-                            stage.detail = "跳过（输出 ≥ 原体积）"
                     else:
-                        # 至少保留编码产物
                         final_output.parent.mkdir(parents=True, exist_ok=True)
                         _safe_replace_output(temp_output, final_output)
                         if final_output.exists():
@@ -290,60 +283,72 @@ class FFmpegExecutor:
                 task.progress = plan.compute_overall_progress()
                 self._emit_progress(task)
 
-            # ── 审计双写 ──
-            try:
-                from leanreel.services.audit import build_audit, write_sidecar
-                cmd = getattr(task, "_ffmpeg_command", [])
-                cq_info = getattr(task, "_adaptive_cq", {})
-                audit = build_audit(
-                    task=task,
-                    ffmpeg_command=cmd,
-                    adaptive_cq_original=cq_info.get("original", 0),
-                    adaptive_cq_adjusted=cq_info.get("adjusted", 0),
-                    adaptive_cq_reason=cq_info.get("reason", ""),
-                )
-                sidecar_path = write_sidecar(audit)
+            # ── 体积反超检查（写完输出后再判断） ──
+            if task.compressed_size > 0 and task.original_size > 0 and task.compressed_size >= task.original_size:
+                if final_output.exists():
+                    final_output.unlink()
+                task.compressed_size = task.original_size
+                if plan.stages:
+                    for s in plan.stages:
+                        if s.slot.slot_id == "move_out":
+                            s.detail = "跳过（输出 ≥ 原体积）"
+                            break
+                task._output_discarded = True
 
-                db = getattr(task, "_db", None)
-                if db is not None and sidecar_path:
-                    import json as _json
-                    from leanreel.domain.models import CompressionRecord
-                    rec = CompressionRecord(
-                        file_snapshot_id=getattr(task.snapshot, "id", 0) or 0,
-                        strategy_name=audit.strategy_name,
-                        original_size=audit.source_size_bytes,
-                        compressed_size=audit.output_size_bytes,
-                        status=audit.status,
-                        duration_seconds=int(audit.duration_seconds),
-                        error_message=getattr(task, "error_message", ""),
-                        output_path=audit.output_path,
-                        output_size_bytes=audit.output_size_bytes,
-                        savings_pct=audit.savings_pct,
-                        encoder=audit.encoder,
-                        cq_value=audit.cq or audit.crf,
-                        preset=audit.preset,
-                        pix_fmt=audit.pix_fmt,
-                        audio_mode=audit.audio_mode,
-                        sub_mode=audit.sub_mode,
-                        ffmpeg_command=_json.dumps(audit.ffmpeg_command),
-                        sidecar_path=sidecar_path,
-                        leanreel_version=audit.leanreel_version,
+            # ── 审计双写（仅当输出未被丢弃） ──
+            if not getattr(task, "_output_discarded", False):
+                try:
+                    from leanreel.services.audit import build_audit, write_sidecar
+                    cmd = getattr(task, "_ffmpeg_command", [])
+                    cq_info = getattr(task, "_adaptive_cq", {})
+                    audit = build_audit(
+                        task=task,
+                        ffmpeg_command=cmd,
+                        adaptive_cq_original=cq_info.get("original", 0),
+                        adaptive_cq_adjusted=cq_info.get("adjusted", 0),
+                        adaptive_cq_reason=cq_info.get("reason", ""),
                     )
-                    try:
-                        db_id = db.insert_compression(rec)
-                        audit.db_record_id = db_id
-                        # Re-write sidecar with db_record_id
-                        if db_id:
-                            write_sidecar(audit)
-                    except Exception:
-                        import traceback
-                        traceback.print_exc()
+                    sidecar_path = write_sidecar(audit)
 
-                if getattr(task, "_delete_source", False) and task.status.value == "completed" and 0 < task.compressed_size < task.original_size:
-                    _delete_source_file(task.input_path)
-            except Exception:
-                import traceback
-                traceback.print_exc()
+                    db = getattr(task, "_db", None)
+                    if db is not None and sidecar_path:
+                        import json as _json
+                        from leanreel.domain.models import CompressionRecord
+                        rec = CompressionRecord(
+                            file_snapshot_id=getattr(task.snapshot, "id", 0) or 0,
+                            strategy_name=audit.strategy_name,
+                            original_size=audit.source_size_bytes,
+                            compressed_size=audit.output_size_bytes,
+                            status=audit.status,
+                            duration_seconds=int(audit.duration_seconds),
+                            error_message=getattr(task, "error_message", ""),
+                            output_path=audit.output_path,
+                            output_size_bytes=audit.output_size_bytes,
+                            savings_pct=audit.savings_pct,
+                            encoder=audit.encoder,
+                            cq_value=audit.cq or audit.crf,
+                            preset=audit.preset,
+                            pix_fmt=audit.pix_fmt,
+                            audio_mode=audit.audio_mode,
+                            sub_mode=audit.sub_mode,
+                            ffmpeg_command=_json.dumps(audit.ffmpeg_command),
+                            sidecar_path=sidecar_path,
+                            leanreel_version=audit.leanreel_version,
+                        )
+                        try:
+                            db_id = db.insert_compression(rec)
+                            audit.db_record_id = db_id
+                            if db_id:
+                                write_sidecar(audit)
+                        except Exception:
+                            import traceback
+                            traceback.print_exc()
+
+                    if getattr(task, "_delete_source", False) and task.status.value == "completed" and 0 < task.compressed_size < task.original_size:
+                        _delete_source_file(task.input_path)
+                except Exception:
+                    import traceback
+                    traceback.print_exc()
 
         except CancelledError:
             current_idx = task.current_stage_index
