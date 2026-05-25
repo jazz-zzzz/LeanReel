@@ -1,5 +1,5 @@
 {
-  "name": "x265 CPU CRF 22 高压缩转码",
+  "name": "CPU - x265 CRF 22 高压缩转码",
   "description": "CPU 软编码，更小体积，可能有轻微画质损失，仅建议 SDR 片源手动选择。",
   "is_preset": true,
   "video": {"encoder": "libx265", "crf": 22, "preset": "slow", "pix_fmt": "yuv420p10le"},

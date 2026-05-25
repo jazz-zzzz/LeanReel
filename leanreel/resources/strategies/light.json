@@ -1,5 +1,5 @@
 {
-  "name": "x265 CPU CRF 18 高质量转码",
+  "name": "CPU - x265 CRF 18 高质量转码",
   "description": "CPU 软编码，画质优先，速度较慢，适合高码率 SDR H.264。",
   "is_preset": true,
   "video": {"encoder": "libx265", "crf": 18, "preset": "slow", "pix_fmt": "yuv420p10le"},

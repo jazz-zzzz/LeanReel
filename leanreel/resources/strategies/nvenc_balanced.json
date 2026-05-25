@@ -1,5 +1,5 @@
 {
-  "name": "NVENC HEVC CQ 26 快速转码",
+  "name": "GPU - NVENC CQ 26 快速转码",
   "description": "NVIDIA GPU 硬编码，速度很快，适合批量处理 SDR H.264。",
   "is_preset": true,
   "video": {"encoder": "hevc_nvenc", "crf": 0, "preset": "", "pix_fmt": "yuv420p10le", "gpu": true, "nv_preset": "p5", "rc": "vbr", "cq": 26},

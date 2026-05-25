@@ -1,5 +1,5 @@
 {
-  "name": "NVENC HEVC CQ 23 高质量转码",
+  "name": "GPU - NVENC CQ 23 高质量转码",
   "description": "NVIDIA GPU 硬编码，速度快，画质优先，适合高码率 SDR H.264。",
   "is_preset": true,
   "video": {"encoder": "hevc_nvenc", "crf": 0, "preset": "", "pix_fmt": "yuv420p10le", "gpu": true, "nv_preset": "p5", "rc": "vbr", "cq": 23},

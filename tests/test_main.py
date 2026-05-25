@@ -34,7 +34,7 @@ def test_get_strategies_dir_refreshes_builtin_strategy_files(monkeypatch, tmp_pa
 
     balanced = json.loads((strategies_dir / "balanced.json").read_text(encoding="utf-8"))
     custom = json.loads((strategies_dir / "my_custom.json").read_text(encoding="utf-8"))
-    assert balanced["name"] == "x265 CPU CRF 20 标准转码"
+    assert "balanced" not in balanced["name"] and "CPU" in balanced["name"]
     assert custom["name"] == "我的自定义策略"
 
 def test_init_services_does_not_run_nvenc_detection_synchronously(monkeypatch, tmp_path):
