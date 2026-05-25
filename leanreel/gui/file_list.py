@@ -727,33 +727,25 @@ class FileListPanel(QWidget):
         self,
         snap: Any,
         match: MatchResult | None,
-        compressed_record: Any | None = None,
-        sidecar_path: str | None = None,
+        compressed_record: dict | None = None,
     ) -> FileDecisionDisplay:
         # ── 已压缩检测（最早） ──
-        compressed_record = compressed_record or sidecar_path
         if compressed_record:
-            strategy_name = UI_TEXT.FILE_COMPRESSED
-            sidecar_path = getattr(compressed_record, "sidecar_path", None)
-            record_strategy = getattr(compressed_record, "strategy_name", "")
-            if record_strategy:
-                strategy_name = UI_TEXT.compressed_strategy(record_strategy)
-            elif isinstance(compressed_record, str):
-                sidecar_path = compressed_record
-                try:
-                    from leanreel.services.audit import read_sidecar
-                    audit_snap = read_sidecar(sidecar_path)
-                    if audit_snap and audit_snap.strategy_name:
-                        strategy_name = UI_TEXT.compressed_strategy(audit_snap.strategy_name)
-                except Exception:
-                    pass
+            encoder_label_map = {
+                "libx265": "HEVC", "hevc_nvenc": "HEVC",
+                "av1_nvenc": "AV1", "copy": "流复制",
+            }
+            encoder = compressed_record.get("encoder", "")
+            label = encoder_label_map.get(encoder, encoder)
+            strategy_name = compressed_record.get("strategy_name", "")
+            savings = compressed_record.get("savings_pct", 0)
             return FileDecisionDisplay(
                 status_key="compressed",
-                strategy_text=strategy_name,
-                result_text=UI_TEXT.FILE_COMPLETED,
+                strategy_text=f"已被压缩为 {label} 片源",
+                result_text=f"节省 {savings:.0f}%" if savings else "已完成",
                 result_sort=-5,
                 processable=False,
-                tooltip=UI_TEXT.compressed_tooltip(Path(sidecar_path or "").name),
+                tooltip=f"策略: {strategy_name}",
             )
 
         # ── 等待探测 ──

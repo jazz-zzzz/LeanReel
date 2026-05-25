@@ -1,7 +1,7 @@
 """LeanReel 主窗口 — TMM 风格布局"""
 from PySide6.QtWidgets import (
     QMainWindow, QMenuBar, QStatusBar, QHBoxLayout, QWidget,
-    QSplitter, QDockWidget, QLabel
+    QSplitter, QDockWidget, QLabel, QStackedWidget
 )
 from PySide6.QtCore import Qt
 
@@ -40,7 +40,9 @@ class MainWindow(QMainWindow):
         self.splitter.addWidget(self.strategy_placeholder)
         self.splitter.setSizes([240, 820, 340])
 
-        self.layout.addWidget(self.splitter)
+        self.stack = QStackedWidget()
+        self.stack.addWidget(self.splitter)  # index 0: file list view
+        self.layout.addWidget(self.stack)
 
     def _setup_menu(self):
         menu = self.menuBar()
@@ -49,6 +51,7 @@ class MainWindow(QMainWindow):
 
         view_menu = menu.addMenu(UI_TEXT.MAIN_MENU_VIEW)
         self._toggle_queue_action = view_menu.addAction(UI_TEXT.MAIN_MENU_QUEUE_TOGGLE)
+        self._toggle_history_action = view_menu.addAction("转换历史")
 
         help_menu = menu.addMenu(UI_TEXT.MAIN_MENU_HELP)
         help_menu.addAction(UI_TEXT.MAIN_MENU_ABOUT, self._show_about)
@@ -59,6 +62,19 @@ class MainWindow(QMainWindow):
 
     def set_toggle_queue_action(self, callback):
         self._toggle_queue_action.triggered.connect(callback)
+
+    def set_toggle_history_action(self, callback):
+        self._toggle_history_action.triggered.connect(callback)
+
+    def set_history_panel(self, widget: QWidget):
+        self.stack.addWidget(widget)  # index 1
+        widget.back_requested.connect(self.show_file_list)
+
+    def show_history(self):
+        self.stack.setCurrentIndex(1)
+
+    def show_file_list(self):
+        self.stack.setCurrentIndex(0)
 
     def _setup_status(self):
         self.status = QStatusBar()

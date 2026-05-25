@@ -206,7 +206,7 @@ def test_audit_roundtrip_sidecar_to_display(qtbot):
         assert len(found) == 1
         assert "movie_zcompressed" in found[0]
 
-        # Verify FileDecisionDisplay marks as compressed
+        # Verify FileDecisionDisplay marks as compressed (DB-driven)
         panel = FileListPanel()
         qtbot.addWidget(panel)
         snap = FileSnapshot(
@@ -217,7 +217,12 @@ def test_audit_roundtrip_sidecar_to_display(qtbot):
             video_codec="h264",
             probe_ok=True,
         )
-        decision = panel._decision_display(snap, match=None, sidecar_path=found[0])
+        compressed_record = {
+            "encoder": "libx265",
+            "strategy_name": "x265 HEVC CRF 20 标准转码",
+            "savings_pct": 65.0,
+        }
+        decision = panel._decision_display(snap, match=None, compressed_record=compressed_record)
         assert decision.status_key == "compressed"
         assert decision.processable is False
-        assert "x265" in decision.strategy_text
+        assert "HEVC" in decision.strategy_text
