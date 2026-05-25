@@ -1,0 +1,12 @@
+{
+  "name": "x265 HEVC CRF 20 快速转码",
+  "description": "CPU 软编码，medium 预设提速约 2 倍，体积略大 5-10%，适合批量处理 SDR H.264。",
+  "is_preset": true,
+  "video": {"encoder": "libx265", "crf": 20, "preset": "medium", "pix_fmt": "yuv420p10le", "x265_params": "pmode=1"},
+  "hdr": {"mode": "preserve_hdr10", "dv_handling": "reinject_rpu"},
+  "audio": {"mode": "keep_original", "remove_commentary": true, "preferred_languages": ["chi", "zho", "eng"]},
+  "subtitle": {"mode": "keep_chinese"},
+  "filters": {"skip_x265": true, "min_size_gb": null, "only_remux": false},
+  "estimated_savings": "30-45%",
+  "quality_impact": "快速批量转码，默认不处理 HEVC/HDR/DV 片源"
+}

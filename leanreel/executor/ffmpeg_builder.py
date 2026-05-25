@@ -64,6 +64,8 @@ class FFmpegBuilder:
                 "-preset", v.preset,
                 "-pix_fmt", v.pix_fmt,
             ])
+            if v.x265_params:
+                cmd.extend(["-x265-params", v.x265_params])
             if snapshot.hdr_type in (HDRType.HDR10, HDRType.HDR10P, HDRType.DV_P5, HDRType.DV_P7, HDRType.DV_P8):
                 cmd.extend([
                     "-color_primaries", "bt2020",

@@ -161,6 +161,7 @@ class VideoRule:
     crf: int = 20
     preset: str = "slow"
     pix_fmt: str = "yuv420p10le"
+    x265_params: str = ""
     gpu: bool = False
     nv_preset: str = "p1"
     rc: str = "vbr"
@@ -174,6 +175,7 @@ class VideoRule:
         return {
             "encoder": self.encoder, "crf": self.crf,
             "preset": self.preset, "pix_fmt": self.pix_fmt,
+            "x265_params": self.x265_params,
             "gpu": self.gpu, "nv_preset": self.nv_preset,
             "rc": self.rc, "cq": self.cq,
         }
@@ -185,6 +187,7 @@ class VideoRule:
             crf=d.get("crf", 20),
             preset=d.get("preset", "slow"),
             pix_fmt=d.get("pix_fmt", "yuv420p10le"),
+            x265_params=d.get("x265_params", ""),
             gpu=d.get("gpu", False),
             nv_preset=d.get("nv_preset", "p1"),
             rc=d.get("rc", "vbr"),

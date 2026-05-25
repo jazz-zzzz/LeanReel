@@ -1,0 +1,12 @@
+{
+  "name": "x265 HEVC CRF 22 极速转码",
+  "description": "CPU 软编码，fast 预设提速约 3.5 倍，体积更小但略有画质损失，仅建议 SDR 片源手动选择。",
+  "is_preset": true,
+  "video": {"encoder": "libx265", "crf": 22, "preset": "fast", "pix_fmt": "yuv420p10le", "x265_params": "pmode=1"},
+  "hdr": {"mode": "preserve_hdr10", "dv_handling": "degrade_to_hdr10"},
+  "audio": {"mode": "keep_original", "remove_commentary": true, "preferred_languages": ["chi", "zho"]},
+  "subtitle": {"mode": "keep_chinese"},
+  "filters": {"skip_x265": false, "min_size_gb": null, "only_remux": false},
+  "estimated_savings": "45-65%",
+  "quality_impact": "极速高压缩，画质风险更高，默认不处理 HEVC/HDR/DV 片源"
+}
