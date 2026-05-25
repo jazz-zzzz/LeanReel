@@ -306,7 +306,7 @@ class FFmpegExecutor:
                             import traceback
                             traceback.print_exc()
 
-                    if getattr(task, "_delete_source", False) and task.status.value == "completed" and 0 < task.compressed_size < task.original_size:
+                    if getattr(task, "_delete_source", False) and 0 < task.compressed_size < task.original_size:
                         _delete_source_file(task.input_path)
                         rec.source_deleted = 1
                         try:
