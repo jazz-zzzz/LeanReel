@@ -10,6 +10,7 @@ from leanreel.controllers.signals import AppSignals
 from leanreel.controllers.strategy_controller import StrategyController
 from leanreel.controllers.encoding_controller import EncodingController
 from leanreel.controllers.library_controller import LibraryController
+from leanreel.controllers.history_controller import HistoryController
 from leanreel.state.app_state import AppState
 from leanreel.utils.threading_contract import capture_main_thread, forbid_main_thread, require_main_thread
 from leanreel.utils.paths import get_data_dir, get_strategies_dir
@@ -28,6 +29,7 @@ from leanreel.gui.library_panel import LibraryPanel
 from leanreel.gui.file_list import FileListPanel
 from leanreel.gui.strategy_panel import StrategyPanel
 from leanreel.gui.queue_panel import QueuePanel
+from leanreel.gui.history_panel import HistoryPanel
 from leanreel.gui.theme import apply_theme
 from leanreel.state.file_store import FileTableStore
 
@@ -105,6 +107,20 @@ class Application:
         self.win.set_strategy_widget(self.strategy_panel)
         self.win.set_queue_panel(self.queue_panel)
         self.strategy_panel.set_strategies(self.services.strategies)
+
+        # 历史面板
+        self.history_panel = HistoryPanel()
+        self.win.set_history_panel(self.history_panel)
+        self.history_ctrl = HistoryController(self.services.db, self.history_panel)
+
+        def _toggle_history():
+            if self.win.stack.currentIndex() == 0:
+                self.win.show_history()
+                self.history_ctrl.load()
+            else:
+                self.win.show_file_list()
+
+        self.win.set_toggle_history_action(_toggle_history)
 
     def _init_encoding_controller(self):
         self.encoding_ctrl = EncodingController(

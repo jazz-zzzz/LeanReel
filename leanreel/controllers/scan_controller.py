@@ -197,15 +197,24 @@ class ScanController:
                 estimate=estimate_savings(s, strategy),
             )
 
-        folder_ids = {int(s.library_folder_id or 0) for s in snapshots if getattr(s, "library_folder_id", 0)}
-        get_records = getattr(getattr(self._services, "db", None), "get_compression_records_for_folders", None)
-        compressed_map = get_records(folder_ids) if get_records else {}
+        # ── 检测已压缩文件（从 DB 查询） ──
+        compressed_info: dict = {}
+        try:
+            history_rows = self._services.db.get_all_history()
+            for h in history_rows:
+                if h.get("status") == "completed":
+                    folder_id = h.get("library_folder_id")
+                    rel_path = h.get("relative_path", "")
+                    if folder_id is not None and rel_path:
+                        compressed_info[(int(folder_id), str(rel_path))] = h
+        except Exception:
+            pass
 
         rows = []
         for s in snapshots:
             key = (int(s.library_folder_id or 0), str(s.relative_path))
             m = matched.get(key)
-            d = self._file_panel._decision_display(s, m, compressed_map.get(key))
+            d = self._file_panel._decision_display(s, m, compressed_info.get(key))
             rows.append(FileRow(snap=s, match=m, decision=d))
         self._file_panel.set_strategy_lookup(self._services.strategies)
         self._store.rebuild(rows, strategies=self._services.strategies, keep_checked=False)

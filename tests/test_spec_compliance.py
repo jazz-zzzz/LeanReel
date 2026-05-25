@@ -694,18 +694,17 @@ def test_populate_file_list_uses_sql_compression_records_not_sidecar_scan(monkey
     """Compressed state comes from SQL records, not per-file NAS glob calls."""
     from types import SimpleNamespace
     from leanreel.controllers.scan_controller import ScanController
-    from leanreel.domain.models import CompressionRecord
 
     def fail_sidecar_scan(_source_path):
         raise AssertionError("sidecar scan should not be used")
 
     monkeypatch.setattr("leanreel.services.audit.find_sidecars_for_source", fail_sidecar_scan)
-    compressed_records = {
-        (1, "cached.mkv"): CompressionRecord(
-            file_snapshot_id=5,
-            strategy_name="SQL 压缩记录",
-            sidecar_path=r"\\nas\media\cached_zcompressed.mkv.leanreel.json",
-        )
+    expected_record = {
+        "status": "completed",
+        "library_folder_id": 1,
+        "relative_path": "cached.mkv",
+        "strategy_name": "SQL 压缩记录",
+        "sidecar_path": r"\\nas\media\cached_zcompressed.mkv.leanreel.json",
     }
     seen_records = []
 
@@ -718,7 +717,7 @@ def test_populate_file_list_uses_sql_compression_records_not_sidecar_scan(monkey
         services=SimpleNamespace(
             matcher=NoMatch(),
             strategies=[],
-            db=SimpleNamespace(get_compression_records_for_folders=lambda folder_ids: compressed_records),
+            db=SimpleNamespace(get_all_history=lambda: [expected_record]),
         ),
         file_panel=SimpleNamespace(
             _decision_display=lambda snap, match, compressed_record=None: seen_records.append(compressed_record) or SimpleNamespace(processable=False),
@@ -734,7 +733,7 @@ def test_populate_file_list_uses_sql_compression_records_not_sidecar_scan(monkey
 
     ctrl._populate_file_list([_snap(library_folder_id=1, relative_path="cached.mkv")])
 
-    assert seen_records == [compressed_records[(1, "cached.mkv")]]
+    assert seen_records == [expected_record]
 
 
 def test_f1_probe_results_are_committed_on_main_thread(qtbot):
