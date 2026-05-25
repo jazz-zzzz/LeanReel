@@ -1,12 +1,12 @@
 ﻿"""FFmpeg 执行器 — 编码编排，I/O 分离、临时文件管理、Dolby Vision 流程"""
 import hashlib
-import os as _os
 import shutil
 import tempfile
 import threading
 from pathlib import Path
 from typing import Optional
 
+from leanreel.executor.output_commit import OutputCommitter
 from leanreel.services.pipeline import build_pipeline
 from leanreel.domain.models import TaskStatus
 from leanreel.executor.dovi import DoviTool
@@ -40,18 +40,7 @@ def _delete_source_file(filepath: str):
 
 def _safe_replace_output(temp_output, final_output):
     """原子替换输出文件，失败时保留已有文件。"""
-    staging = str(final_output) + ".staging"
-    try:
-        shutil.move(str(temp_output), staging)
-        if _os.path.exists(staging) and _os.path.getsize(staging) > 0:
-            _os.replace(staging, str(final_output))
-    except Exception:
-        # 清理 staging，保留已有的 final_output
-        try:
-            _os.unlink(staging)
-        except Exception:
-            pass
-        raise
+    OutputCommitter().commit(Path(temp_output), Path(final_output))
 
 
 class CancelledError(Exception):
@@ -145,8 +134,9 @@ class FFmpegExecutor:
                         local_input = task_temp_dir / source_path.name
                         bytes_copied = 0
 
+                        _COPY_CHUNK = 64 * 1024 * 1024  # 64 MB，减少 NAS 协议往返
                         with open(source_path, "rb") as src, open(local_input, "wb") as dst:
-                            while chunk := src.read(8 * 1024 * 1024):
+                            while chunk := src.read(_COPY_CHUNK):
                                 if cancel_event.is_set():
                                     break
                                 dst.write(chunk)
