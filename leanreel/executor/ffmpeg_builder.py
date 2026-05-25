@@ -102,7 +102,7 @@ class FFmpegBuilder:
         if sub_mode == "remove_all":
             pass
         elif sub_mode == "keep_all":
-            cmd.extend(["-map", "0:s", "-c:s", "copy"])
+            cmd.extend(["-map", "0:s?", "-c:s", "copy"])
         elif subtitle_tracks:
             if sub_mode == "keep_chinese":
                 lang_whitelist = {"chi", "zho", "zh"}
