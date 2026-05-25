@@ -218,6 +218,7 @@ QCheckBox::indicator {{
 QCheckBox::indicator:checked {{
     background-color: {C_ACCENT};
     border-color: {C_ACCENT};
+    image: url("{{CHECK_ICON}}");
 }}
 
 /* ── 组框 ── */
@@ -359,8 +360,10 @@ QToolButton:hover {{
 
 
 def apply_theme(app: QApplication):
+    from leanreel.executor.resources import bundled_resource_path
+    check_icon = bundled_resource_path("icons", "checkmark.svg").resolve().as_uri()
     app.setStyle("Fusion")
-    app.setStyleSheet(QSS)
+    app.setStyleSheet(QSS.replace("{CHECK_ICON}", check_icon))
 
 
 # ── 列配色 (QColor, 供表格/树控件使用) ──
