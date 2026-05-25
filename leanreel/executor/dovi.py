@@ -8,6 +8,8 @@ from leanreel.domain.models import Strategy
 from leanreel.executor.resources import bundled_resource_path
 from leanreel.executor._config import _config
 
+_VERSION_TIMEOUT = 5
+
 
 def get_dovi_tool_path() -> str:
     if _config.dovi_tool_path:
@@ -53,3 +55,17 @@ class DoviTool:
         result = subprocess.run(cmd, capture_output=True, text=True,
                                 encoding="utf-8", errors="replace", timeout=120)
         return result.returncode == 0, result.stderr.strip()
+
+
+def get_dovi_tool_version() -> str:
+    """返回 dovi_tool 版本字符串，例如 'dovi_tool 2.1.0'"""
+    try:
+        proc = subprocess.run(
+            [get_dovi_tool_path(), "--version"],
+            capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+            timeout=_VERSION_TIMEOUT,
+        )
+        return proc.stdout.strip().split("\n")[0] if proc.returncode == 0 else "unknown"
+    except Exception:
+        return "unknown"

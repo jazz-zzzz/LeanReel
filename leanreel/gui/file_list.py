@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
 
 from PySide6.QtWidgets import (
@@ -721,7 +722,27 @@ class FileListPanel(QWidget):
                     checked_count += 1
         self.selection_label.setText(f"已选中 {checked_count}/{processable_total} 个可处理文件")
 
-    def _decision_display(self, snap: Any, match: MatchResult | None) -> FileDecisionDisplay:
+    def _decision_display(self, snap: Any, match: MatchResult | None, sidecar_path: str | None = None) -> FileDecisionDisplay:
+        # ── 已压缩检测（最早） ──
+        if sidecar_path:
+            strategy_name = "已压缩"
+            try:
+                from leanreel.services.audit import read_sidecar
+                audit_snap = read_sidecar(sidecar_path)
+                if audit_snap and audit_snap.strategy_name:
+                    strategy_name = f"已压缩：{audit_snap.strategy_name}"
+            except Exception:
+                pass
+            return FileDecisionDisplay(
+                status_key="compressed",
+                strategy_text=strategy_name,
+                result_text="已完成",
+                result_sort=-5,
+                processable=False,
+                tooltip=f"该文件已压缩，审计记录：{Path(sidecar_path).name}",
+            )
+
+        # ── 等待探测 ──
         if (
             getattr(snap, "probe_ok", None) is False
             and not getattr(snap, "video_codec", "")

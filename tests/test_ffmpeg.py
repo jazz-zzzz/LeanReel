@@ -1041,3 +1041,34 @@ def test_encode_cleans_up_dv_output_on_inject_failure(monkeypatch, tmp_path):
     # 编码输出临时文件也应被清理
     temp_outputs = list(temp_dir.glob("dv_fail_SS.mkv"))
     assert len(temp_outputs) == 0, f"temp output files leaked: {temp_outputs}"
+
+
+# ============================================================
+# J. get_ffmpeg_version 单元测试
+# ============================================================
+
+def test_get_ffmpeg_version_returns_string():
+    """正向用例1：mock subprocess 返回正常版本输出"""
+    from unittest.mock import patch, MagicMock
+    from leanreel.executor.ffmpeg_builder import get_ffmpeg_version
+
+    with patch("leanreel.executor.ffmpeg_builder.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="ffmpeg version 7.1-full_build-www.gyan.dev Copyright (c) 2000-2025\nmore text",
+        )
+        result = get_ffmpeg_version()
+        assert "ffmpeg version 7.1" in result
+        mock_run.assert_called_once()
+        args, kwargs = mock_run.call_args
+        assert kwargs.get("timeout") == 5
+
+
+def test_get_ffmpeg_version_returns_unknown_on_error():
+    """正向用例2：mock subprocess 抛出异常时返回 unknown"""
+    from unittest.mock import patch
+    from leanreel.executor.ffmpeg_builder import get_ffmpeg_version
+
+    with patch("leanreel.executor.ffmpeg_builder.subprocess.run", side_effect=FileNotFoundError):
+        result = get_ffmpeg_version()
+        assert result == "unknown"

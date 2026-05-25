@@ -123,6 +123,9 @@ class ScanController:
         self._win.set_status(f"探测中：{st.done_files}/{st.total_files}...")
 
     def _populate_file_list(self, snapshots) -> dict[tuple[int, str], MatchResult]:
+        from leanreel.services.audit import find_sidecars_for_source
+        import os as _os
+
         matched: dict[tuple[int, str], MatchResult] = {}
         for s in snapshots:
             key = (int(s.library_folder_id or 0), str(s.relative_path))
@@ -137,11 +140,23 @@ class ScanController:
                 strategy=strategy,
                 estimate=estimate_savings(s, strategy),
             )
+
+        # ── 检测已压缩文件 ──
+        compressed_map: dict[tuple[int, str], str] = {}
+        for s in snapshots:
+            folder_path = self._state.current_folder_paths.get(s.library_folder_id)
+            if folder_path:
+                source_abs = _os.path.join(folder_path, s.relative_path)
+                sidecars = find_sidecars_for_source(source_abs)
+                if sidecars:
+                    key = (int(s.library_folder_id or 0), str(s.relative_path))
+                    compressed_map[key] = sidecars[0]
+
         rows = []
         for s in snapshots:
             key = (int(s.library_folder_id or 0), str(s.relative_path))
             m = matched.get(key)
-            d = self._file_panel._decision_display(s, m)
+            d = self._file_panel._decision_display(s, m, compressed_map.get(key))
             rows.append(FileRow(snap=s, match=m, decision=d))
         self._file_panel.set_strategy_lookup(self._services.strategies)
         self._store.rebuild(rows, strategies=self._services.strategies, keep_checked=False)

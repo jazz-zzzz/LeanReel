@@ -132,3 +132,34 @@ def test_extract_rpu_propagates_timeout(monkeypatch):
     monkeypatch.setattr("subprocess.run", fake_run)
     with pytest.raises(subprocess.TimeoutExpired):
         DoviTool.extract_rpu("source.mkv", "/tmp/rpu.bin")
+
+
+# ============================================================
+# get_dovi_tool_version 单元测试
+# ============================================================
+
+def test_get_dovi_tool_version_returns_string():
+    """正向用例1：mock subprocess 返回正常版本输出"""
+    from unittest.mock import patch, MagicMock
+    from leanreel.executor.dovi import get_dovi_tool_version
+
+    with patch("leanreel.executor.dovi.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="dovi_tool 2.1.0\nsome other text",
+        )
+        result = get_dovi_tool_version()
+        assert "dovi_tool" in result
+        mock_run.assert_called_once()
+        args, kwargs = mock_run.call_args
+        assert kwargs.get("timeout") == 5
+
+
+def test_get_dovi_tool_version_returns_unknown_on_error():
+    """正向用例2：mock subprocess 抛出异常时返回 unknown"""
+    from unittest.mock import patch
+    from leanreel.executor.dovi import get_dovi_tool_version
+
+    with patch("leanreel.executor.dovi.subprocess.run", side_effect=RuntimeError):
+        result = get_dovi_tool_version()
+        assert result == "unknown"

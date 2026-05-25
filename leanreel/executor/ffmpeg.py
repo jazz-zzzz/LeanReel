@@ -51,11 +51,12 @@ class FFmpegExecutor:
     """Executor adapter used by WorkerManager. 支持 Slotted Pipeline 阶段化编码。"""
 
     def __init__(self, progress_callback=None, temp_dir: Optional[str] = None,
-                 sync_output: bool = False, keep_temp: bool = False):
+                 sync_output: bool = False, keep_temp: bool = False, db=None):
         self.progress_callback = progress_callback
         self.temp_dir = temp_dir
         self.sync_output = sync_output
         self.keep_temp = keep_temp
+        self._db = db
         self._cancel_events: dict[str, threading.Event] = {}
         self._cancel_lock = threading.Lock()
 
@@ -84,6 +85,7 @@ class FFmpegExecutor:
 
         plan = build_pipeline(task)
         task.pipeline_plan = plan
+        task._db = self._db
 
         final_output = Path(task.output_path)
         temp_dir = self._get_temp_dir()
@@ -164,22 +166,35 @@ class FFmpegExecutor:
 
                     # 自适应 CQ：低比特率源 → 提高 CQ 避免体积反超
                     cq = strategy.video.cq if hasattr(strategy, "video") else 26
+                    cq_original = cq  # SAVE: original CQ before adjustment
+                    cq_reason = "no bpp data"
                     if snap and snap.size_bytes > 0 and snap.duration_seconds > 0:
                         src_mbps = (snap.size_bytes * 8) / (snap.duration_seconds * 1_000_000)
                         pixels = max(1, (snap.video_width or 1920) * (snap.video_height or 1080))
                         bpp = src_mbps * 1_000_000 / pixels
                         if bpp < 2.5:
                             cq = min(cq + 8, 35)   # 非常压缩 → 大幅提高 CQ
+                            cq_reason = f"bpp {bpp:.1f} < 2.5, cq {cq_original} -> {cq}"
                         elif bpp < 5.0:
                             cq = min(cq + 4, 32)   # 较压缩
+                            cq_reason = f"bpp {bpp:.1f} < 5.0, cq {cq_original} -> {cq}"
                         elif bpp < 8.0:
                             cq = min(cq + 2, 30)   # 轻微压缩
-                        # bpp >= 8.0 → 保持原 CQ（高质量源，如 remux）
+                            cq_reason = f"bpp {bpp:.1f} < 8.0, cq {cq_original} -> {cq}"
+                        else:
+                            cq_reason = f"bpp {bpp:.1f} >= 8.0, no adjustment needed"
 
                     import copy
                     adjusted = copy.deepcopy(strategy)
                     adjusted.video.cq = cq
                     cmd = FFmpegBuilder.build(snap, adjusted, encode_input, str(temp_output))
+                    # Store for audit
+                    task._ffmpeg_command = list(cmd)
+                    task._adaptive_cq = {
+                        "original": cq_original,
+                        "adjusted": cq,
+                        "reason": cq_reason,
+                    }
                     duration = snap.duration_seconds if snap else 0.0
                     input_size = snap.size_bytes if snap else 0
 
@@ -270,6 +285,58 @@ class FFmpegExecutor:
 
                 task.progress = plan.compute_overall_progress()
                 self._emit_progress(task)
+
+            # ── 审计双写 ──
+            try:
+                from leanreel.services.audit import build_audit, write_sidecar
+                cmd = getattr(task, "_ffmpeg_command", [])
+                cq_info = getattr(task, "_adaptive_cq", {})
+                audit = build_audit(
+                    task=task,
+                    ffmpeg_command=cmd,
+                    adaptive_cq_original=cq_info.get("original", 0),
+                    adaptive_cq_adjusted=cq_info.get("adjusted", 0),
+                    adaptive_cq_reason=cq_info.get("reason", ""),
+                )
+                sidecar_path = write_sidecar(audit)
+
+                db = getattr(task, "_db", None)
+                if db is not None and sidecar_path:
+                    import json as _json
+                    from leanreel.domain.models import CompressionRecord
+                    rec = CompressionRecord(
+                        file_snapshot_id=getattr(task.snapshot, "id", 0) or 0,
+                        strategy_name=audit.strategy_name,
+                        original_size=audit.source_size_bytes,
+                        compressed_size=audit.output_size_bytes,
+                        status=audit.status,
+                        duration_seconds=int(audit.duration_seconds),
+                        error_message=getattr(task, "error_message", ""),
+                        output_path=audit.output_path,
+                        output_size_bytes=audit.output_size_bytes,
+                        savings_pct=audit.savings_pct,
+                        encoder=audit.encoder,
+                        cq_value=audit.cq or audit.crf,
+                        preset=audit.preset,
+                        pix_fmt=audit.pix_fmt,
+                        audio_mode=audit.audio_mode,
+                        sub_mode=audit.sub_mode,
+                        ffmpeg_command=_json.dumps(audit.ffmpeg_command),
+                        sidecar_path=sidecar_path,
+                        leanreel_version=audit.leanreel_version,
+                    )
+                    try:
+                        db_id = db.insert_compression(rec)
+                        audit.db_record_id = db_id
+                        # Re-write sidecar with db_record_id
+                        if db_id:
+                            write_sidecar(audit)
+                    except Exception:
+                        import traceback
+                        traceback.print_exc()
+            except Exception:
+                import traceback
+                traceback.print_exc()
 
         except CancelledError:
             current_idx = task.current_stage_index
