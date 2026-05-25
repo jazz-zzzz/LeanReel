@@ -14,7 +14,7 @@ class OutputCommitter:
     def commit(self, temp_output: Path | str, final_output: Path | str) -> Path:
         temp_output = Path(temp_output)
         final_output = Path(final_output)
-        staging = final_output.with_name(final_output.name + ".staging")
+        staging = final_output.with_name(f"{final_output.stem}.staging{final_output.suffix}")
 
         if not temp_output.exists():
             raise FileNotFoundError(str(temp_output))

@@ -88,7 +88,7 @@ class FFmpegExecutor:
         output_key = hashlib.sha1(str(final_output.resolve()).encode("utf-8")).hexdigest()[:12]
         task_temp_dir = temp_dir / output_key
         task_temp_dir.mkdir(parents=True, exist_ok=True)
-        staging_output = Path(str(final_output) + ".staging")
+        staging_output = final_output.with_name(f"{final_output.stem}.staging{final_output.suffix}")
         rpu_file: Optional[Path] = None
         dv_output: Optional[Path] = None
 

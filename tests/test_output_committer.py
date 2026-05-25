@@ -14,7 +14,7 @@ def test_output_committer_moves_temp_through_staging_file(tmp_path: Path):
     assert result == final_output
     assert final_output.read_bytes() == b"encoded"
     assert not temp_output.exists()
-    assert not (tmp_path / "movie_zcompressed.mkv.staging").exists()
+    assert not (tmp_path / "movie_zcompressed.staging.mkv").exists()
 
 
 def test_output_committer_rejects_empty_temp_and_preserves_existing_output(tmp_path: Path):

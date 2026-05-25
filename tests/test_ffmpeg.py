@@ -347,8 +347,8 @@ def test_ffmpeg_executor_runs_built_command(monkeypatch, balanced_strategy, tmp_
     assert "-map_metadata 0" in cmd_joined
     assert "-map_chapters 0" in cmd_joined
 
-    # I/O 分离：命令输出到暂存文件（.staging 后缀）
-    assert str(cmd[-1]).endswith(".staging")
+    # 命令输出到暂存文件（.staging 在扩展名前）
+    assert ".staging.mkv" in str(cmd[-1])
     # 最终文件在目标路径（原子提交后）
     assert (tmp_path / "sample.out.mkv").exists()
 
@@ -1288,7 +1288,7 @@ def test_encode_cleans_up_dv_output_on_inject_failure(monkeypatch, tmp_path):
     assert len(rpu_files) == 0, f"rpu files leaked: {rpu_files}"
 
     # 暂存输出文件也应被清理（不再在 temp_dir 内，而在输出路径旁）
-    staging_output = tmp_path / "dv_fail_SS.mkv.staging"
+    staging_output = tmp_path / "dv_fail_SS.staging.mkv"
     assert not staging_output.exists(), f"staging output leaked: {staging_output}"
 
 
