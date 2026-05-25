@@ -137,11 +137,9 @@ def test_build_av1_nvenc_command_uses_cq_not_crf():
     assert "-preset p5" in joined
     assert "-rc vbr" in joined
     assert "-cq 34" in joined
-    assert "-spatial-aq 1" in joined
-    assert "-temporal-aq 1" in joined
-    assert "-spatial_aq" not in cmd
-    assert "-temporal_aq" not in cmd
-    assert "-aq-strength 8" in joined
+    assert "-spatial-aq" not in joined
+    assert "-temporal-aq" not in joined
+    assert "-aq-strength" not in joined
     assert "-crf" not in cmd
 
 

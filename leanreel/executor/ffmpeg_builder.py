@@ -161,10 +161,13 @@ class FFmpegBuilder:
                 "-preset", _nvenc_preset(spec, v.nv_preset),
                 "-rc", _nvenc_rc(v.rc),
                 "-cq", str(cq),
-                "-spatial-aq", "1",
-                "-temporal-aq", "1",
-                "-aq-strength", "8",
             ])
+            if encoder != "av1_nvenc":
+                cmd.extend([
+                    "-spatial-aq", "1",
+                    "-temporal-aq", "1",
+                    "-aq-strength", "8",
+                ])
             if snapshot.hdr_type in _HDR_TYPES:
                 _append_hdr_color_metadata(cmd)
                 if snapshot.hdr_type == HDRType.HDR10P and _supports_hdr10plus_flag(encoder):
