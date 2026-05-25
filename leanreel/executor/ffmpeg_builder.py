@@ -143,14 +143,18 @@ class FFmpegBuilder:
     @staticmethod
     def build(snapshot: FileSnapshot, strategy: Strategy,
               input_path: str, output_path: str) -> list[str]:
-        cmd = [get_ffmpeg_path(), "-nostdin", "-y",
-               "-thread_queue_size", "8192",
-               "-buffer_size", "134217728",
-               "-i", input_path]
-
         v = strategy.video
         spec = _encoder_spec(v.encoder)
         encoder = spec.name
+
+        cmd = [get_ffmpeg_path(), "-nostdin", "-y"]
+        if spec.kind == "nvenc":
+            cmd.extend(["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"])
+        cmd.extend([
+            "-thread_queue_size", "16384",
+            "-buffer_size", "134217728",
+            "-i", input_path,
+        ])
 
         # --- 视频流：大写 V 排除内嵌封面 mjpeg ---
         cmd.extend(["-map", "0:V"])
