@@ -51,11 +51,12 @@ def build_encode_tasks(
 class EncodingController:
     """编码控制器 — 管理编码生命周期（开始/暂停/取消/完成）"""
 
-    def __init__(self, strategy_panel, win, queue_panel, notifier):
+    def __init__(self, strategy_panel, win, queue_panel, notifier, db=None):
         self._strategy_panel = strategy_panel
         self._win = win
         self._queue_panel = queue_panel
         self._notifier = notifier
+        self._db = db
         self.active_manager: WorkerManager | None = None
         self.encoding_in_progress = False
         self._encode_lock = threading.Lock()
@@ -99,6 +100,7 @@ class EncodingController:
                     progress_callback=lambda t: self._notifier.task_updated.emit(t),
                     sync_output=self._strategy_panel.sync_output,
                     keep_temp=self._strategy_panel.keep_temp,
+                    db=self._db,
                 ),
                 self._strategy_panel.worker_count,
                 progress_callback=lambda t: self._notifier.task_updated.emit(t),

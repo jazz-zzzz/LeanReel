@@ -111,6 +111,7 @@ class Application:
             win=self.win,
             queue_panel=self.queue_panel,
             notifier=self.notifier,
+            db=self.services.db,
         )
 
     def _init_strategy_controller(self):

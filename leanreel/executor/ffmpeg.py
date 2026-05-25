@@ -51,11 +51,12 @@ class FFmpegExecutor:
     """Executor adapter used by WorkerManager. 支持 Slotted Pipeline 阶段化编码。"""
 
     def __init__(self, progress_callback=None, temp_dir: Optional[str] = None,
-                 sync_output: bool = False, keep_temp: bool = False):
+                 sync_output: bool = False, keep_temp: bool = False, db=None):
         self.progress_callback = progress_callback
         self.temp_dir = temp_dir
         self.sync_output = sync_output
         self.keep_temp = keep_temp
+        self._db = db
         self._cancel_events: dict[str, threading.Event] = {}
         self._cancel_lock = threading.Lock()
 
@@ -84,6 +85,7 @@ class FFmpegExecutor:
 
         plan = build_pipeline(task)
         task.pipeline_plan = plan
+        task._db = self._db
 
         final_output = Path(task.output_path)
         temp_dir = self._get_temp_dir()

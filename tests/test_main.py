@@ -12,7 +12,7 @@ from leanreel.controllers.encoding_controller import build_encode_tasks, make_ou
 def test_make_output_path_adds_suffix_without_overwriting_original():
     source = Path("C:/media/Movie.mkv")
 
-    assert make_output_path(source) == Path("C:/media/Movie_SS.mkv")
+    assert make_output_path(source) == Path("C:/media/Movie_zcompressed.mkv")
 
 
 def test_get_strategies_dir_refreshes_builtin_strategy_files(monkeypatch, tmp_path):
@@ -79,7 +79,7 @@ def test_build_encode_tasks_uses_strategy_and_reconstructs_input_path():
 
     assert len(tasks) == 1
     assert tasks[0].input_path == str(Path("D:/TV") / "Season 1/Episode 1.mkv")
-    assert tasks[0].output_path == str(Path("D:/TV") / "Season 1/Episode 1_SS.mkv")
+    assert tasks[0].output_path == str(Path("D:/TV") / "Season 1/Episode 1_zcompressed.mkv")
     assert tasks[0].strategy is strategy
     assert tasks[0].snapshot is snapshots[0]
     assert tasks[0].strategy_name == "均衡压缩"
