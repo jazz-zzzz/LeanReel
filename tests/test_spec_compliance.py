@@ -1136,6 +1136,7 @@ def test_scan_populate_matches_duplicate_relative_paths_by_file_key(qtbot):
         _services=SimpleNamespace(matcher=Matcher(), strategies=[strategy]),
         _file_panel=panel,
         _store=store,
+        _state=SimpleNamespace(current_folder_paths={}),
     )
     snapshots = [
         _snap(library_folder_id=1, relative_path="movie.mkv", file_name="movie.mkv"),
