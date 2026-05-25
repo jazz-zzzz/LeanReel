@@ -276,8 +276,15 @@ class FFmpegExecutor:
                     if db is not None and sidecar_path:
                         import json as _json
                         from leanreel.domain.models import CompressionRecord
+                        fsid = getattr(task.snapshot, "id", 0) or 0
+                        if not fsid:
+                            rows = db.execute(
+                                "SELECT id FROM file_snapshot WHERE library_folder_id=? AND relative_path=?",
+                                [task.snapshot.library_folder_id, task.snapshot.relative_path],
+                            )
+                            fsid = rows[0]["id"] if rows else 0
                         rec = CompressionRecord(
-                            file_snapshot_id=getattr(task.snapshot, "id", 0) or 0,
+                            file_snapshot_id=fsid,
                             strategy_name=audit.strategy_name,
                             original_size=audit.source_size_bytes,
                             compressed_size=audit.output_size_bytes,
