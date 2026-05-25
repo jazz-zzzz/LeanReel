@@ -87,6 +87,59 @@ class CompressionRecord:
     created_at: str = ""
 
 
+@dataclass
+class CompressionAudit:
+    """编码完成后的完整审计快照 — DB 和 Sidecar 的唯一数据源"""
+    library_folder_id: int = 0
+    relative_path: str = ""
+    source_path: str = ""
+    source_size_bytes: int = 0
+    source_mtime: float = 0.0
+    source_codec: str = ""
+    source_width: int = 0
+    source_height: int = 0
+    source_pix_fmt: str = ""
+    source_bitrate_bps: int = 0
+    source_duration_seconds: float = 0.0
+    source_frame_rate: str = ""
+    source_hdr: str = "SDR"
+    source_color_primaries: str = ""
+    source_color_transfer: str = ""
+    source_color_space: str = ""
+    source_audio: list[dict] = field(default_factory=list)
+    source_subtitle: list[dict] = field(default_factory=list)
+
+    output_path: str = ""
+    output_size_bytes: int = 0
+    savings_bytes: int = 0
+    savings_pct: float = 0.0
+
+    strategy_name: str = ""
+    encoder: str = ""
+    crf: int = 0
+    cq: int = 0
+    preset: str = ""
+    pix_fmt: str = ""
+    audio_mode: str = ""
+    sub_mode: str = ""
+
+    ffmpeg_command: list[str] = field(default_factory=list)
+    adaptive_cq_original: int = 0
+    adaptive_cq_adjusted: int = 0
+    adaptive_cq_reason: str = ""
+    started_at: str = ""
+    completed_at: str = ""
+    duration_seconds: float = 0.0
+    status: str = "pending"
+
+    ffmpeg_version: str = ""
+    dovi_tool_version: str = ""
+    leanreel_version: str = ""
+    platform: str = ""
+
+    db_record_id: int = 0
+
+
 # ── 策略模型 ──
 
 
