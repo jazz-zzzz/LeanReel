@@ -1,12 +1,12 @@
 ﻿"""FFmpeg 执行器 — 编码编排，I/O 分离、临时文件管理、Dolby Vision 流程"""
 import hashlib
+import os
 import shutil
 import tempfile
 import threading
 from pathlib import Path
 from typing import Optional
 
-from leanreel.executor.output_commit import OutputCommitter
 from leanreel.services.pipeline import build_pipeline
 from leanreel.domain.models import TaskStatus
 from leanreel.executor.dovi import DoviTool
@@ -38,10 +38,6 @@ def _delete_source_file(filepath: str):
         pass
 
 
-def _safe_replace_output(temp_output, final_output):
-    """原子替换输出文件，失败时保留已有文件。"""
-    OutputCommitter().commit(Path(temp_output), Path(final_output))
-
 
 class CancelledError(Exception):
     """编码被用户取消。"""
@@ -51,12 +47,9 @@ class FFmpegExecutor:
     """Executor adapter used by WorkerManager. 支持 Slotted Pipeline 阶段化编码。"""
 
     def __init__(self, progress_callback=None, temp_dir: Optional[str] = None,
-                 sync_output: bool = False, keep_temp: bool = False, db=None,
-                 delete_source: bool = False):
+                 db=None, delete_source: bool = False):
         self.progress_callback = progress_callback
         self.temp_dir = temp_dir
-        self.sync_output = sync_output
-        self.keep_temp = keep_temp
         self._delete_source = delete_source
         self._db = db
         self._cancel_events: dict[str, threading.Event] = {}
@@ -95,8 +88,7 @@ class FFmpegExecutor:
         output_key = hashlib.sha1(str(final_output.resolve()).encode("utf-8")).hexdigest()[:12]
         task_temp_dir = temp_dir / output_key
         task_temp_dir.mkdir(parents=True, exist_ok=True)
-        temp_output = task_temp_dir / final_output.name
-        local_input: Optional[Path] = None  # 复制到本地的源文件副本
+        staging_output = Path(str(final_output) + ".staging")
         rpu_file: Optional[Path] = None
         dv_output: Optional[Path] = None
 
@@ -108,9 +100,9 @@ class FFmpegExecutor:
         with self._cancel_lock:
             self._cancel_events[task.input_path] = cancel_event
 
-        # 如果临时文件已存在，先删除
-        if temp_output.exists():
-            temp_output.unlink()
+        # 如果暂存文件已存在，先删除
+        if staging_output.exists():
+            staging_output.unlink()
 
         try:
             for i, stage in enumerate(plan.stages):
@@ -127,29 +119,6 @@ class FFmpegExecutor:
                 if slot_id == "prepare":
                     plan.mark_stage_completed(i)
 
-                elif slot_id == "copy_in":
-                    source_path = Path(task.input_path)
-                    if source_path.exists():
-                        total_bytes = source_path.stat().st_size
-                        local_input = task_temp_dir / source_path.name
-                        bytes_copied = 0
-
-                        _COPY_CHUNK = 128 * 1024 * 1024  # 128 MB，减少 NAS 协议往返
-                        with open(source_path, "rb") as src, open(local_input, "wb") as dst:
-                            while chunk := src.read(_COPY_CHUNK):
-                                if cancel_event.is_set():
-                                    break
-                                dst.write(chunk)
-                                bytes_copied += len(chunk)
-                                if total_bytes > 0:
-                                    stage.internal_progress = bytes_copied / total_bytes
-                                    task.progress = plan.compute_overall_progress()
-                                    self._emit_progress(task)
-
-                    if cancel_event.is_set():
-                        raise CancelledError()
-                    plan.mark_stage_completed(i)
-
                 elif slot_id == "extract_rpu":
                     rpu_file = task_temp_dir / f"{final_output.stem}.rpu"
                     if rpu_file.exists():
@@ -157,8 +126,7 @@ class FFmpegExecutor:
                             rpu_file.unlink()
                         except OSError:
                             pass
-                    # 使用本地副本（如果已复制到本地）
-                    extract_source = str(local_input) if local_input else task.input_path
+                    extract_source = task.input_path
                     ok, stderr = DoviTool.extract_rpu(extract_source, str(rpu_file))
                     if not ok:
                         raise RuntimeError(f"Dolby Vision RPU extraction failed: {task.file_name}\n{stderr[:500]}")

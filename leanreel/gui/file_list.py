@@ -13,8 +13,10 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import QEvent, Signal, Qt
 from PySide6.QtGui import QColor
 
-_HEADERS = ["", "文件名", "体积", "编码信息", "HDR", "处理策略", "预计结果"]
-_TREE_HEADERS = ["文件夹名", "体积", "文件数", "编码信息", "HDR", "处理策略", "预计结果"]
+from leanreel.ui_text import UI_TEXT
+
+_HEADERS = UI_TEXT.FILE_HEADERS
+_TREE_HEADERS = UI_TEXT.FILE_TREE_HEADERS
 
 from leanreel.gui.theme import (
     _COLOR_CODEC_OK,
@@ -139,7 +141,7 @@ class FileListPanel(QWidget):
         else:
             self._show_table()
 
-    def _show_empty(self, message="未扫描"):
+    def _show_empty(self, message=UI_TEXT.FILE_UNSCANNED):
         self.summary_label.setText(message)
         self.stack.setCurrentWidget(self.empty_label)
 
@@ -174,8 +176,7 @@ class FileListPanel(QWidget):
             and not getattr(s, "probe_error", "")
             and not getattr(s, "video_codec", "")
         )
-        prefix = f"发现 {len(snapshots)} 个文件 · 正在探测 {pending}" if pending else f"已扫描 {len(snapshots)} 个文件"
-        self.summary_label.setText(f"{prefix} · 可处理 {processable} · 总计 {total_tb:.2f} TB")
+        self.summary_label.setText(UI_TEXT.file_summary(len(snapshots), pending, processable, total_tb))
 
     def get_checked_file_keys(self) -> list[tuple[int, str]]:
         """返回所有勾中文件的 (library_folder_id, relative_path) key 列表（已排序）。"""
@@ -235,32 +236,32 @@ class FileListPanel(QWidget):
 
         # 顶部信息栏
         info_layout = QHBoxLayout()
-        self.summary_label = QLabel("未扫描")
-        self.refresh_btn = QPushButton("重建缓存")
-        self.refresh_btn.setToolTip("重新扫描所有文件夹并重建编码信息缓存")
+        self.summary_label = QLabel(UI_TEXT.FILE_UNSCANNED)
+        self.refresh_btn = QPushButton(UI_TEXT.FILE_REBUILD_CACHE)
+        self.refresh_btn.setToolTip(UI_TEXT.FILE_REBUILD_CACHE_TOOLTIP)
         self.refresh_btn.clicked.connect(self.refresh_requested.emit)
         self.progress_bar = QProgressBar()
         self.progress_bar.setMinimum(0)
         self.progress_bar.setMaximum(100)
         self.progress_bar.setTextVisible(True)
-        self.progress_bar.setFormat("探测中... %v/%m")
+        self.progress_bar.setFormat(UI_TEXT.FILE_PROGRESS_FORMAT)
         self.progress_bar.setFixedWidth(200)
         self.progress_bar.setMaximumHeight(22)
         self.progress_bar.hide()
         info_layout.addWidget(self.refresh_btn)
         info_layout.addWidget(self.progress_bar)
         self.view_combo = QComboBox()
-        self.view_combo.addItem("平铺", "flat")
-        self.view_combo.addItem("目录树", "tree")
+        self.view_combo.addItem(UI_TEXT.FILE_VIEW_FLAT, "flat")
+        self.view_combo.addItem(UI_TEXT.FILE_VIEW_TREE, "tree")
         self.view_combo.currentIndexChanged.connect(
             lambda _i: self.set_view_mode(self.view_combo.currentData())
         )
         self.filter_combo = QComboBox()
-        self.filter_combo.addItem("全部", "all")
-        self.filter_combo.addItem("可处理", "processable")
-        self.filter_combo.addItem("已保护跳过", "protected")
-        self.filter_combo.addItem("探测失败", "probe_failed")
-        self.filter_combo.addItem("已选择", "checked")
+        self.filter_combo.addItem(UI_TEXT.FILE_FILTER_ALL, "all")
+        self.filter_combo.addItem(UI_TEXT.FILE_FILTER_PROCESSABLE, "processable")
+        self.filter_combo.addItem(UI_TEXT.FILE_FILTER_PROTECTED, "protected")
+        self.filter_combo.addItem(UI_TEXT.FILE_FILTER_PROBE_FAILED, "probe_failed")
+        self.filter_combo.addItem(UI_TEXT.FILE_FILTER_CHECKED, "checked")
         self.filter_combo.currentIndexChanged.connect(lambda _i: self._apply_filter())
         info_layout.addWidget(self.summary_label)
         info_layout.addStretch()
@@ -286,7 +287,7 @@ class FileListPanel(QWidget):
         self.tree.hide()
 
         # 空状态提示
-        self.empty_label = QLabel("请先在左侧添加库和文件夹以扫描视频文件")
+        self.empty_label = QLabel(UI_TEXT.FILE_EMPTY_HINT)
         self.empty_label.setAlignment(Qt.AlignCenter)
         self.empty_label.setStyleSheet("color: #6b6560; font-size: 14px; padding: 40px;")
 
@@ -301,11 +302,11 @@ class FileListPanel(QWidget):
         select_layout = QHBoxLayout()
         select_layout.setContentsMargins(0, 0, 0, 0)
         select_layout.setSpacing(6)
-        self.select_all_btn = QPushButton("全选")
+        self.select_all_btn = QPushButton(UI_TEXT.FILE_SELECT_ALL)
         self.select_all_btn.clicked.connect(self.select_all)
-        self.deselect_all_btn = QPushButton("取消全选")
+        self.deselect_all_btn = QPushButton(UI_TEXT.FILE_DESELECT_ALL)
         self.deselect_all_btn.clicked.connect(self.deselect_all)
-        self.selection_label = QLabel("已选中 0/0 个文件")
+        self.selection_label = QLabel(UI_TEXT.file_selection_count(0, 0))
         self.selection_label.setStyleSheet("color: #8a857c; font-size: 11px;")
         select_layout.addWidget(self.select_all_btn)
         select_layout.addWidget(self.deselect_all_btn)
@@ -353,7 +354,7 @@ class FileListPanel(QWidget):
         flags = self.table.model().flags(index)
         if flags & Qt.ItemIsEnabled or not (flags & Qt.ItemIsUserCheckable):
             return False
-        reason = self.table.model().data(index, Qt.ToolTipRole) or "该文件当前不可选择"
+        reason = self.table.model().data(index, Qt.ToolTipRole) or UI_TEXT.FILE_DISABLED_REASON
         QToolTip.showText(self.table.viewport().mapToGlobal(pos), reason, self.table)
         return True
 
@@ -382,7 +383,7 @@ class FileListPanel(QWidget):
         flags = item.flags()
         if flags & Qt.ItemIsEnabled or not (flags & Qt.ItemIsUserCheckable):
             return False
-        reason = item.toolTip(0) or "该文件当前不可选择"
+        reason = item.toolTip(0) or UI_TEXT.FILE_DISABLED_REASON
         QToolTip.showText(self.tree.viewport().mapToGlobal(pos), reason, self.tree)
         return True
 
@@ -396,7 +397,7 @@ class FileListPanel(QWidget):
             self._show_empty()
             if self._store:
                 self._store.rebuild([], strategies=strategies, keep_checked=False)
-            self.summary_label.setText("未扫描")
+            self.summary_label.setText(UI_TEXT.FILE_UNSCANNED)
             self._update_selection_count()
             return
 
@@ -438,10 +439,10 @@ class FileListPanel(QWidget):
             probe_ok = getattr(snap, "probe_ok", None)
             probe_error = getattr(snap, "probe_error", "") or ""
             if probe_ok is False and probe_error:
-                return "探测失败"
+                return UI_TEXT.FILE_PROBE_FAILED
             elif probe_ok is False and not probe_error:
-                return "探测中..."
-            return "未识别"
+                return UI_TEXT.FILE_PROBING
+            return UI_TEXT.FILE_UNRECOGNIZED
         parts = [codec]
         w = getattr(snap, "video_width", 0) or 0
         h = getattr(snap, "video_height", 0) or 0
@@ -484,10 +485,10 @@ class FileListPanel(QWidget):
         combo.setMaximumHeight(28)
         combo.setStyleSheet("QComboBox { padding: 1px 4px; }")
         names = list(self._strategy_lookup)
-        if selected_name and selected_name != "未匹配" and selected_name not in names:
+        if selected_name and selected_name != UI_TEXT.FILE_UNMATCHED and selected_name not in names:
             names.insert(0, selected_name)
-        if "自定义" not in names:
-            names.append("自定义")
+        if UI_TEXT.FILE_CUSTOM_STRATEGY not in names:
+            names.append(UI_TEXT.FILE_CUSTOM_STRATEGY)
         combo.addItems(names)
         if selected_name in names:
             combo.setCurrentText(selected_name)
@@ -528,7 +529,7 @@ class FileListPanel(QWidget):
         if target_key is None:
             return
 
-        if strategy_name != "自定义":
+        if strategy_name != UI_TEXT.FILE_CUSTOM_STRATEGY:
             lookup = self._strategy_lookup.get(strategy_name, strategy_name)
             match = MatchResult(strategy=lookup) if not isinstance(lookup, MatchResult) else lookup
             decision = self._decision_display(target_row.snap, match)
@@ -540,7 +541,7 @@ class FileListPanel(QWidget):
         rel = target_row.snap.relative_path if target_row else (relative_path if isinstance(relative_path, str) else relative_path[1])
         signal_key = target_key if target_key is not None else rel
         self.strategy_override_changed.emit(signal_key, strategy_name)
-        if strategy_name == "自定义":
+        if strategy_name == UI_TEXT.FILE_CUSTOM_STRATEGY:
             self.custom_strategy_requested.emit(signal_key)
         self._apply_filter()
 
@@ -657,7 +658,7 @@ class FileListPanel(QWidget):
             return
         from PySide6.QtWidgets import QMenu
         menu = QMenu()
-        menu.addAction("重建此文件夹缓存", lambda: self.tree_folder_refresh_requested.emit(folder_id))
+        menu.addAction(UI_TEXT.FILE_REBUILD_FOLDER_CACHE, lambda: self.tree_folder_refresh_requested.emit(folder_id))
         menu.exec(self.tree.viewport().mapToGlobal(pos))
 
     def _on_tree_selection_changed(self):
@@ -711,7 +712,7 @@ class FileListPanel(QWidget):
 
     def _update_selection_count(self):
         if self._store is None:
-            self.selection_label.setText("已选中 0/0 个可处理文件")
+            self.selection_label.setText(UI_TEXT.file_selection_count(0, 0))
             return
         checked_count = 0
         processable_total = 0
@@ -720,26 +721,39 @@ class FileListPanel(QWidget):
                 processable_total += 1
                 if self._store.is_checked(row.key):
                     checked_count += 1
-        self.selection_label.setText(f"已选中 {checked_count}/{processable_total} 个可处理文件")
+        self.selection_label.setText(UI_TEXT.file_selection_count(checked_count, processable_total))
 
-    def _decision_display(self, snap: Any, match: MatchResult | None, sidecar_path: str | None = None) -> FileDecisionDisplay:
+    def _decision_display(
+        self,
+        snap: Any,
+        match: MatchResult | None,
+        compressed_record: Any | None = None,
+        sidecar_path: str | None = None,
+    ) -> FileDecisionDisplay:
         # ── 已压缩检测（最早） ──
-        if sidecar_path:
-            strategy_name = "已压缩"
-            try:
-                from leanreel.services.audit import read_sidecar
-                audit_snap = read_sidecar(sidecar_path)
-                if audit_snap and audit_snap.strategy_name:
-                    strategy_name = f"已压缩：{audit_snap.strategy_name}"
-            except Exception:
-                pass
+        compressed_record = compressed_record or sidecar_path
+        if compressed_record:
+            strategy_name = UI_TEXT.FILE_COMPRESSED
+            sidecar_path = getattr(compressed_record, "sidecar_path", None)
+            record_strategy = getattr(compressed_record, "strategy_name", "")
+            if record_strategy:
+                strategy_name = UI_TEXT.compressed_strategy(record_strategy)
+            elif isinstance(compressed_record, str):
+                sidecar_path = compressed_record
+                try:
+                    from leanreel.services.audit import read_sidecar
+                    audit_snap = read_sidecar(sidecar_path)
+                    if audit_snap and audit_snap.strategy_name:
+                        strategy_name = UI_TEXT.compressed_strategy(audit_snap.strategy_name)
+                except Exception:
+                    pass
             return FileDecisionDisplay(
                 status_key="compressed",
                 strategy_text=strategy_name,
-                result_text="已完成",
+                result_text=UI_TEXT.FILE_COMPLETED,
                 result_sort=-5,
                 processable=False,
-                tooltip=f"该文件已压缩，审计记录：{Path(sidecar_path).name}",
+                tooltip=UI_TEXT.compressed_tooltip(Path(sidecar_path or "").name),
             )
 
         # ── 等待探测 ──
@@ -750,11 +764,11 @@ class FileListPanel(QWidget):
         ):
             return FileDecisionDisplay(
                 status_key="pending",
-                strategy_text="探测中...",
+                strategy_text=UI_TEXT.FILE_PROBING,
                 result_text="...",
                 result_sort=-4,
                 processable=False,
-                tooltip="正在探测编码信息",
+                tooltip=UI_TEXT.FILE_PROBING_TOOLTIP,
             )
 
         skip_reason = get_skip_reason(snap)
@@ -762,7 +776,7 @@ class FileListPanel(QWidget):
             return FileDecisionDisplay(
                 status_key="protected",
                 strategy_text=skip_reason,
-                result_text="不处理",
+                result_text=UI_TEXT.FILE_NOT_PROCESS,
                 result_sort=-2,
                 processable=False,
                 tooltip=skip_reason,
@@ -773,11 +787,11 @@ class FileListPanel(QWidget):
             and not getattr(snap, "video_codec", "")
             and getattr(snap, "probe_error", "")
         ):
-            probe_error = getattr(snap, "probe_error", "") or "探测失败"
+            probe_error = getattr(snap, "probe_error", "") or UI_TEXT.FILE_PROBE_FAILED
             return FileDecisionDisplay(
                 status_key="probe_failed",
-                strategy_text="探测失败",
-                result_text="无法估算",
+                strategy_text=UI_TEXT.FILE_PROBE_FAILED,
+                result_text=UI_TEXT.FILE_CANNOT_ESTIMATE,
                 result_sort=-3,
                 processable=False,
                 tooltip=probe_error,
@@ -785,26 +799,26 @@ class FileListPanel(QWidget):
 
         strategy_name, savings_text, savings_sort = self._resolve_match_display(snap, match)
         return FileDecisionDisplay(
-            status_key="processable" if strategy_name != "未匹配" else "unmatched",
+            status_key="processable" if strategy_name != UI_TEXT.FILE_UNMATCHED else "unmatched",
             strategy_text=strategy_name,
             result_text=savings_text,
             result_sort=savings_sort,
-            processable=strategy_name != "未匹配",
+            processable=strategy_name != UI_TEXT.FILE_UNMATCHED,
             tooltip=strategy_name,
         )
 
     def _resolve_match_display(self, snap: Any, match: MatchResult | None) -> tuple[str, str, int | float]:
         """将 MatchResult 解析为（策略名, 节省文本, 排序列数值）三元组。"""
         if match is None:
-            return "未匹配", "—", -1
+            return UI_TEXT.FILE_UNMATCHED, "—", -1
 
         strategy = match.strategy
         estimate = match.estimate or {}
 
         # ── 提取策略名称 ──
-        strategy_name: str = "未匹配"
+        strategy_name: str = UI_TEXT.FILE_UNMATCHED
         if hasattr(strategy, "name"):
-            strategy_name = strategy.name or "未匹配"
+            strategy_name = strategy.name or UI_TEXT.FILE_UNMATCHED
         elif isinstance(strategy, str):
             strategy_name = strategy
         elif estimate.get("strategy_name"):

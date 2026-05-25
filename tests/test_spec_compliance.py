@@ -690,6 +690,53 @@ def test_f1_library_cache_loader_rejects_main_thread_cache_work(qtbot):
     threading_contract._reset_for_tests()
 
 
+def test_populate_file_list_uses_sql_compression_records_not_sidecar_scan(monkeypatch):
+    """Compressed state comes from SQL records, not per-file NAS glob calls."""
+    from types import SimpleNamespace
+    from leanreel.controllers.scan_controller import ScanController
+    from leanreel.domain.models import CompressionRecord
+
+    def fail_sidecar_scan(_source_path):
+        raise AssertionError("sidecar scan should not be used")
+
+    monkeypatch.setattr("leanreel.services.audit.find_sidecars_for_source", fail_sidecar_scan)
+    compressed_records = {
+        (1, "cached.mkv"): CompressionRecord(
+            file_snapshot_id=5,
+            strategy_name="SQL 压缩记录",
+            sidecar_path=r"\\nas\media\cached_zcompressed.mkv.leanreel.json",
+        )
+    }
+    seen_records = []
+
+    class NoMatch:
+        def match(self, _snap):
+            return None
+
+    ctrl = ScanController(
+        state=SimpleNamespace(current_folder_paths={1: r"\\nas\media"}),
+        services=SimpleNamespace(
+            matcher=NoMatch(),
+            strategies=[],
+            db=SimpleNamespace(get_compression_records_for_folders=lambda folder_ids: compressed_records),
+        ),
+        file_panel=SimpleNamespace(
+            _decision_display=lambda snap, match, compressed_record=None: seen_records.append(compressed_record) or SimpleNamespace(processable=False),
+            set_strategy_lookup=lambda strategies: None,
+            _show_current_view=lambda: None,
+            refresh_summary=lambda snapshots: None,
+            _flat_adapter=None,
+        ),
+        win=SimpleNamespace(set_status=lambda text: None),
+        store=SimpleNamespace(rebuild=lambda rows, strategies=None, keep_checked=False: None),
+        notifier=SimpleNamespace(),
+    )
+
+    ctrl._populate_file_list([_snap(library_folder_id=1, relative_path="cached.mkv")])
+
+    assert seen_records == [compressed_records[(1, "cached.mkv")]]
+
+
 def test_f1_probe_results_are_committed_on_main_thread(qtbot):
     """Background probe callbacks must not update Store or Qt models directly."""
     _qapp()

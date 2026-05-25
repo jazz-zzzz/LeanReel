@@ -105,3 +105,33 @@ def test_compression_history(db: Database):
     records = db.get_history_for_library(lib_id)
     assert len(records) == 1
     assert records[0].strategy_name == "均衡压缩"
+
+
+def test_get_compression_records_for_folders_returns_latest_completed_sidecar(db: Database):
+    from leanreel.domain.models import CompressionRecord
+
+    lib_id = db.insert_library(Library(name="Film"))
+    fid = db.insert_folder(LibraryFolder(library_id=lib_id, path="/mnt/f"))
+    db.execute(
+        "INSERT INTO file_snapshot (library_folder_id, relative_path, file_name, size_bytes, video_codec, video_width, video_height, hdr_type) VALUES (?,?,?,?,?,?,?,?)",
+        [fid, "movie.mkv", "movie.mkv", 1000, "h264", 1920, 1080, "SDR"],
+    )
+    snap_id = db.last_insert_id
+    db.insert_compression(CompressionRecord(
+        file_snapshot_id=snap_id,
+        strategy_name="旧记录",
+        status=TaskStatus.FAILED,
+        sidecar_path="/mnt/f/old.json",
+    ))
+    db.insert_compression(CompressionRecord(
+        file_snapshot_id=snap_id,
+        strategy_name="SQL 压缩记录",
+        status=TaskStatus.COMPLETED,
+        sidecar_path="/mnt/f/movie_zcompressed.mkv.leanreel.json",
+    ))
+
+    records = db.get_compression_records_for_folders({fid})
+
+    assert set(records) == {(fid, "movie.mkv")}
+    assert records[(fid, "movie.mkv")].strategy_name == "SQL 压缩记录"
+    assert records[(fid, "movie.mkv")].sidecar_path.endswith(".leanreel.json")

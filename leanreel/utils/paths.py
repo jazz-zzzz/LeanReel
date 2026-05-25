@@ -3,6 +3,17 @@ import sys
 import os
 from pathlib import Path
 
+_OBSOLETE_BUILTIN_STRATEGIES = {
+    "balanced.json",
+    "extreme.json",
+    "light.json",
+    "nvenc_balanced.json",
+    "nvenc_quality.json",
+    "strip_only.json",
+    "x265_fast.json",
+    "x265_turbo.json",
+}
+
 
 def get_data_dir() -> Path:
     if sys.platform == "win32":
@@ -20,6 +31,11 @@ def get_strategies_dir() -> Path:
     builtin = Path(__file__).parent.parent / "resources" / "strategies"
     if builtin.exists():
         import shutil
+        builtin_names = {f.name for f in builtin.glob("*.json")}
+        for name in _OBSOLETE_BUILTIN_STRATEGIES - builtin_names:
+            stale = user_dir / name
+            if stale.exists():
+                stale.unlink()
         for f in builtin.glob("*.json"):
             dest = user_dir / f.name
             shutil.copy2(f, dest)

@@ -23,14 +23,23 @@ class AppSignals(QObject):
 
     # ── 预扫描信号 ──
 
+    scan_ready_event = Signal(object)
+    """Typed scan-ready event."""
+
     scan_ready = Signal(object, object, int)
     """文件遍历完成 — (placeholders, folder_inputs, token)"""
+
+    scan_resolved_event = Signal(object)
+    """Typed scan-resolved event."""
 
     scan_resolved = Signal(object, object, int)
     """缓存解析完成 — (snapshots, folder_inputs, token)"""
 
     library_cache_loaded = Signal(object, int)
     """库缓存加载完成 — (snapshots, token)"""
+
+    probe_result_event = Signal(object)
+    """Typed probe-result event."""
 
     probe_result = Signal(object, int)
     """单个探测结果 — (snapshot, token)"""
@@ -39,6 +48,9 @@ class AppSignals(QObject):
     """后台策略排序完成 — (strategies)"""
 
     # ── 编码信号 ──
+
+    task_progress = Signal(object)
+    """Typed immutable task progress event."""
 
     task_updated = Signal(object)
     """编码任务状态更新 — (EncodeTask)"""

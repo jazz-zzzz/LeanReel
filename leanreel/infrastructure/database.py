@@ -251,8 +251,69 @@ class Database(LibraryStore):
             strategy_name=r["strategy_name"], original_size=r["original_size"],
             compressed_size=r["compressed_size"], status=TaskStatus(r["status"]),
             duration_seconds=r["duration_seconds"], error_message=r["error_message"],
-            created_at=r["created_at"]
+            created_at=r["created_at"],
+            output_path=r.get("output_path", ""),
+            output_size_bytes=r.get("output_size_bytes", 0),
+            savings_pct=r.get("savings_pct", 0.0),
+            encoder=r.get("encoder", ""),
+            cq_value=r.get("cq_value", 0),
+            preset=r.get("preset", ""),
+            pix_fmt=r.get("pix_fmt", ""),
+            audio_mode=r.get("audio_mode", ""),
+            sub_mode=r.get("sub_mode", ""),
+            ffmpeg_command=r.get("ffmpeg_command", ""),
+            sidecar_path=r.get("sidecar_path", ""),
+            leanreel_version=r.get("leanreel_version", ""),
         ) for r in rows]
+
+    def get_compression_records_for_folders(self, folder_ids: set[int]) -> dict[tuple[int, str], CompressionRecord]:
+        """Return the latest completed compression record keyed by source file."""
+        if not folder_ids:
+            return {}
+        ordered_ids = sorted(int(folder_id) for folder_id in folder_ids)
+        placeholders = ",".join("?" * len(ordered_ids))
+        rows = self.execute(f"""
+            SELECT
+                fs.library_folder_id,
+                fs.relative_path,
+                ch.*
+            FROM compression_history ch
+            JOIN file_snapshot fs ON ch.file_snapshot_id = fs.id
+            WHERE fs.library_folder_id IN ({placeholders})
+              AND ch.status = ?
+              AND ch.sidecar_path <> ''
+            ORDER BY ch.created_at DESC, ch.id DESC
+        """, [*ordered_ids, TaskStatus.COMPLETED.value])
+
+        records: dict[tuple[int, str], CompressionRecord] = {}
+        for r in rows:
+            key = (int(r["library_folder_id"]), str(r["relative_path"]))
+            if key in records:
+                continue
+            records[key] = CompressionRecord(
+                id=r["id"],
+                file_snapshot_id=r["file_snapshot_id"],
+                strategy_name=r["strategy_name"],
+                original_size=r["original_size"],
+                compressed_size=r["compressed_size"],
+                status=TaskStatus(r["status"]),
+                duration_seconds=r["duration_seconds"],
+                error_message=r["error_message"],
+                created_at=r["created_at"],
+                output_path=r.get("output_path", ""),
+                output_size_bytes=r.get("output_size_bytes", 0),
+                savings_pct=r.get("savings_pct", 0.0),
+                encoder=r.get("encoder", ""),
+                cq_value=r.get("cq_value", 0),
+                preset=r.get("preset", ""),
+                pix_fmt=r.get("pix_fmt", ""),
+                audio_mode=r.get("audio_mode", ""),
+                sub_mode=r.get("sub_mode", ""),
+                ffmpeg_command=r.get("ffmpeg_command", ""),
+                sidecar_path=r.get("sidecar_path", ""),
+                leanreel_version=r.get("leanreel_version", ""),
+            )
+        return records
 
     def close(self):
         self._pool.close_all()

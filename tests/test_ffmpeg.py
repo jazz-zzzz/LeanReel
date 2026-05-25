@@ -6,6 +6,27 @@ from leanreel.domain.models import Strategy
 from leanreel.domain.models import FileSnapshot, HDRType
 
 
+def test_builder_exposes_encoder_specs_as_single_source_of_truth():
+    from leanreel.executor import ffmpeg_builder as builder
+
+    assert set(builder.ENCODER_SPECS) == {
+        "copy",
+        "libx265",
+        "av1_nvenc",
+        "hevc_nvenc",
+        "h264_nvenc",
+    }
+    assert builder.ENCODER_SPECS["copy"].kind == "copy"
+    assert builder.ENCODER_SPECS["libx265"].kind == "x265"
+    assert builder.ENCODER_SPECS["av1_nvenc"].kind == "nvenc"
+    assert builder.ENCODER_SPECS["av1_nvenc"].quality_option == "cq"
+    assert builder.ENCODER_SPECS["av1_nvenc"].quality_max == 63
+    assert builder.ENCODER_SPECS["hevc_nvenc"].quality_max == 51
+    assert builder.ENCODER_SPECS["h264_nvenc"].quality_max == 51
+    assert builder.ENCODER_SPECS["av1_nvenc"].supports_hdr10plus is False
+    assert builder.ENCODER_SPECS["hevc_nvenc"].supports_hdr10plus is True
+
+
 @pytest.fixture
 def balanced_strategy():
     data = {
@@ -30,6 +51,51 @@ def test_build_basic_x265_command(balanced_strategy):
     assert "output.mkv" in cmd
 
 
+@pytest.mark.parametrize("encoder", ["av1_nvenc", "hevc_nvenc", "h264_nvenc", "libx265", "copy"])
+def test_build_custom_encoder_for_video_only_source_uses_optional_audio_mapping(encoder):
+    strategy = Strategy.from_dict({
+        "name": f"{encoder} custom",
+        "video": {
+            "encoder": encoder,
+            "gpu": encoder.endswith("_nvenc"),
+            "nv_preset": "p5",
+            "rc": "vbr",
+            "cq": 32,
+            "crf": 18,
+            "preset": "slow",
+            "pix_fmt": "yuv420p10le",
+        },
+        "audio": {"mode": "keep_original"},
+        "subtitle": {"mode": "keep_all"},
+        "filters": {},
+    })
+    snap = FileSnapshot(video_codec="h264", video_width=1920, video_height=1080, probe_ok=True)
+
+    cmd = FFmpegBuilder.build(snap, strategy, "video_only.mkv", "out.mkv")
+    joined = " ".join(cmd)
+
+    assert "-map 0:V" in joined
+    assert "-map 0:a?" in joined
+    assert "-map 0:a " not in f"{joined} "
+    assert "-map 0:s?" in joined
+    assert "-copy_unknown" in cmd
+
+
+def test_build_all_builtin_presets_for_video_only_source_are_optional_track_safe():
+    from leanreel.infrastructure.strategy_loader import load_strategies
+
+    strategy_dir = Path(__file__).resolve().parents[1] / "leanreel" / "resources" / "strategies"
+    snap = FileSnapshot(video_codec="h264", video_width=1920, video_height=1080, probe_ok=True)
+
+    for strategy in load_strategies(str(strategy_dir)):
+        cmd = FFmpegBuilder.build(snap, strategy, "video_only.mkv", "out.mkv")
+        joined = " ".join(cmd)
+        assert "-map 0:V" in joined, strategy.name
+        assert "-map 0:a?" in joined, strategy.name
+        assert "-map 0:a " not in f"{joined} ", strategy.name
+        assert "-map 0:s?" in joined, strategy.name
+
+
 def test_build_nvenc_command():
     from leanreel.domain.models import Strategy
     data = {
@@ -46,6 +112,153 @@ def test_build_nvenc_command():
     assert "-rc" in cmd and "vbr" in cmd
     assert "-cq" in cmd and "23" in cmd
     assert "-crf" not in cmd
+
+
+def test_build_av1_nvenc_command_uses_cq_not_crf():
+    strategy = Strategy.from_dict({
+        "name": "AV1 NVENC CQ34 均衡快速", "is_preset": True,
+        "video": {
+            "encoder": "av1_nvenc",
+            "gpu": True,
+            "nv_preset": "p5",
+            "rc": "vbr",
+            "cq": 34,
+        },
+        "audio": {"mode": "keep_original"},
+        "subtitle": {"mode": "keep_all"},
+        "filters": {},
+    })
+    snap = FileSnapshot(video_codec="h264", video_width=1920, video_height=1080)
+
+    cmd = FFmpegBuilder.build(snap, strategy, "in.ts", "out.mkv")
+    joined = " ".join(cmd)
+
+    assert "-c:V av1_nvenc" in joined
+    assert "-preset p5" in joined
+    assert "-rc vbr" in joined
+    assert "-cq 34" in joined
+    assert "-spatial-aq 1" in joined
+    assert "-temporal-aq 1" in joined
+    assert "-spatial_aq" not in cmd
+    assert "-temporal_aq" not in cmd
+    assert "-aq-strength 8" in joined
+    assert "-crf" not in cmd
+
+
+def test_build_nvenc_clamps_cq_to_encoder_supported_range():
+    strategy = Strategy.from_dict({
+        "name": "HEVC custom", "is_preset": False,
+        "video": {
+            "encoder": "hevc_nvenc",
+            "gpu": True,
+            "nv_preset": "p5",
+            "rc": "vbr",
+            "cq": 63,
+        },
+        "audio": {"mode": "keep_original"},
+        "subtitle": {"mode": "keep_all"},
+        "filters": {},
+    })
+    snap = FileSnapshot(video_codec="h264", video_width=1920, video_height=1080)
+
+    cmd = FFmpegBuilder.build(snap, strategy, "in.mkv", "out.mkv")
+    joined = " ".join(cmd)
+
+    assert "-c:V hevc_nvenc" in joined
+    assert "-cq 51" in joined
+
+
+def test_build_nvenc_defaults_invalid_custom_rc_and_preset_to_safe_values():
+    strategy = Strategy.from_dict({
+        "name": "AV1 bad custom", "is_preset": False,
+        "video": {
+            "encoder": "av1_nvenc",
+            "gpu": True,
+            "nv_preset": "",
+            "rc": "",
+            "cq": -4,
+        },
+        "audio": {"mode": "keep_original"},
+        "subtitle": {"mode": "keep_all"},
+        "filters": {},
+    })
+    snap = FileSnapshot(video_codec="h264", video_width=1920, video_height=1080)
+
+    cmd = FFmpegBuilder.build(snap, strategy, "in.mkv", "out.mkv")
+    joined = " ".join(cmd)
+
+    assert "-preset p4" in joined
+    assert "-rc vbr" in joined
+    assert "-cq 0" in joined
+
+
+def test_build_rejects_unknown_encoder_before_running_ffmpeg():
+    strategy = Strategy.from_dict({
+        "name": "bad encoder", "is_preset": False,
+        "video": {"encoder": "definitely_not_real"},
+        "audio": {"mode": "keep_original"},
+        "subtitle": {"mode": "keep_all"},
+        "filters": {},
+    })
+    snap = FileSnapshot(video_codec="h264", video_width=1920, video_height=1080)
+
+    with pytest.raises(ValueError, match="Unsupported video encoder"):
+        FFmpegBuilder.build(snap, strategy, "in.mkv", "out.mkv")
+
+
+def test_build_x265_clamps_custom_crf_and_defaults_missing_preset():
+    strategy = Strategy.from_dict({
+        "name": "x265 custom", "is_preset": False,
+        "video": {
+            "encoder": "libx265",
+            "crf": 80,
+            "preset": "",
+            "pix_fmt": "",
+        },
+        "audio": {"mode": "keep_original"},
+        "subtitle": {"mode": "keep_all"},
+        "filters": {},
+    })
+    snap = FileSnapshot(video_codec="h264", video_width=1920, video_height=1080)
+
+    cmd = FFmpegBuilder.build(snap, strategy, "in.mkv", "out.mkv")
+    joined = " ".join(cmd)
+
+    assert "-crf 51" in joined
+    assert "-preset slow" in joined
+    assert "-pix_fmt yuv420p10le" in joined
+
+
+def test_build_av1_nvenc_hdr10plus_does_not_emit_unsupported_hdr10plus_flag():
+    strategy = Strategy.from_dict({
+        "name": "AV1 HDR10+", "is_preset": False,
+        "video": {
+            "encoder": "av1_nvenc",
+            "gpu": True,
+            "nv_preset": "p6",
+            "rc": "vbr",
+            "cq": 32,
+        },
+        "hdr": {"mode": "preserve_hdr10"},
+        "audio": {"mode": "keep_original"},
+        "subtitle": {"mode": "keep_all"},
+        "filters": {},
+    })
+    snap = FileSnapshot(
+        video_codec="h264",
+        hdr_type=HDRType.HDR10P,
+        video_width=3840,
+        video_height=2160,
+    )
+
+    cmd = FFmpegBuilder.build(snap, strategy, "hdr10plus.ts", "out.mkv")
+    joined = " ".join(cmd)
+
+    assert "-c:V av1_nvenc" in joined
+    assert "-color_primaries bt2020" in joined
+    assert "-color_trc smpte2084" in joined
+    assert "-colorspace bt2020nc" in joined
+    assert "-hdr10+" not in cmd
 
 
 def test_build_preserves_chapters_and_attachments(balanced_strategy):
@@ -130,7 +343,8 @@ def test_ffmpeg_executor_runs_built_command(monkeypatch, balanced_strategy, tmp_
     assert "-c:V" in cmd_joined
     assert "libx265" in cmd_joined
     assert "-crf" in cmd_joined and "20" in cmd_joined
-    assert "-map 0:a" in cmd_joined   # 音频保留（无探测数据时回退）
+    assert "-map 0:a?" in cmd_joined   # 音频保留（无探测数据时回退）
+    assert "-map 0:a " not in f"{cmd_joined} "
     assert "-c:a copy" in cmd_joined
     assert "-map_metadata 0" in cmd_joined
     assert "-map_chapters 0" in cmd_joined
@@ -236,6 +450,32 @@ def test_build_keep_original_keeps_unknown_language_audio():
     assert "-c:a copy" in joined
 
 
+def test_build_audio_keep_original_fallback_is_optional_when_filters_remove_all_audio():
+    from leanreel.domain.models import AudioTrack
+
+    strategy = Strategy.from_dict({
+        "name": "commentary-only",
+        "audio": {
+            "mode": "keep_original",
+            "remove_commentary": True,
+            "preferred_languages": [],
+        },
+        "subtitle": {"mode": "keep_all"},
+        "video": {},
+        "filters": {},
+    })
+    snap = FileSnapshot(video_codec="h264", audio_tracks=[
+        AudioTrack(codec="aac", channels=2, language="eng", title="Commentary", is_commentary=True),
+    ])
+
+    cmd = FFmpegBuilder.build(snap, strategy, "in.mkv", "out.mkv")
+    joined = " ".join(cmd)
+
+    assert "-map 0:a?" in joined
+    assert "-map 0:a " not in f"{joined} "
+    assert "-c:a copy" in joined
+
+
 def test_build_filters_by_preferred_languages():
     from leanreel.domain.models import AudioTrack
     strategy = Strategy.from_dict({
@@ -312,7 +552,8 @@ def test_build_audio_fallback_when_no_probe_data(balanced_strategy):
     snap = FileSnapshot(video_codec="h264", audio_tracks=[])
     cmd = FFmpegBuilder.build(snap, balanced_strategy, "in.mkv", "out.mkv")
     joined = " ".join(cmd)
-    assert "-map 0:a" in joined
+    assert "-map 0:a?" in joined
+    assert "-map 0:a " not in f"{joined} "
     assert "-c:a copy" in joined
 
 

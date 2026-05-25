@@ -94,6 +94,40 @@ def test_load_strategies_skips_corrupted_json(tmp_path: Path):
     assert len(strategies) == 2  # 损坏文件被跳过
 
 
+def test_builtin_presets_are_three_av1_cpu_tiers():
+    """内置主预设只保留两个 AV1 档和一个 CPU 保画质档。"""
+    strategy_dir = Path(__file__).resolve().parents[1] / "leanreel" / "resources" / "strategies"
+
+    strategies = load_strategies(str(strategy_dir))
+
+    assert [s.name for s in strategies] == [
+        "AV1 NVENC CQ34 均衡快速",
+        "AV1 NVENC CQ32 保画质",
+        "CPU x265 CRF18 慢速保画质",
+    ]
+    assert all(s.is_preset for s in strategies)
+
+    av1_balanced, av1_quality, cpu_quality = strategies
+    assert av1_balanced.video.encoder == "av1_nvenc"
+    assert av1_balanced.video.gpu is True
+    assert av1_balanced.video.rc == "vbr"
+    assert av1_balanced.video.cq == 34
+    assert av1_balanced.video.nv_preset == "p5"
+
+    assert av1_quality.video.encoder == "av1_nvenc"
+    assert av1_quality.video.gpu is True
+    assert av1_quality.video.rc == "vbr"
+    assert av1_quality.video.cq == 32
+    assert av1_quality.video.nv_preset == "p6"
+
+    assert cpu_quality.video.encoder == "libx265"
+    assert cpu_quality.video.crf == 18
+    assert cpu_quality.video.preset == "slow"
+    assert cpu_quality.video.pix_fmt == "yuv420p10le"
+    assert all("用户 PDF" not in s.description for s in strategies)
+    assert all("PDF" not in s.description for s in strategies)
+
+
 # ──────────────────────────────────────────
 # VideoRule.is_gpu 测试
 # ──────────────────────────────────────────

@@ -2,13 +2,16 @@
 import threading
 from pathlib import Path
 
+from leanreel.controllers.events import TaskProgressEvent
 from leanreel.domain.models import Strategy, is_protected_source, TaskStatus
 from leanreel.executor.ffmpeg import FFmpegExecutor
 from leanreel.executor.worker import EncodeTask, WorkerManager
+from leanreel.ui_text import UI_TEXT
 
 
-def make_output_path(source: Path) -> Path:
-    return source.with_name(f"{source.stem}_zcompressed{source.suffix}")
+def make_output_path(source: Path, strategy: Strategy | None = None) -> Path:
+    suffix = ".mkv" if getattr(getattr(strategy, "video", None), "encoder", "") == "av1_nvenc" else source.suffix
+    return source.with_name(f"{source.stem}_zcompressed{suffix}")
 
 
 def compute_encode_summary(results: list[EncodeTask]) -> tuple[int, int, int]:
@@ -39,7 +42,7 @@ def build_encode_tasks(
         tasks.append(EncodeTask(
             file_name=snap.file_name,
             input_path=str(input_path),
-            output_path=str(make_output_path(input_path)),
+            output_path=str(make_output_path(input_path, selected_strategy)),
             strategy_name=selected_strategy.name,
             strategy=selected_strategy,
             snapshot=snap,
@@ -60,19 +63,28 @@ class EncodingController:
         self.active_manager: WorkerManager | None = None
         self.encoding_in_progress = False
         self._encode_lock = threading.Lock()
+        self._progress_sequence = 0
+
+    def _emit_task_progress(self, task):
+        self._progress_sequence += 1
+        event = TaskProgressEvent.from_task(task, sequence=self._progress_sequence)
+        if hasattr(self._notifier, "task_progress"):
+            self._notifier.task_progress.emit(event)
+        if hasattr(self._notifier, "task_updated"):
+            self._notifier.task_updated.emit(task)
 
     def start(self, snapshots, folder_paths, strategy_overrides):
         """启动编码。返回 True 表示编码已成功启动。"""
         with self._encode_lock:
             if self.encoding_in_progress:
-                self._win.set_status("编码正在进行中，请等待完成")
+                self._win.set_status(UI_TEXT.ENCODE_IN_PROGRESS)
                 return False
             self.encoding_in_progress = True
 
         try:
             default_strategy = self._strategy_panel.current_preset_strategy or self._strategy_panel.current_strategy
             if default_strategy is None:
-                self._win.set_status("没有可用策略")
+                self._win.set_status(UI_TEXT.NO_STRATEGY)
                 with self._encode_lock:
                     self.encoding_in_progress = False
                 return False
@@ -84,7 +96,7 @@ class EncodingController:
                 strategy_overrides,
             )
             if not tasks:
-                self._win.set_status("没有可压缩文件")
+                self._win.set_status(UI_TEXT.NO_ENCODABLE_FILES)
                 with self._encode_lock:
                     self.encoding_in_progress = False
                 return False
@@ -97,14 +109,12 @@ class EncodingController:
             self.active_manager = WorkerManager(
                 FFmpegExecutor(
                     temp_dir=self._strategy_panel.temp_dir,
-                    progress_callback=lambda t: self._notifier.task_updated.emit(t),
-                    sync_output=self._strategy_panel.sync_output,
-                    keep_temp=self._strategy_panel.keep_temp,
+                    progress_callback=self._emit_task_progress,
                     delete_source=self._strategy_panel.delete_source,
                     db=self._db,
                 ),
                 self._strategy_panel.worker_count,
-                progress_callback=lambda t: self._notifier.task_updated.emit(t),
+                progress_callback=self._emit_task_progress,
             )
 
             def _run_encode():
@@ -119,7 +129,7 @@ class EncodingController:
         except Exception as e:
             with self._encode_lock:
                 self.encoding_in_progress = False
-            self._win.set_status(f"错误：{e}")
+            self._win.set_status(UI_TEXT.error(e))
             return False
 
     def toggle_pause(self):
@@ -128,19 +138,19 @@ class EncodingController:
             return
         if self.active_manager.is_paused:
             self.active_manager.resume()
-            self._win.set_status("编码已恢复")
-            self._queue_panel.pause_btn.setText("暂停")
+            self._win.set_status(UI_TEXT.ENCODE_RESUMED)
+            self._queue_panel.pause_btn.setText(UI_TEXT.PAUSE)
         else:
             self.active_manager.pause()
-            self._win.set_status("编码已暂停（等待当前任务完成）")
-            self._queue_panel.pause_btn.setText("继续")
+            self._win.set_status(UI_TEXT.ENCODE_PAUSED)
+            self._queue_panel.pause_btn.setText(UI_TEXT.RESUME)
 
     def cancel(self, _idx=None):
         """取消当前编码。"""
         if self.active_manager is None:
             return
         self.active_manager.cancel()
-        self._win.set_status("正在取消编码...")
+        self._win.set_status(UI_TEXT.ENCODE_CANCELING)
 
     def on_task_updated(self, task):
         """单个任务状态更新时由 WorkerManager 回调触发。"""
@@ -152,18 +162,31 @@ class EncodingController:
 
         # 构建包含阶段信息的状态栏消息
         stage = getattr(task, 'current_stage', None)
-        if stage and task.status == TaskStatus.RUNNING:
-            stage_text = stage.slot.display_name
-            if stage.progress_type.value == "estimated":
-                stage_text += f" {stage.internal_progress:.0%}"
+        stage_name = getattr(task, "stage_name", "")
+        if (stage or stage_name) and task.status == TaskStatus.RUNNING:
+            if stage:
+                stage_text = stage.slot.display_name
+                if stage.progress_type.value == "estimated":
+                    stage_text += f" {stage.internal_progress:.0%}"
+            else:
+                stage_text = stage_name
+                if getattr(task, "stage_progress", 0.0):
+                    stage_text += f" {task.stage_progress:.0%}"
             self._win.set_status(
-                f"{stage_text} ｜ {task.file_name} ｜ "
-                f"已处理 {progress['completed'] + progress['failed']}/{progress['total']}"
-                + (f" ・ 失败 {progress['failed']}" if progress['failed'] else "")
+                UI_TEXT.encoding_stage_status(
+                    stage_text=stage_text,
+                    file_name=task.file_name,
+                    done=progress["completed"] + progress["failed"],
+                    total=progress["total"],
+                    failed=progress["failed"],
+                )
             )
         else:
             self._win.set_status(
-                f"编码中：{progress['completed'] + progress['failed']}/{progress['total']}"
+                UI_TEXT.encoding_progress(
+                    progress["completed"] + progress["failed"],
+                    progress["total"],
+                )
             )
 
     def on_encoding_done(self):
@@ -174,9 +197,4 @@ class EncodingController:
             return
         results = self.active_manager.get_results()
         done, failed, cancelled = compute_encode_summary(results)
-        parts = [f"编码完成：成功 {done}"]
-        if failed:
-            parts.append(f"失败 {failed}")
-        if cancelled:
-            parts.append(f"取消 {cancelled}")
-        self._win.set_status(" ｜ ".join(parts))
+        self._win.set_status(UI_TEXT.encoding_summary(done, failed, cancelled))

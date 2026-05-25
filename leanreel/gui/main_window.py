@@ -5,6 +5,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
+from leanreel.ui_text import UI_TEXT
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -42,22 +44,18 @@ class MainWindow(QMainWindow):
 
     def _setup_menu(self):
         menu = self.menuBar()
-        file_menu = menu.addMenu("文件(&F)")
-        file_menu.addAction("退出(&X)", self.close)
+        file_menu = menu.addMenu(UI_TEXT.MAIN_MENU_FILE)
+        file_menu.addAction(UI_TEXT.MAIN_MENU_EXIT, self.close)
 
-        view_menu = menu.addMenu("视图(&V)")
-        self._toggle_queue_action = view_menu.addAction("显示/隐藏队列")
+        view_menu = menu.addMenu(UI_TEXT.MAIN_MENU_VIEW)
+        self._toggle_queue_action = view_menu.addAction(UI_TEXT.MAIN_MENU_QUEUE_TOGGLE)
 
-        help_menu = menu.addMenu("帮助(&H)")
-        help_menu.addAction("关于 LeanReel", self._show_about)
+        help_menu = menu.addMenu(UI_TEXT.MAIN_MENU_HELP)
+        help_menu.addAction(UI_TEXT.MAIN_MENU_ABOUT, self._show_about)
 
     def _show_about(self):
         from PySide6.QtWidgets import QMessageBox
-        QMessageBox.about(self, "关于 LeanReel",
-            "LeanReel — 视频压缩管理工具\n\n"
-            "默认保护 HEVC/HDR/Dolby Vision 片源。\n"
-            "为 SDR 旧编码片源提供可解释的本地转码策略。"
-        )
+        QMessageBox.about(self, UI_TEXT.MAIN_ABOUT_TITLE, UI_TEXT.MAIN_ABOUT_BODY)
 
     def set_toggle_queue_action(self, callback):
         self._toggle_queue_action.triggered.connect(callback)
@@ -66,7 +64,7 @@ class MainWindow(QMainWindow):
         self.status = QStatusBar()
         self.status.setFixedHeight(28)
         self.setStatusBar(self.status)
-        self.status_label = QLabel("就绪")
+        self.status_label = QLabel(UI_TEXT.READY)
         self.status_label.setStyleSheet("color: #e8e3db; font-size: 12px; padding: 2px 16px;")
         self.status.addWidget(self.status_label, 1)
 
@@ -87,7 +85,7 @@ class MainWindow(QMainWindow):
         widget.setVisible(True)
 
     def _setup_docks(self):
-        self.queue_dock = QDockWidget("任务队列", self)
+        self.queue_dock = QDockWidget(UI_TEXT.QUEUE_DOCK_TITLE, self)
         self.queue_dock.setAllowedAreas(Qt.BottomDockWidgetArea)
         self.queue_panel = QWidget()
         self.queue_dock.setWidget(self.queue_panel)

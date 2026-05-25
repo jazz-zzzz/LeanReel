@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt
 
 from leanreel.state.app_state import AppState
+from leanreel.ui_text import UI_TEXT
 
 if TYPE_CHECKING:
     from leanreel.main import Services
@@ -120,11 +121,11 @@ class StrategyController:
     def _on_start_requested(self):
         checked_keys = set(self._file_panel.get_checked_file_keys())
         if not checked_keys:
-            self._win.set_status("没有勾选任何文件，请先在文件列表中勾选要处理的文件")
+            self._win.set_status(UI_TEXT.NO_CHECKED_FILES)
             return
         snapshots = [s for s in self._state.current_snapshots if (s.library_folder_id, s.relative_path) in checked_keys]
         if not snapshots:
-            self._win.set_status("勾选的文件未找到")
+            self._win.set_status(UI_TEXT.CHECKED_FILES_MISSING)
             return
         self._encoding_ctrl.start(
             snapshots,

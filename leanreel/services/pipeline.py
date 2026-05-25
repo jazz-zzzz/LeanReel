@@ -122,12 +122,8 @@ def build_pipeline(task) -> PipelinePlan:
     # 1. 准备阶段（始终存在）
     stages.append(StageTask(slot=SLOT_PREPARE, progress_type=ProgressType.INSTANT))
 
-    # 2. 复制入（如果启用 I/O 分离）
     snap = getattr(task, "snapshot", None)
     strategy = getattr(task, "strategy", None)
-    needs_io = strategy is not None and getattr(strategy, "hdr", None) is not None
-    # I/O 分离在 FFmpegExecutor 中通过 temp_dir 控制，总是启用
-    stages.append(StageTask(slot=SLOT_COPY_IN, progress_type=ProgressType.DETERMINISTIC))
 
     # 3. 提取 RPU（DV_P7 + reinject_rpu 策略）
     if snap is not None and strategy is not None:

@@ -15,6 +15,62 @@ def test_make_output_path_adds_suffix_without_overwriting_original():
     assert make_output_path(source) == Path("C:/media/Movie_zcompressed.mkv")
 
 
+def test_make_output_path_uses_mkv_for_av1_strategy():
+    source = Path("C:/media/Movie.ts")
+    strategy = Strategy.from_dict({
+        "name": "AV1 NVENC CQ34 均衡快速",
+        "video": {"encoder": "av1_nvenc", "gpu": True},
+        "filters": {},
+    })
+
+    assert make_output_path(source, strategy) == Path("C:/media/Movie_zcompressed.mkv")
+
+
+def test_prioritize_strategies_filters_gpu_by_exact_encoder(monkeypatch):
+    import leanreel.services.strategy_utils as strategy_utils
+
+    av1 = Strategy.from_dict({
+        "name": "AV1",
+        "video": {"encoder": "av1_nvenc", "gpu": True},
+        "filters": {},
+    })
+    hevc = Strategy.from_dict({
+        "name": "HEVC",
+        "video": {"encoder": "hevc_nvenc", "gpu": True},
+        "filters": {},
+    })
+    cpu = Strategy.from_dict({
+        "name": "CPU",
+        "video": {"encoder": "libx265"},
+        "filters": {},
+    })
+
+    monkeypatch.setattr(strategy_utils, "available_nvenc_encoders", lambda: {"hevc_nvenc"})
+    assert [s.name for s in strategy_utils._prioritize_strategies([av1, hevc, cpu])] == ["HEVC", "CPU"]
+
+    monkeypatch.setattr(strategy_utils, "available_nvenc_encoders", lambda: {"av1_nvenc"})
+    assert [s.name for s in strategy_utils._prioritize_strategies([av1, hevc, cpu])] == ["AV1", "CPU"]
+
+
+def test_prioritize_strategies_hides_unsupported_gpu_but_keeps_cpu(monkeypatch):
+    import leanreel.services.strategy_utils as strategy_utils
+
+    av1 = Strategy.from_dict({
+        "name": "AV1",
+        "video": {"encoder": "av1_nvenc", "gpu": True},
+        "filters": {},
+    })
+    cpu = Strategy.from_dict({
+        "name": "CPU",
+        "video": {"encoder": "libx265"},
+        "filters": {},
+    })
+
+    monkeypatch.setattr(strategy_utils, "available_nvenc_encoders", lambda: {"hevc_nvenc"})
+
+    assert [s.name for s in strategy_utils._prioritize_strategies([av1, cpu])] == ["CPU"]
+
+
 def test_get_strategies_dir_refreshes_builtin_strategy_files(monkeypatch, tmp_path):
     from leanreel.utils import paths as paths_mod
 
@@ -22,7 +78,7 @@ def test_get_strategies_dir_refreshes_builtin_strategy_files(monkeypatch, tmp_pa
     user_dir = tmp_path / "strategies"
     user_dir.mkdir()
     (user_dir / "balanced.json").write_text(
-        '{"name": "均衡压缩", "is_preset": true}',
+        '{"name": "旧内置预设", "is_preset": true}',
         encoding="utf-8",
     )
     (user_dir / "my_custom.json").write_text(
@@ -32,9 +88,10 @@ def test_get_strategies_dir_refreshes_builtin_strategy_files(monkeypatch, tmp_pa
 
     strategies_dir = paths_mod.get_strategies_dir()
 
-    balanced = json.loads((strategies_dir / "balanced.json").read_text(encoding="utf-8"))
+    av1_balanced = json.loads((strategies_dir / "av1_balanced.json").read_text(encoding="utf-8"))
     custom = json.loads((strategies_dir / "my_custom.json").read_text(encoding="utf-8"))
-    assert "balanced" not in balanced["name"] and "CPU" in balanced["name"]
+    assert av1_balanced["name"] == "AV1 NVENC CQ34 均衡快速"
+    assert not (strategies_dir / "balanced.json").exists()
     assert custom["name"] == "我的自定义策略"
 
 def test_init_services_does_not_run_nvenc_detection_synchronously(monkeypatch, tmp_path):

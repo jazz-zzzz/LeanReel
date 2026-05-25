@@ -128,6 +128,23 @@ def test_scanner_finds_video_files(tmp_path: Path):
     assert "another.mp4" in exts
 
 
+def test_discover_video_files_reports_partial_failures(monkeypatch):
+    from leanreel.infrastructure.file_discovery import discover_video_files
+
+    def fake_scandir(path):
+        raise OSError("network path unavailable")
+
+    monkeypatch.setattr("os.scandir", fake_scandir)
+
+    report = discover_video_files(r"\\nas\share")
+
+    assert report.files == []
+    assert report.partial is True
+    assert len(report.warnings) == 1
+    assert report.warnings[0].path == r"\\nas\share"
+    assert "network path unavailable" in report.warnings[0].error
+
+
 def test_scanner_caches_results(tmp_path: Path):
     (tmp_path / "movie.mkv").write_text("fake")
 
@@ -534,6 +551,37 @@ def test_probe_multi_reports_cache_hits_before_slow_probes(tmp_path: Path):
     assert first_result.wait(timeout=0.5)
     assert results == ["cached.mkv"]
     release_slow_probe.set()
+
+
+def test_probe_multi_honors_cancel_token_before_launching_probe(tmp_path: Path):
+    from leanreel.services.cancellation import CancellationToken
+    from leanreel.services.scanner import Scanner
+    from leanreel.infrastructure.repository import SnapshotRepository
+
+    video = tmp_path / "movie.mkv"
+    video.write_text("fake")
+
+    db = Database(str(tmp_path / "test.db"))
+    lib_id = db.insert_library(Library(name="Test"))
+    folder_id = db.insert_folder(LibraryFolder(library_id=lib_id, path=str(tmp_path)))
+
+    probe = CountingFFprobe()
+    scanner = Scanner(repo=SnapshotRepository(db), probe=probe, max_workers=1)
+    token = CancellationToken()
+    token.cancel()
+    finished = threading.Event()
+    results = []
+
+    scanner.probe_multi(
+        [(folder_id, str(tmp_path), [("movie.mkv", str(video))])],
+        results.append,
+        on_finished=finished.set,
+        cancel_token=token,
+    )
+
+    assert finished.wait(timeout=2)
+    assert results == []
+    assert probe.calls == 0
 
 
 # ── 孤儿清理 ──

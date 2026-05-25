@@ -10,11 +10,18 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal
 
 from leanreel.domain.models import Strategy
+from leanreel.ui_text import UI_TEXT
 
 _CPU_ENCODERS = ["libx265"]
-_GPU_ENCODERS = ["hevc_nvenc", "h264_nvenc"]
+_GPU_ENCODERS = ["av1_nvenc", "hevc_nvenc", "h264_nvenc"]
 _ALL_ENCODERS = [*_CPU_ENCODERS, *_GPU_ENCODERS, "copy"]
 _NV_PRESETS = ["p1", "p2", "p3", "p4", "p5", "p6", "p7"]
+_GPU_CQ_MAX = {"av1_nvenc": 63, "hevc_nvenc": 51, "h264_nvenc": 51}
+_GPU_CUSTOM_NAMES = {
+    "av1_nvenc": "AV1 NVENC CQ {cq} 自定义转码",
+    "hevc_nvenc": "HEVC NVENC CQ {cq} 自定义转码",
+    "h264_nvenc": "H.264 NVENC CQ {cq} 自定义转码",
+}
 
 _ROW_STYLE = """
 QPushButton {
@@ -64,7 +71,7 @@ class PresetCardPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
 
-        presets_label = QLabel("压缩策略")
+        presets_label = QLabel(UI_TEXT.STRATEGY_PRESETS)
         presets_label.setStyleSheet(
             "font-weight: bold; color: #8a857c; font-size: 11px; padding: 2px 4px;"
         )
@@ -244,7 +251,7 @@ class StrategyPanel(QWidget):
         layout.addWidget(self.preset_panel)
 
         # ── 自定义参数（可折叠）──
-        self.custom_group = CollapsibleGroup("自定义参数")
+        self.custom_group = CollapsibleGroup(UI_TEXT.STRATEGY_CUSTOM_GROUP)
 
         custom_content = QWidget()
         custom_layout = QFormLayout(custom_content)
@@ -259,17 +266,17 @@ class StrategyPanel(QWidget):
         self.custom_crf_spin.setRange(0, 51)
         self.custom_crf_spin.setValue(20)
         self.crf_label = QLabel("CRF")
-        self.crf_label.setToolTip("x265 质量参数，数字越小画质越高，体积越大")
+        self.crf_label.setToolTip(UI_TEXT.STRATEGY_CRF_TOOLTIP)
 
         self.custom_cq_spin = QSpinBox()
-        self.custom_cq_spin.setRange(0, 51)
-        self.custom_cq_spin.setValue(26)
+        self.custom_cq_spin.setRange(0, 63)
+        self.custom_cq_spin.setValue(34)
         self.cq_label = QLabel("CQ")
 
         self.custom_nvpreset_combo = QComboBox()
         self.custom_nvpreset_combo.addItems([p.upper() for p in _NV_PRESETS])
         self.custom_nvpreset_combo.setCurrentText("P7")
-        self.nvpreset_label = QLabel("NV 预设")
+        self.nvpreset_label = QLabel(UI_TEXT.STRATEGY_NV_PRESET)
 
         self.custom_audio_combo = QComboBox()
         self.custom_audio_combo.addItems(["keep_original", "strip_commentary"])
@@ -277,14 +284,14 @@ class StrategyPanel(QWidget):
         self.custom_subtitle_combo.addItems(
             ["keep_all", "keep_chinese", "keep_chinese_english", "remove_all"]
         )
-        self.custom_savings_label = QLabel("预计节省：35-50%")
+        self.custom_savings_label = QLabel(UI_TEXT.STRATEGY_ESTIMATED_SAVINGS_DEFAULT)
 
-        custom_layout.addRow("编码器", self.custom_encoder_combo)
+        custom_layout.addRow(UI_TEXT.STRATEGY_ENCODER, self.custom_encoder_combo)
         custom_layout.addRow(self.crf_label, self.custom_crf_spin)
         custom_layout.addRow(self.cq_label, self.custom_cq_spin)
         custom_layout.addRow(self.nvpreset_label, self.custom_nvpreset_combo)
-        custom_layout.addRow("音轨", self.custom_audio_combo)
-        custom_layout.addRow("字幕", self.custom_subtitle_combo)
+        custom_layout.addRow(UI_TEXT.STRATEGY_AUDIO, self.custom_audio_combo)
+        custom_layout.addRow(UI_TEXT.STRATEGY_SUBTITLE, self.custom_subtitle_combo)
         custom_layout.addRow(self.custom_savings_label)
 
         self.custom_group.set_content_widget(custom_content)
@@ -304,7 +311,7 @@ class StrategyPanel(QWidget):
                 widget.valueChanged.connect(self._emit_custom_strategy)
 
         # ── 编码设置 ──
-        encode_group = QGroupBox("编码设置")
+        encode_group = QGroupBox(UI_TEXT.STRATEGY_ENCODING_SETTINGS)
         encode_group.setStyleSheet("""
             QGroupBox {
                 padding-top: 16px;
@@ -327,35 +334,27 @@ class StrategyPanel(QWidget):
         self.workers_spin = QSpinBox()
         self.workers_spin.setRange(1, 16)
         self.workers_spin.setValue(4)
-        self.workers_spin.setSuffix(" 个")
-        encode_layout.addRow("并行数", self.workers_spin)
+        self.workers_spin.setSuffix(UI_TEXT.STRATEGY_WORKERS_SUFFIX)
+        encode_layout.addRow(UI_TEXT.STRATEGY_WORKERS, self.workers_spin)
 
         temp_row = QHBoxLayout()
         self.temp_dir_edit = QLineEdit(self._temp_dir)
-        self.temp_dir_edit.setPlaceholderText("编码临时目录（本地 SSD 路径）")
+        self.temp_dir_edit.setPlaceholderText(UI_TEXT.STRATEGY_TEMP_PLACEHOLDER)
         self.browse_btn = QToolButton()
         self.browse_btn.setText("...")
         self.browse_btn.clicked.connect(self._browse_temp_dir)
         temp_row.addWidget(self.temp_dir_edit)
         temp_row.addWidget(self.browse_btn)
-        encode_layout.addRow("临时目录", temp_row)
+        encode_layout.addRow(UI_TEXT.STRATEGY_TEMP_DIR, temp_row)
 
-        self.sync_output_cb = QCheckBox("同步回源目录（输出移到源文件所在位置）")
-        self.sync_output_cb.setChecked(False)
-        encode_layout.addRow(self.sync_output_cb)
-
-        self.keep_temp_cb = QCheckBox("保留临时文件（调试用）")
-        self.keep_temp_cb.setChecked(False)
-        encode_layout.addRow(self.keep_temp_cb)
-
-        self.delete_source_cb = QCheckBox("删除源文件（压缩成功后永久删除）")
+        self.delete_source_cb = QCheckBox(UI_TEXT.STRATEGY_DELETE_SOURCE)
         self.delete_source_cb.setChecked(False)
         encode_layout.addRow(self.delete_source_cb)
 
         layout.addWidget(encode_group)
 
         # ── 开始按钮 ──
-        self.start_btn = QPushButton("开始压缩")
+        self.start_btn = QPushButton(UI_TEXT.STRATEGY_START)
         self.start_btn.setObjectName("primary_action")
         self.start_btn.clicked.connect(self.start_requested.emit)
         layout.addWidget(self.start_btn)
@@ -383,12 +382,14 @@ class StrategyPanel(QWidget):
         self.custom_cq_spin.setVisible(is_gpu)
         self.nvpreset_label.setVisible(is_gpu)
         self.custom_nvpreset_combo.setVisible(is_gpu)
+        if is_gpu:
+            self.custom_cq_spin.setRange(0, _GPU_CQ_MAX.get(encoder, 51))
 
         self._emit_custom_strategy()
 
     def _browse_temp_dir(self):
         d = QFileDialog.getExistingDirectory(
-            self, "选择编码临时目录", self.temp_dir_edit.text()
+            self, UI_TEXT.STRATEGY_TEMP_DIALOG_TITLE, self.temp_dir_edit.text()
         )
         if d:
             self.temp_dir_edit.setText(d)
@@ -397,7 +398,7 @@ class StrategyPanel(QWidget):
     def _emit_custom_strategy(self):
         strategy = self.custom_strategy
         self.custom_savings_label.setText(
-            f"预计节省：{strategy.estimated_savings}"
+            UI_TEXT.estimated_savings(strategy.estimated_savings)
         )
         self.custom_strategy_changed.emit(strategy)
 
@@ -409,16 +410,16 @@ class StrategyPanel(QWidget):
         is_copy = encoder == "copy"
 
         if is_copy:
-            name = "Copy Streams 自定义流复制"
+            name = UI_TEXT.STRATEGY_COPY_CUSTOM_NAME
             savings = "5-15%"
-            quality_impact = "不重编码视频"
+            quality_impact = UI_TEXT.STRATEGY_COPY_QUALITY
             crf_val = 0
             cq_val = 0
         elif is_cpu:
             crf_val = self.custom_crf_spin.value()
             cq_val = 0
-            name = f"x265 HEVC CRF {crf_val} 自定义转码"
-            quality_impact = "CPU x265 编码"
+            name = UI_TEXT.STRATEGY_CPU_CUSTOM_NAME.format(crf=crf_val)
+            quality_impact = UI_TEXT.STRATEGY_CPU_QUALITY
             if crf_val <= 18:
                 savings = "20-35%"
             elif crf_val <= 20:
@@ -430,9 +431,19 @@ class StrategyPanel(QWidget):
         else:
             crf_val = 0
             cq_val = self.custom_cq_spin.value()
-            name = f"NVENC HEVC CQ {cq_val} 自定义转码"
-            quality_impact = "GPU 硬件编码"
-            if cq_val <= 20:
+            name = _GPU_CUSTOM_NAMES.get(
+                encoder,
+                UI_TEXT.STRATEGY_GPU_CUSTOM_NAME,
+            ).format(cq=cq_val)
+            quality_impact = UI_TEXT.STRATEGY_GPU_QUALITY
+            if encoder == "av1_nvenc":
+                if cq_val <= 32:
+                    savings = "35-55%"
+                elif cq_val <= 34:
+                    savings = "45-65%"
+                else:
+                    savings = "50-70%"
+            elif cq_val <= 20:
                 savings = "15-30%"
             elif cq_val <= 24:
                 savings = "25-45%"
@@ -445,7 +456,7 @@ class StrategyPanel(QWidget):
 
         return Strategy.from_dict({
             "name": name,
-            "description": "手动配置的压缩策略",
+            "description": UI_TEXT.STRATEGY_MANUAL_DESCRIPTION,
             "is_preset": False,
             "video": {
                 "encoder": encoder,
@@ -471,14 +482,6 @@ class StrategyPanel(QWidget):
     @property
     def temp_dir(self) -> str:
         return self.temp_dir_edit.text().strip() or self._temp_dir
-
-    @property
-    def sync_output(self) -> bool:
-        return self.sync_output_cb.isChecked()
-
-    @property
-    def keep_temp(self) -> bool:
-        return self.keep_temp_cb.isChecked()
 
     @property
     def delete_source(self) -> bool:

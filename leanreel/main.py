@@ -14,7 +14,7 @@ from leanreel.state.app_state import AppState
 from leanreel.utils.threading_contract import capture_main_thread, forbid_main_thread, require_main_thread
 from leanreel.utils.paths import get_data_dir, get_strategies_dir
 from leanreel.infrastructure.database import Database
-from leanreel.infrastructure.file_discovery import find_video_files
+from leanreel.infrastructure.file_discovery import discover_video_files
 from leanreel.infrastructure.repository import SnapshotRepository
 from leanreel.executor.probe import FFprobeRunner
 from leanreel.services.library import LibraryManager
@@ -22,6 +22,7 @@ from leanreel.services.strategy_utils import _prioritize_strategies
 from leanreel.infrastructure.strategy_loader import load_strategies
 from leanreel.services.matcher import Matcher
 from leanreel.services.scanner import Scanner
+from leanreel.ui_text import UI_TEXT
 from leanreel.gui.main_window import MainWindow
 from leanreel.gui.library_panel import LibraryPanel
 from leanreel.gui.file_list import FileListPanel
@@ -133,7 +134,7 @@ class Application:
             win=self.win,
             store=self.store,
             notifier=self.notifier,
-            file_discoverer=find_video_files,
+            file_discoverer=discover_video_files,
         )
 
     def _init_library_controller(self):
@@ -146,6 +147,7 @@ class Application:
             notifier=self.notifier,
             on_folder_probe=self.scan_ctrl._probe_folder_streaming,
             on_file_list_refresh=self.scan_ctrl._populate_file_list,
+            on_cancel_scans=self.scan_ctrl.cancel_all,
         )
 
     # ── 信号连接 ──
@@ -171,16 +173,16 @@ class Application:
         self.queue_panel.pause_requested.connect(self.encoding_ctrl.toggle_pause)
         self.queue_panel.cancel_requested.connect(self.encoding_ctrl.cancel)
 
-        self.notifier.scan_ready.connect(self.scan_ctrl._on_scan_ready)
-        self.notifier.scan_resolved.connect(self.scan_ctrl._on_scan_resolved)
+        self.notifier.scan_ready_event.connect(self.scan_ctrl._on_scan_ready)
+        self.notifier.scan_resolved_event.connect(self.scan_ctrl._on_scan_resolved)
         self.notifier.library_cache_loaded.connect(self._on_library_cache_loaded)
-        self.notifier.probe_result.connect(self.scan_ctrl._on_probe_result)
+        self.notifier.probe_result_event.connect(self.scan_ctrl._on_probe_result)
         self.notifier.strategies_ready.connect(self._on_strategies_ready)
         self.notifier.all_done.connect(
-            lambda: (self.win.set_status("编码信息探测完成"),
+            lambda: (self.win.set_status(UI_TEXT.ENCODING_INFO_PROBED),
                      self.file_panel.enable_sorting())
         )
-        self.notifier.task_updated.connect(self.encoding_ctrl.on_task_updated)
+        self.notifier.task_progress.connect(self.encoding_ctrl.on_task_updated)
         self.notifier.encoding_done.connect(self.encoding_ctrl.on_encoding_done)
 
         # 注入 Store 到 FileListPanel（新数据路径）
@@ -224,11 +226,11 @@ class Application:
             self.file_panel.refresh_btn.setEnabled(False)
             self.file_panel.set_progress_visible(True)
             self.file_panel.set_progress(st.done_files, st.total_files)
-            self.win.set_status(f"探测中：{st.done_files}/{st.total_files}...")
+            self.win.set_status(UI_TEXT.probe_progress(st.done_files, st.total_files))
         else:
             self.file_panel.refresh_btn.setEnabled(True)
             self.file_panel.set_progress_visible(False)
-            self.win.set_status(f"已加载 {len(snapshots)} 个文件")
+            self.win.set_status(UI_TEXT.loaded_files(len(snapshots)))
 
     # ── 入口 ──
 

@@ -5,6 +5,7 @@ from typing import Callable
 from leanreel.domain.models import FileSnapshot
 from leanreel.domain.interfaces import SnapshotStore, ProbeRunner
 from leanreel.services._probe_batch import is_probe_complete, ProbeBatch
+from leanreel.services.cancellation import CancellationToken
 
 
 class Scanner:
@@ -28,6 +29,7 @@ class Scanner:
         folders: list[tuple[int, str, list[tuple[str, str]]]],
         on_result: Callable[[FileSnapshot], None],
         on_finished: Callable[[], None] | None = None,
+        cancel_token: CancellationToken | None = None,
     ) -> int:
         """多文件夹合并探测 — 共享一个线程池，避免每个文件夹各自开池。"""
         all_jobs: list[tuple[int, str, str]] = []
@@ -47,7 +49,7 @@ class Scanner:
                 self._repo.delete_orphans(folder_id, discovered)
 
         batch = ProbeBatch(self._repo, self._probe, self.max_workers, on_result, on_finished)
-        return batch.start(all_jobs, cache_by_folder, orphan_cleanup)
+        return batch.start(all_jobs, cache_by_folder, orphan_cleanup, cancel_token=cancel_token)
 
     def probe_stream(
         self,
@@ -56,6 +58,7 @@ class Scanner:
         on_result: Callable[[FileSnapshot], None],
         on_finished: Callable[[], None] | None = None,
         files: list[tuple[str, str]] | None = None,
+        cancel_token: CancellationToken | None = None,
     ) -> int:
         """单文件夹流式探测 — 调用方负责文件发现，本方法不碰 I/O。
 
@@ -76,4 +79,4 @@ class Scanner:
             self._repo.delete_orphans(library_folder_id, discovered)
 
         batch = ProbeBatch(self._repo, self._probe, self.max_workers, on_result, on_finished)
-        return batch.start(jobs, cache_by_folder, orphan_cleanup)
+        return batch.start(jobs, cache_by_folder, orphan_cleanup, cancel_token=cancel_token)

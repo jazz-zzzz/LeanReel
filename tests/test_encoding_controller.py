@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 from unittest.mock import MagicMock, patch, ANY, call
 
 import pytest
@@ -256,6 +257,27 @@ class TestEncodingControllerStart:
         )
 
         assert [task.strategy_name for task in tasks] == ["均衡压缩", "均衡压缩"]
+
+    def test_build_encode_tasks_uses_mkv_output_for_av1_ts_source(self):
+        """AV1 输出强制使用 MKV，避免沿用 TS 等弱容器。"""
+        strategy = Strategy.from_dict({
+            "name": "AV1 NVENC CQ34 均衡快速",
+            "video": {"encoder": "av1_nvenc", "gpu": True},
+            "filters": {},
+        })
+        snapshots = [
+            FileSnapshot(
+                library_folder_id=7,
+                relative_path="Movie.ts",
+                file_name="Movie.ts",
+                video_codec="h264",
+            )
+        ]
+
+        tasks = build_encode_tasks(snapshots, {7: "D:/Movies"}, strategy)
+
+        assert len(tasks) == 1
+        assert tasks[0].output_path == str(Path("D:/Movies") / "Movie_zcompressed.mkv")
 
     def test_start_returns_false_when_already_encoding(self, controller, sample_snapshots, sample_folder_paths):
         """负向用例 1：编码进行中时再次调用 start() 返回 False"""

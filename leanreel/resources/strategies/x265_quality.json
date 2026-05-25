@@ -1,0 +1,22 @@
+{
+  "name": "CPU x265 CRF18 慢速保画质",
+  "description": "CPU 慢速档。CRF18 偏保守，slow 预设用更多时间换更好的压缩效率，适合不急、希望在近透明画质下尽量压低体积的文件。",
+  "is_preset": true,
+  "video": {
+    "encoder": "libx265",
+    "crf": 18,
+    "preset": "slow",
+    "pix_fmt": "yuv420p10le",
+    "x265_params": "",
+    "gpu": false,
+    "nv_preset": "",
+    "rc": "",
+    "cq": 0
+  },
+  "hdr": {"mode": "preserve_hdr10", "dv_handling": "reinject_rpu"},
+  "audio": {"mode": "keep_original", "remove_commentary": false},
+  "subtitle": {"mode": "keep_all"},
+  "filters": {"skip_x265": true, "min_size_gb": null, "only_remux": false},
+  "estimated_savings": "30-50%",
+  "quality_impact": "近透明画质优先；默认仍跳过 HEVC/HDR/DV 片源"
+}

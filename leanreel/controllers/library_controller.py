@@ -3,6 +3,7 @@ import threading
 from typing import Callable
 
 from leanreel.state.app_state import AppState
+from leanreel.ui_text import UI_TEXT
 
 
 class LibraryController:
@@ -18,6 +19,7 @@ class LibraryController:
         notifier,
         on_folder_probe: Callable[[int, str], None] | None = None,
         on_file_list_refresh: Callable[[list], None] | None = None,
+        on_cancel_scans: Callable[[], None] | None = None,
     ):
         self._state = state
         self._services = services
@@ -27,6 +29,7 @@ class LibraryController:
         self._notifier = notifier
         self._on_folder_probe = on_folder_probe or (lambda folder_id, path: None)
         self._on_file_list_refresh = on_file_list_refresh or (lambda snapshots: None)
+        self._on_cancel_scans = on_cancel_scans or (lambda: None)
 
     def _on_library_added(self, name):
         try:
@@ -55,6 +58,7 @@ class LibraryController:
         self._on_folder_probe(folder.id, path)
 
     def _on_library_selected(self, lib_id):
+        self._on_cancel_scans()
         folders = self._services.db.get_folders_for_library(lib_id)
         folder_paths = {folder.id: folder.path for folder in folders}
         self._state.current_library_id = lib_id
@@ -62,7 +66,7 @@ class LibraryController:
         self._state.active_scan_folder_id = next(iter(folder_paths), 0)
         self._state.library_token += 1
         my_token = self._state.library_token
-        self._win.set_status("加载缓存中...")
+        self._win.set_status(UI_TEXT.LOADING_CACHE)
 
         def _load_cache_in_background():
             from leanreel.utils.threading_contract import forbid_main_thread
@@ -84,6 +88,7 @@ class LibraryController:
     def _on_library_deleted(self, lib_id):
         from leanreel.controllers.scan_controller import clear_current_state
 
+        self._on_cancel_scans()
         self._services.lib_mgr.delete_library(lib_id)
         if getattr(self._state, "current_library_id", None) == lib_id:
             (
@@ -94,11 +99,12 @@ class LibraryController:
             self._state.current_library_id = None
             self._file_panel.populate([], {}, self._services.strategies)
         self._refresh_libraries()
-        self._win.set_status("库已删除")
+        self._win.set_status(UI_TEXT.LIBRARY_DELETED)
 
     def _on_folder_removed(self, folder_id):
         from leanreel.controllers.scan_controller import remove_folder_from_current_state
 
+        self._on_cancel_scans()
         self._services.lib_mgr.remove_folder(folder_id)
         (
             self._state.current_snapshots,
@@ -112,7 +118,7 @@ class LibraryController:
         )
         self._on_file_list_refresh(self._state.current_snapshots)
         self._refresh_libraries()
-        self._win.set_status("文件夹已移除")
+        self._win.set_status(UI_TEXT.FOLDER_REMOVED)
 
     def _refresh_libraries(self):
         libs = self._services.lib_mgr.get_all_libraries()

@@ -728,10 +728,49 @@ def test_strategy_panel_custom_controls_emit_recomputed_strategy():
 
     assert panel.custom_group.isVisibleTo(panel)
     assert changes
-    assert changes[-1].name == "NVENC HEVC CQ 25 自定义转码"
+    assert changes[-1].name == "HEVC NVENC CQ 25 自定义转码"
     assert changes[-1].video.cq == 25
     assert changes[-1].estimated_savings == "35-55%"
-    assert panel.current_strategy.name == "NVENC HEVC CQ 25 自定义转码"
+    assert panel.current_strategy.name == "HEVC NVENC CQ 25 自定义转码"
+    panel.close()
+
+
+def test_strategy_panel_custom_av1_uses_av1_name_and_cq63_range():
+    from leanreel.gui.strategy_panel import StrategyPanel
+
+    app = get_app()
+    panel = StrategyPanel()
+
+    panel.show_custom_strategy()
+    panel.custom_encoder_combo.setCurrentText("av1_nvenc")
+    panel.custom_cq_spin.setValue(63)
+
+    strategy = panel.current_strategy
+
+    assert panel.custom_cq_spin.maximum() == 63
+    assert strategy.name == "AV1 NVENC CQ 63 自定义转码"
+    assert strategy.video.encoder == "av1_nvenc"
+    assert strategy.video.cq == 63
+    panel.close()
+
+
+def test_strategy_panel_custom_hevc_clamps_cq_to_nvenc_hevc_range():
+    from leanreel.gui.strategy_panel import StrategyPanel
+
+    app = get_app()
+    panel = StrategyPanel()
+
+    panel.show_custom_strategy()
+    panel.custom_encoder_combo.setCurrentText("av1_nvenc")
+    panel.custom_cq_spin.setValue(63)
+    panel.custom_encoder_combo.setCurrentText("hevc_nvenc")
+
+    strategy = panel.current_strategy
+
+    assert panel.custom_cq_spin.maximum() == 51
+    assert strategy.name == "HEVC NVENC CQ 51 自定义转码"
+    assert strategy.video.encoder == "hevc_nvenc"
+    assert strategy.video.cq == 51
     panel.close()
 
 

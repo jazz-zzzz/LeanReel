@@ -7,6 +7,7 @@ from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QColor
 
 from leanreel.domain.models import TaskStatus
+from leanreel.ui_text import UI_TEXT
 
 _STATUS_COLORS = {
     TaskStatus.RUNNING: QColor("#c8963e"),
@@ -52,7 +53,7 @@ class QueuePanel(QWidget):
 
         # 总进度
         header = QHBoxLayout()
-        self.total_label = QLabel("就绪")
+        self.total_label = QLabel(UI_TEXT.READY)
         header.addWidget(self.total_label)
         header.addStretch()
         layout.addLayout(header)
@@ -75,11 +76,11 @@ class QueuePanel(QWidget):
 
         # 按钮
         btn_layout = QHBoxLayout()
-        self.pause_btn = QPushButton("暂停")
+        self.pause_btn = QPushButton(UI_TEXT.PAUSE)
         self.pause_btn.clicked.connect(self.pause_requested.emit)
-        self.cancel_btn = QPushButton("取消全部")
+        self.cancel_btn = QPushButton(UI_TEXT.CANCEL_ALL)
         self.cancel_btn.clicked.connect(lambda: self.cancel_requested.emit(-1))
-        self.clear_btn = QPushButton("清空已完成")
+        self.clear_btn = QPushButton(UI_TEXT.CLEAR_FINISHED)
         self.clear_btn.clicked.connect(self.clear_finished)
         btn_layout.addWidget(self.pause_btn)
         btn_layout.addWidget(self.cancel_btn)
@@ -89,12 +90,7 @@ class QueuePanel(QWidget):
 
     def update_progress(self, progress: dict):
         self.total_progress.setValue(int(progress["percentage"]))
-        self.total_label.setText(
-            f"完成 {progress['completed']}/{progress['total']}  "
-            f"跳过 {progress['skipped']}  "
-            f"失败 {progress['failed']}  "
-            f"取消 {progress.get('cancelled', 0)}"
-        )
+        self.total_label.setText(UI_TEXT.queue_progress(progress))
 
     def add_task_row(self, task):
         row = QWidget()
@@ -122,7 +118,7 @@ class QueuePanel(QWidget):
         info_label.setObjectName("queue_info")
         info_label.setStyleSheet("color: #8a857c; font-size: 11px;")
         if task.status == TaskStatus.FAILED:
-            info_label.setToolTip(getattr(task, "error_message", "") or "未知错误")
+            info_label.setToolTip(getattr(task, "error_message", "") or UI_TEXT.UNKNOWN_ERROR)
         row_layout.addWidget(info_label)
 
         self.task_layout.insertWidget(self.task_layout.count() - 1, row)
@@ -130,8 +126,8 @@ class QueuePanel(QWidget):
     @staticmethod
     def _task_info_text(task) -> str:
         if task.status == TaskStatus.FAILED:
-            error_message = getattr(task, "error_message", "") or "未知错误"
-            return f"失败：{error_message}"
+            error_message = getattr(task, "error_message", "") or UI_TEXT.UNKNOWN_ERROR
+            return UI_TEXT.failed_info(error_message)
         if task.status == TaskStatus.COMPLETED:
             orig = _format_bytes(task.original_size)
             comp = _format_bytes(task.compressed_size) if task.compressed_size else "—"
@@ -139,9 +135,9 @@ class QueuePanel(QWidget):
             if task.compressed_size and task.original_size:
                 pct = (1 - task.compressed_size / task.original_size) * 100
                 ratio = f" ({pct:.0f}%)"
-            return f"{orig} → {comp}{ratio}"
+            return UI_TEXT.completed_info(orig, comp, ratio)
         if task.status == TaskStatus.SKIPPED:
-            return getattr(task, "error_message", "") or "已跳过"
+            return getattr(task, "error_message", "") or UI_TEXT.SKIPPED
         if task.status == TaskStatus.RUNNING:
             stage = getattr(task, "current_stage", None)
             if stage:
@@ -150,7 +146,13 @@ class QueuePanel(QWidget):
                     return f"{stage_name}..."
                 pct = stage.internal_progress * 100
                 return f"{stage_name}: {pct:.0f}%"
-            return f"压缩中... {task.progress:.0f}%"
+            stage_name = getattr(task, "stage_name", "")
+            if stage_name:
+                if getattr(task, "stage_indeterminate", False):
+                    return f"{stage_name}..."
+                pct = getattr(task, "stage_progress", 0.0) * 100
+                return f"{stage_name}: {pct:.0f}%"
+            return UI_TEXT.running_info(task.progress)
         return _format_bytes(task.original_size)
 
     def clear_all(self):
@@ -171,7 +173,7 @@ class QueuePanel(QWidget):
     def clear_tasks(self):
         self.clear_all()
         self.total_progress.setValue(0)
-        self.total_label.setText("就绪")
+        self.total_label.setText(UI_TEXT.READY)
 
     def update_task_row(self, task):
         """增量更新已存在的任务行（根据 input_path 全路径匹配）"""
@@ -193,7 +195,7 @@ class QueuePanel(QWidget):
                 if info_label is not None:
                     info_label.setText(self._task_info_text(task))
                     if task.status == TaskStatus.FAILED:
-                        info_label.setToolTip(getattr(task, "error_message", "") or "未知错误")
+                        info_label.setToolTip(getattr(task, "error_message", "") or UI_TEXT.UNKNOWN_ERROR)
                     else:
                         info_label.setToolTip("")
                 return

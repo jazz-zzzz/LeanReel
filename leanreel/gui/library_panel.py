@@ -7,6 +7,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QFont
 
+from leanreel.ui_text import UI_TEXT
+
 
 class LibraryPanel(QWidget):
     library_selected = Signal(int)
@@ -33,8 +35,8 @@ class LibraryPanel(QWidget):
         toolbar = QHBoxLayout()
         toolbar.setContentsMargins(6, 4, 6, 4)
 
-        self.add_btn = QPushButton("+ 新建")
-        self.add_btn.setToolTip("新建库")
+        self.add_btn = QPushButton(UI_TEXT.LIBRARY_NEW)
+        self.add_btn.setToolTip(UI_TEXT.LIBRARY_NEW_TOOLTIP)
         self.add_btn.clicked.connect(self._add_library)
         toolbar.addWidget(self.add_btn)
         toolbar.addStretch()
@@ -42,7 +44,7 @@ class LibraryPanel(QWidget):
 
         # ── 搜索 ──
         self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("搜索库或文件夹...")
+        self.search_edit.setPlaceholderText(UI_TEXT.LIBRARY_SEARCH_PLACEHOLDER)
         self.search_edit.setClearButtonEnabled(True)
         self.search_edit.textChanged.connect(self._filter_tree)
         layout.addWidget(self.search_edit)
@@ -95,7 +97,7 @@ class LibraryPanel(QWidget):
             lib_item.setExpanded(True)
 
         if self.tree.topLevelItemCount() == 0:
-            self.empty_item = QTreeWidgetItem(["没有匹配的库或文件夹"])
+            self.empty_item = QTreeWidgetItem([UI_TEXT.LIBRARY_NO_MATCH])
             self.empty_item.setFlags(Qt.NoItemFlags)
             self.empty_item.setForeground(0, Qt.gray)
             self.tree.addTopLevelItem(self.empty_item)
@@ -114,7 +116,7 @@ class LibraryPanel(QWidget):
             self.folder_selected.emit(obj_id)
 
     def _add_library(self):
-        name, ok = QInputDialog.getText(self, "新建库", "库名称：")
+        name, ok = QInputDialog.getText(self, UI_TEXT.LIBRARY_DIALOG_NEW_TITLE, UI_TEXT.LIBRARY_DIALOG_NAME_LABEL)
         if ok and name.strip():
             self.library_added.emit(name.strip())
 
@@ -128,24 +130,24 @@ class LibraryPanel(QWidget):
         kind, obj_id = data
         menu = QMenu()
         if kind == "library":
-            menu.addAction("添加文件夹...", lambda: self._add_folder_dialog(obj_id))
-            menu.addAction("从 LeanReel 删除库", lambda: self._delete_library(obj_id))
+            menu.addAction(UI_TEXT.LIBRARY_CONTEXT_ADD_FOLDER, lambda: self._add_folder_dialog(obj_id))
+            menu.addAction(UI_TEXT.LIBRARY_CONTEXT_DELETE, lambda: self._delete_library(obj_id))
         elif kind == "folder":
-            menu.addAction("重建缓存", lambda: self.folder_refresh_requested.emit(obj_id))
+            menu.addAction(UI_TEXT.LIBRARY_CONTEXT_REBUILD_CACHE, lambda: self.folder_refresh_requested.emit(obj_id))
             menu.addSeparator()
-            menu.addAction("从片库移除文件夹", lambda: self._remove_folder(obj_id))
+            menu.addAction(UI_TEXT.LIBRARY_CONTEXT_REMOVE_FOLDER, lambda: self._remove_folder(obj_id))
         menu.exec(self.tree.viewport().mapToGlobal(pos))
 
     def _add_folder_dialog(self, lib_id):
-        path = QFileDialog.getExistingDirectory(self, "选择文件夹")
+        path = QFileDialog.getExistingDirectory(self, UI_TEXT.LIBRARY_CHOOSE_FOLDER_TITLE)
         if path:
             self.folder_added.emit(lib_id, path)
 
     def _delete_library(self, lib_id):
         result = QMessageBox.question(
             self,
-            "删除库",
-            "从 LeanReel 删除这个库？磁盘上的视频文件不会被删除。",
+            UI_TEXT.LIBRARY_DELETE_TITLE,
+            UI_TEXT.LIBRARY_DELETE_PROMPT,
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
@@ -155,8 +157,8 @@ class LibraryPanel(QWidget):
     def _remove_folder(self, folder_id):
         result = QMessageBox.question(
             self,
-            "移除文件夹",
-            "从当前片库移除这个文件夹？磁盘上的视频文件不会被删除。",
+            UI_TEXT.LIBRARY_REMOVE_FOLDER_TITLE,
+            UI_TEXT.LIBRARY_REMOVE_FOLDER_PROMPT,
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )

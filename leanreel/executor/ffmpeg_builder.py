@@ -1,4 +1,5 @@
 ﻿"""FFmpeg 命令构建 — 纯命令生成，不涉及 I/O"""
+from dataclasses import dataclass
 import subprocess
 import threading
 
@@ -8,6 +9,65 @@ from leanreel.executor.resources import bundled_resource_path
 from leanreel.executor._config import _config
 
 _VERSION_TIMEOUT = 5
+_HDR_TYPES = {HDRType.HDR10, HDRType.HDR10P, HDRType.DV_P5, HDRType.DV_P7, HDRType.DV_P8}
+_NVENC_RC_VALUES = {"vbr", "cbr", "constqp"}
+_NVENC_PRESETS = {"p1", "p2", "p3", "p4", "p5", "p6", "p7"}
+_X265_PRESETS = {
+    "ultrafast", "superfast", "veryfast", "faster", "fast",
+    "medium", "slow", "slower", "veryslow", "placebo",
+}
+
+
+@dataclass(frozen=True)
+class EncoderSpec:
+    name: str
+    kind: str
+    quality_option: str = ""
+    quality_min: int = 0
+    quality_max: int = 0
+    default_preset: str = ""
+    default_pix_fmt: str = ""
+    supports_hdr10plus: bool = False
+
+
+ENCODER_SPECS = {
+    "copy": EncoderSpec(name="copy", kind="copy"),
+    "libx265": EncoderSpec(
+        name="libx265",
+        kind="x265",
+        quality_option="crf",
+        quality_min=0,
+        quality_max=51,
+        default_preset="slow",
+        default_pix_fmt="yuv420p10le",
+        supports_hdr10plus=True,
+    ),
+    "av1_nvenc": EncoderSpec(
+        name="av1_nvenc",
+        kind="nvenc",
+        quality_option="cq",
+        quality_min=0,
+        quality_max=63,
+        default_preset="p4",
+    ),
+    "hevc_nvenc": EncoderSpec(
+        name="hevc_nvenc",
+        kind="nvenc",
+        quality_option="cq",
+        quality_min=0,
+        quality_max=51,
+        default_preset="p4",
+        supports_hdr10plus=True,
+    ),
+    "h264_nvenc": EncoderSpec(
+        name="h264_nvenc",
+        kind="nvenc",
+        quality_option="cq",
+        quality_min=0,
+        quality_max=51,
+        default_preset="p4",
+    ),
+}
 
 
 def get_ffmpeg_path() -> str:
@@ -24,6 +84,59 @@ def set_ffmpeg_path(path: str):
     _config.ffmpeg_path = path
 
 
+def _append_hdr_color_metadata(cmd: list[str]) -> None:
+    cmd.extend([
+        "-color_primaries", "bt2020",
+        "-color_trc", "smpte2084",
+        "-colorspace", "bt2020nc",
+    ])
+
+
+def _supports_hdr10plus_flag(encoder: str) -> bool:
+    return ENCODER_SPECS[encoder].supports_hdr10plus
+
+
+def _clamp_int(value: object, minimum: int, maximum: int) -> int:
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        n = minimum
+    return max(minimum, min(maximum, n))
+
+
+def _encoder_spec(encoder: str) -> EncoderSpec:
+    if encoder not in ENCODER_SPECS:
+        raise ValueError(f"Unsupported video encoder: {encoder}")
+    return ENCODER_SPECS[encoder]
+
+
+def _nvenc_preset(spec: EncoderSpec, value: str) -> str:
+    preset = (value or "").lower()
+    return preset if preset in _NVENC_PRESETS else spec.default_preset
+
+
+def _nvenc_rc(value: str) -> str:
+    rc = (value or "").lower()
+    return rc if rc in _NVENC_RC_VALUES else "vbr"
+
+
+def _nvenc_cq(spec: EncoderSpec, value: object) -> int:
+    return _clamp_int(value, spec.quality_min, spec.quality_max)
+
+
+def _x265_preset(spec: EncoderSpec, value: str) -> str:
+    preset = (value or "").lower()
+    return preset if preset in _X265_PRESETS else spec.default_preset
+
+
+def _x265_crf(spec: EncoderSpec, value: object) -> int:
+    return _clamp_int(value, spec.quality_min, spec.quality_max)
+
+
+def _x265_pix_fmt(spec: EncoderSpec, value: str) -> str:
+    return value or spec.default_pix_fmt
+
+
 class FFmpegBuilder:
     """构建 FFmpeg 命令行参数 — 完整无损流保留"""
 
@@ -33,46 +146,41 @@ class FFmpegBuilder:
         cmd = [get_ffmpeg_path(), "-nostdin", "-y", "-i", input_path]
 
         v = strategy.video
+        spec = _encoder_spec(v.encoder)
+        encoder = spec.name
 
         # --- 视频流：大写 V 排除内嵌封面 mjpeg ---
         cmd.extend(["-map", "0:V"])
 
-        if v.encoder == "copy":
+        if spec.kind == "copy":
             cmd.extend(["-c:V", "copy"])
-        elif v.is_gpu:
+        elif spec.kind == "nvenc":
+            cq = _nvenc_cq(spec, v.cq)
             cmd.extend([
-                "-c:V", v.encoder,
-                "-preset", v.nv_preset,
-                "-rc", v.rc,
-                "-cq", str(v.cq),
-                "-spatial_aq", "1",
-                "-temporal_aq", "1",
+                "-c:V", encoder,
+                "-preset", _nvenc_preset(spec, v.nv_preset),
+                "-rc", _nvenc_rc(v.rc),
+                "-cq", str(cq),
+                "-spatial-aq", "1",
+                "-temporal-aq", "1",
                 "-aq-strength", "8",
             ])
-            if snapshot.hdr_type in (HDRType.HDR10, HDRType.HDR10P, HDRType.DV_P5, HDRType.DV_P7, HDRType.DV_P8):
-                cmd.extend([
-                    "-color_primaries", "bt2020",
-                    "-color_trc", "smpte2084",
-                    "-colorspace", "bt2020nc",
-                ])
-                if snapshot.hdr_type == HDRType.HDR10P:
+            if snapshot.hdr_type in _HDR_TYPES:
+                _append_hdr_color_metadata(cmd)
+                if snapshot.hdr_type == HDRType.HDR10P and _supports_hdr10plus_flag(encoder):
                     cmd.append("-hdr10+")
         else:
             cmd.extend([
-                "-c:V", v.encoder,
-                "-crf", str(v.crf),
-                "-preset", v.preset,
-                "-pix_fmt", v.pix_fmt,
+                "-c:V", encoder,
+                "-crf", str(_x265_crf(spec, v.crf)),
+                "-preset", _x265_preset(spec, v.preset),
+                "-pix_fmt", _x265_pix_fmt(spec, v.pix_fmt),
             ])
             if v.x265_params:
                 cmd.extend(["-x265-params", v.x265_params])
-            if snapshot.hdr_type in (HDRType.HDR10, HDRType.HDR10P, HDRType.DV_P5, HDRType.DV_P7, HDRType.DV_P8):
-                cmd.extend([
-                    "-color_primaries", "bt2020",
-                    "-color_trc", "smpte2084",
-                    "-colorspace", "bt2020nc",
-                ])
-                if snapshot.hdr_type == HDRType.HDR10P:
+            if snapshot.hdr_type in _HDR_TYPES:
+                _append_hdr_color_metadata(cmd)
+                if snapshot.hdr_type == HDRType.HDR10P and _supports_hdr10plus_flag(encoder):
                     cmd.append("-hdr10+")
 
         # --- 音频 ---
@@ -94,9 +202,9 @@ class FFmpegBuilder:
             if kept_audio:
                 cmd.extend(["-c:a", "copy"])
             elif audio_rule.mode == "keep_original":
-                cmd.extend(["-map", "0:a", "-c:a", "copy"])
+                cmd.extend(["-map", "0:a?", "-c:a", "copy"])
         else:
-            cmd.extend(["-map", "0:a", "-c:a", "copy"])
+            cmd.extend(["-map", "0:a?", "-c:a", "copy"])
 
         # --- 字幕 ---
         sub_mode = strategy.subtitle.mode

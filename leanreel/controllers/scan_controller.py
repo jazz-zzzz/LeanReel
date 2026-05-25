@@ -2,9 +2,18 @@
 import os
 import threading
 
+from leanreel.controllers.events import (
+    FolderScanInput,
+    ProbeResultEvent,
+    ScanReadyEvent,
+    ScanResolvedEvent,
+)
 from leanreel.domain.models import FileSnapshot, FileRow, MatchResult, get_skip_reason
+from leanreel.infrastructure.file_discovery import DiscoveryReport
+from leanreel.services.cancellation import CancellationToken
 from leanreel.services.matcher import estimate_savings
 from leanreel.state.scan_state import ScanState
+from leanreel.ui_text import UI_TEXT
 from leanreel.utils.threading_contract import require_main_thread, forbid_main_thread
 
 
@@ -42,6 +51,56 @@ class ScanController:
         self._store = store
         self._notifier = notifier
         self._discover = file_discoverer
+        self._cancel_tokens: dict[int, CancellationToken] = {}
+
+    def _token_for_scan(self, token: int) -> CancellationToken:
+        tokens = getattr(self, "_cancel_tokens", None)
+        if tokens is None:
+            tokens = {}
+            self._cancel_tokens = tokens
+        return tokens.setdefault(token, CancellationToken())
+
+    def _cancel_token_for_scan(self, token: int) -> CancellationToken:
+        return ScanController._token_for_scan(self, token)
+
+    def cancel_all(self):
+        tokens = getattr(self, "_cancel_tokens", {})
+        for token in list(tokens.values()):
+            token.cancel()
+        for st in getattr(self._state, "scan_states", {}).values():
+            st.running = False
+
+    def cancel_folders(self, folder_ids: set[int]):
+        for token, st in list(getattr(self._state, "scan_states", {}).items()):
+            if st.running and st.owns_any_folder(folder_ids):
+                st.running = False
+                ScanController._token_for_scan(self, token).cancel()
+
+    def _discover_report(self, path: str) -> DiscoveryReport:
+        result = self._discover(path)
+        if isinstance(result, DiscoveryReport):
+            return result
+        if hasattr(result, "files") and hasattr(result, "warnings"):
+            return DiscoveryReport(files=list(result.files), warnings=list(result.warnings))
+        return DiscoveryReport(files=list(result), warnings=[])
+
+    def _emit_scan_ready(self, event: ScanReadyEvent):
+        if hasattr(self._notifier, "scan_ready_event"):
+            self._notifier.scan_ready_event.emit(event)
+        if hasattr(self._notifier, "scan_ready"):
+            self._notifier.scan_ready.emit(*event.legacy_args())
+
+    def _emit_scan_resolved(self, event: ScanResolvedEvent):
+        if hasattr(self._notifier, "scan_resolved_event"):
+            self._notifier.scan_resolved_event.emit(event)
+        if hasattr(self._notifier, "scan_resolved"):
+            self._notifier.scan_resolved.emit(*event.legacy_args())
+
+    def _emit_probe_result(self, event: ProbeResultEvent):
+        if hasattr(self._notifier, "probe_result_event"):
+            self._notifier.probe_result_event.emit(event)
+        if hasattr(self._notifier, "probe_result"):
+            self._notifier.probe_result.emit(*event.legacy_args())
 
     def _current_library_id(self) -> int | None:
         return getattr(self._state, "current_library_id", None)
@@ -120,12 +179,9 @@ class ScanController:
         if not ScanController._scan_is_current(self, st):
             return
         self._file_panel.set_progress(st.done_files, st.total_files)
-        self._win.set_status(f"探测中：{st.done_files}/{st.total_files}...")
+        self._win.set_status(UI_TEXT.probe_progress(st.done_files, st.total_files))
 
     def _populate_file_list(self, snapshots) -> dict[tuple[int, str], MatchResult]:
-        from leanreel.services.audit import find_sidecars_for_source
-        import os as _os
-
         matched: dict[tuple[int, str], MatchResult] = {}
         for s in snapshots:
             key = (int(s.library_folder_id or 0), str(s.relative_path))
@@ -141,16 +197,9 @@ class ScanController:
                 estimate=estimate_savings(s, strategy),
             )
 
-        # ── 检测已压缩文件 ──
-        compressed_map: dict[tuple[int, str], str] = {}
-        for s in snapshots:
-            folder_path = self._state.current_folder_paths.get(s.library_folder_id)
-            if folder_path:
-                source_abs = _os.path.join(folder_path, s.relative_path)
-                sidecars = find_sidecars_for_source(source_abs)
-                if sidecars:
-                    key = (int(s.library_folder_id or 0), str(s.relative_path))
-                    compressed_map[key] = sidecars[0]
+        folder_ids = {int(s.library_folder_id or 0) for s in snapshots if getattr(s, "library_folder_id", 0)}
+        get_records = getattr(getattr(self._services, "db", None), "get_compression_records_for_folders", None)
+        compressed_map = get_records(folder_ids) if get_records else {}
 
         rows = []
         for s in snapshots:
@@ -172,6 +221,7 @@ class ScanController:
             return
         self._state.scan_token += 1
         my_token = self._state.scan_token
+        cancel_token = ScanController._token_for_scan(self, my_token)
         current_paths = getattr(self._state, "current_folder_paths", None)
         if current_paths is not None:
             current_paths[folder_id] = path
@@ -183,14 +233,17 @@ class ScanController:
             my_token,
             folder_id,
         )
-        self._win.set_status(f"扫描 {path}...")
+        self._win.set_status(UI_TEXT.scan_path(path))
         self._file_panel.refresh_btn.setEnabled(False)
         self._file_panel.set_progress_visible(True)
         ScanController._set_progress_indeterminate(self)
 
         def _prepare_in_background():
             forbid_main_thread("single-folder file discovery")
-            files = self._discover(path)
+            if cancel_token.is_cancelled:
+                return
+            report = ScanController._discover_report(self, path)
+            files = report.files
             placeholders = [
                 FileSnapshot(
                     library_folder_id=folder_id,
@@ -201,7 +254,16 @@ class ScanController:
                 )
                 for rel_path, abs_path in files
             ]
-            self._notifier.scan_ready.emit(placeholders, [(folder_id, path, files)], my_token)
+            if cancel_token.is_cancelled:
+                return
+            ScanController._emit_scan_ready(self, ScanReadyEvent(
+                batch_id=my_token,
+                library_id=ScanController._current_library_id(self),
+                folder_inputs=[FolderScanInput(folder_id, path, files)],
+                placeholders=placeholders,
+                warnings=[f"{w.path}: {w.error}" for w in report.warnings],
+                partial=report.partial,
+            ))
 
         threading.Thread(target=_prepare_in_background, daemon=True).start()
 
@@ -209,20 +271,21 @@ class ScanController:
         """Rebuild cache for the visible library."""
         current_paths = getattr(self._state, "current_folder_paths", {})
         if not current_paths:
-            self._win.set_status("没有已添加的文件夹，请先添加文件夹")
+            self._win.set_status(UI_TEXT.NO_FOLDERS)
             return
 
         folder_ids = set(current_paths.keys())
         if ScanController._is_scanning(self, folder_ids):
-            self._win.set_status("当前库扫描已在进行中，请等待完成")
+            self._win.set_status(UI_TEXT.SCAN_ALREADY_RUNNING)
             return
 
-        self._win.set_status("扫描中...")
+        self._win.set_status(UI_TEXT.SCANNING)
         self._file_panel.refresh_btn.setEnabled(False)
         self._file_panel.set_progress_visible(True)
         ScanController._set_progress_indeterminate(self)
         self._state.scan_token += 1
         my_token = self._state.scan_token
+        cancel_token = ScanController._token_for_scan(self, my_token)
         folders_at_call = list(current_paths.items())
         first_fid = folders_at_call[0][0] if folders_at_call else 0
         ScanController._start_scan(
@@ -239,8 +302,15 @@ class ScanController:
             try:
                 placeholders = []
                 folder_inputs = []
+                warnings = []
+                partial = False
                 for folder_id, path in folders_at_call:
-                    files = self._discover(path)
+                    if cancel_token.is_cancelled:
+                        return
+                    report = ScanController._discover_report(self, path)
+                    files = report.files
+                    warnings.extend(f"{w.path}: {w.error}" for w in report.warnings)
+                    partial = partial or report.partial
                     folder_inputs.append((folder_id, path, files))
                     for rel_path, abs_path in files:
                         placeholders.append(FileSnapshot(
@@ -250,17 +320,42 @@ class ScanController:
                             size_bytes=0,
                             probe_ok=False,
                         ))
-                self._notifier.scan_ready.emit(placeholders, folder_inputs, my_token)
+                if cancel_token.is_cancelled:
+                    return
+                ScanController._emit_scan_ready(self, ScanReadyEvent(
+                    batch_id=my_token,
+                    library_id=ScanController._current_library_id(self),
+                    folder_inputs=folder_inputs,
+                    placeholders=placeholders,
+                    warnings=warnings,
+                    partial=partial,
+                ))
             except Exception:
                 import traceback
                 traceback.print_exc()
-                self._notifier.scan_ready.emit([], [], my_token)
+                ScanController._emit_scan_ready(self, ScanReadyEvent(
+                    batch_id=my_token,
+                    library_id=ScanController._current_library_id(self),
+                    error="file discovery failed",
+                ))
 
         threading.Thread(target=_scan_in_background, daemon=True).start()
 
-    def _on_scan_ready(self, placeholders, folder_inputs, my_token):
+    def _on_scan_ready(self, placeholders, folder_inputs=None, my_token=None):
         """Resolve cached rows in a worker, then commit visible rows on the main thread."""
         require_main_thread("ScanController._on_scan_ready")
+        if isinstance(placeholders, ScanReadyEvent):
+            event = placeholders
+        else:
+            event = ScanReadyEvent(
+                batch_id=my_token,
+                library_id=ScanController._current_library_id(self),
+                folder_inputs=folder_inputs or [],
+                placeholders=placeholders or [],
+            )
+        placeholders = list(event.placeholders)
+        folder_inputs = [item.as_legacy() for item in event.folder_inputs]
+        my_token = event.batch_id
         st = ScanController._state_for_token(self, my_token, folder_inputs)
         if st is None or not st.running:
             return
@@ -274,24 +369,30 @@ class ScanController:
             if is_current:
                 self._file_panel.refresh_btn.setEnabled(True)
                 self._file_panel.set_progress_visible(False)
-                self._win.set_status("未找到视频文件" if folder_inputs else "扫描失败，请检查后重试")
+                if event.error:
+                    self._win.set_status(event.error)
+                elif event.partial and event.warnings:
+                    self._win.set_status(UI_TEXT.scan_partial_failure(event.warnings[0]))
+                else:
+                    self._win.set_status(UI_TEXT.scan_empty(bool(folder_inputs)))
             return
 
         st.total_files = total
         st.done_files = 0
         if is_current:
-            self._win.set_status("加载缓存中...")
+            self._win.set_status(UI_TEXT.LOADING_CACHE)
 
         def _resolve_cache_in_background():
             forbid_main_thread("scan cache resolution")
+            cancel_token = ScanController._cancel_token_for_scan(self, my_token)
             latest = self._state.scan_states.get(my_token)
-            if latest is None or not latest.running:
+            if latest is None or not latest.running or cancel_token.is_cancelled:
                 return
             cache_by_folder: dict[int, dict[str, FileSnapshot]] = {}
             try:
                 for folder_id, path, _files in folder_inputs:
                     latest = self._state.scan_states.get(my_token)
-                    if latest is None or not latest.running:
+                    if latest is None or not latest.running or cancel_token.is_cancelled:
                         return
                     cache_by_folder[folder_id] = {
                         s.relative_path: s
@@ -305,14 +406,35 @@ class ScanController:
                 import traceback
                 traceback.print_exc()
                 resolved = placeholders
-            self._notifier.scan_resolved.emit(resolved, folder_inputs, my_token)
+            if cancel_token.is_cancelled:
+                return
+            ScanController._emit_scan_resolved(self, ScanResolvedEvent(
+                batch_id=my_token,
+                folder_inputs=folder_inputs,
+                snapshots=resolved,
+            ))
 
         threading.Thread(target=_resolve_cache_in_background, daemon=True).start()
 
-    def _on_scan_resolved(self, resolved, folder_inputs, my_token):
+    def _on_scan_resolved(self, resolved, folder_inputs=None, my_token=None):
         require_main_thread("ScanController._on_scan_resolved")
+        if isinstance(resolved, ScanResolvedEvent):
+            event = resolved
+        else:
+            event = ScanResolvedEvent(
+                batch_id=my_token,
+                folder_inputs=folder_inputs or [],
+                snapshots=resolved or [],
+            )
+        resolved = list(event.snapshots)
+        folder_inputs = [item.as_legacy() for item in event.folder_inputs]
+        my_token = event.batch_id
         st = ScanController._state_for_token(self, my_token, folder_inputs)
         if st is None or not st.running:
+            return
+        cancel_token = ScanController._cancel_token_for_scan(self, my_token)
+        if cancel_token.is_cancelled:
+            st.running = False
             return
         total = len(resolved)
         st.total_files = total
@@ -335,12 +457,25 @@ class ScanController:
             ScanController._sync_visible_scan_progress(self, st)
 
         def _on_result(snap):
-            self._notifier.probe_result.emit(snap, my_token)
+            if not cancel_token.is_cancelled:
+                ScanController._emit_probe_result(self, ProbeResultEvent(my_token, snap))
 
-        self._services.scanner.probe_multi(folder_inputs, _on_result, on_finished=None)
+        try:
+            self._services.scanner.probe_multi(
+                folder_inputs,
+                _on_result,
+                on_finished=None,
+                cancel_token=cancel_token,
+            )
+        except TypeError:
+            self._services.scanner.probe_multi(folder_inputs, _on_result, on_finished=None)
 
-    def _on_probe_result(self, snap, my_token):
+    def _on_probe_result(self, snap, my_token=None):
         require_main_thread("ScanController._on_probe_result")
+        if isinstance(snap, ProbeResultEvent):
+            event = snap
+            snap = event.snapshot
+            my_token = event.batch_id
         st = self._state.scan_states.get(my_token)
         if st is None or not st.running:
             return

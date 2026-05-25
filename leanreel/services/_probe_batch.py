@@ -6,6 +6,7 @@ from typing import Callable
 
 from leanreel.domain.models import FileSnapshot
 from leanreel.domain.interfaces import SnapshotStore, ProbeRunner
+from leanreel.services.cancellation import CancellationToken
 
 
 def is_probe_complete(snap: FileSnapshot) -> bool:
@@ -89,6 +90,7 @@ class ProbeBatch:
         jobs: list[tuple[int, str, str]],
         cache_by_folder: dict[int, dict[str, FileSnapshot]],
         orphan_cleanup: Callable[[], None],
+        cancel_token: CancellationToken | None = None,
     ) -> int:
         """启动探测。返回总文件数，结果通过 on_result/on_finished 回调。
 
@@ -104,11 +106,14 @@ class ProbeBatch:
         probe = self._probe
         on_result = self._on_result
         on_finished = self._on_finished
+        cancel_token = cancel_token or CancellationToken()
 
         def _run():
             with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
                 futures = {}
                 for fid, rel_path, abs_path in jobs:
+                    if cancel_token.is_cancelled:
+                        break
                     try:
                         st = os.stat(abs_path)
                         fsize, fmtime = st.st_size, st.st_mtime
@@ -121,10 +126,11 @@ class ProbeBatch:
                         and existing.file_mtime == fmtime
                         and is_probe_complete(existing)
                     ):
-                        try:
-                            on_result(existing)
-                        except Exception:
-                            pass
+                        if not cancel_token.is_cancelled:
+                            try:
+                                on_result(existing)
+                            except Exception:
+                                pass
                         continue
                     f = pool.submit(
                         probe_one, abs_path, rel_path, fid,
@@ -132,12 +138,17 @@ class ProbeBatch:
                     )
                     futures[f] = None
                 for f in concurrent.futures.as_completed(futures):
+                    if cancel_token.is_cancelled:
+                        for pending in futures:
+                            pending.cancel()
+                        break
                     try:
                         on_result(f.result())
                     except Exception:
                         pass
 
-            orphan_cleanup()
+            if not cancel_token.is_cancelled:
+                orphan_cleanup()
             if on_finished:
                 on_finished()
 
