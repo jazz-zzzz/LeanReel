@@ -354,7 +354,7 @@ class FileRow:
 
 # ── 跳过原因判断（纯函数，仅依赖 domain 类型）──
 
-PROTECTED_CODECS = {"hevc", "h265"}
+PROTECTED_CODECS = {"hevc", "h265", "av1", "av01"}
 PROTECTED_HDR_TYPES = {HDRType.HDR10, HDRType.HDR10P, HDRType.DV_P5, HDRType.DV_P7, HDRType.DV_P8}
 
 
@@ -366,6 +366,8 @@ def is_protected_source(snapshot: FileSnapshot) -> bool:
 def get_skip_reason(snapshot: FileSnapshot) -> str | None:
     codec = (snapshot.video_codec or "").lower()
     if codec in PROTECTED_CODECS:
+        if codec in ("av1", "av01"):
+            return "跳过：AV1 片源"
         return "跳过：HEVC/H.265 片源"
     hdr_type = snapshot.hdr_type
     if hdr_type not in PROTECTED_HDR_TYPES:
