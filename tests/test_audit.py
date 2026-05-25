@@ -163,3 +163,61 @@ def test_find_sidecars_no_match_returns_empty():
         src.touch()
         found = find_sidecars_for_source(str(src))
         assert found == []
+
+
+def test_audit_roundtrip_sidecar_to_display(qtbot):
+    """端到端：写 sidecar → 扫描检测 → 文件列表显示已压缩"""
+    import tempfile
+    from pathlib import Path
+    from leanreel.domain.models import CompressionAudit, FileSnapshot
+    from leanreel.gui.file_list import FileListPanel
+    from leanreel.services.audit import write_sidecar, find_sidecars_for_source
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "movie_zcompressed.mkv"
+        out.touch()
+        sidecar = Path(tmp) / "movie_zcompressed.mkv.leanreel.json"
+
+        audit = CompressionAudit(
+            library_folder_id=1,
+            relative_path="movie.mkv",
+            source_path=str(Path(tmp) / "movie.mkv"),
+            source_size_bytes=10_000_000_000,
+            source_codec="h264",
+            source_hdr="SDR",
+            output_path=str(out),
+            output_size_bytes=3_500_000_000,
+            savings_bytes=6_500_000_000,
+            savings_pct=65.0,
+            strategy_name="x265 HEVC CRF 20 标准转码",
+            encoder="libx265",
+            crf=20,
+            preset="slow",
+            ffmpeg_command=["ffmpeg", "-y"],
+            status="completed",
+        )
+        path = write_sidecar(audit)
+        assert path != ""
+        assert sidecar.exists()
+
+        # Simulate scan detection
+        source_path = str(Path(tmp) / "movie.mkv")
+        found = find_sidecars_for_source(source_path)
+        assert len(found) == 1
+        assert "movie_zcompressed" in found[0]
+
+        # Verify FileDecisionDisplay marks as compressed
+        panel = FileListPanel()
+        qtbot.addWidget(panel)
+        snap = FileSnapshot(
+            library_folder_id=1,
+            relative_path="movie.mkv",
+            file_name="movie.mkv",
+            size_bytes=10_000_000_000,
+            video_codec="h264",
+            probe_ok=True,
+        )
+        decision = panel._decision_display(snap, match=None, sidecar_path=found[0])
+        assert decision.status_key == "compressed"
+        assert decision.processable is False
+        assert "x265" in decision.strategy_text
