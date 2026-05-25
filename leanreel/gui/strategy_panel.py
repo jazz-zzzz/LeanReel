@@ -237,7 +237,6 @@ class StrategyPanel(QWidget):
 
     def __init__(self):
         super().__init__()
-        self._temp_dir = str(Path.home() / "Temp" / "LeanReel")
         self.setup_ui()
 
     def setup_ui(self):
@@ -337,16 +336,6 @@ class StrategyPanel(QWidget):
         self.workers_spin.setSuffix(UI_TEXT.STRATEGY_WORKERS_SUFFIX)
         encode_layout.addRow(UI_TEXT.STRATEGY_WORKERS, self.workers_spin)
 
-        temp_row = QHBoxLayout()
-        self.temp_dir_edit = QLineEdit(self._temp_dir)
-        self.temp_dir_edit.setPlaceholderText(UI_TEXT.STRATEGY_TEMP_PLACEHOLDER)
-        self.browse_btn = QToolButton()
-        self.browse_btn.setText("...")
-        self.browse_btn.clicked.connect(self._browse_temp_dir)
-        temp_row.addWidget(self.temp_dir_edit)
-        temp_row.addWidget(self.browse_btn)
-        encode_layout.addRow(UI_TEXT.STRATEGY_TEMP_DIR, temp_row)
-
         self.delete_source_cb = QCheckBox(UI_TEXT.STRATEGY_DELETE_SOURCE)
         self.delete_source_cb.setChecked(False)
         encode_layout.addRow(self.delete_source_cb)
@@ -386,14 +375,6 @@ class StrategyPanel(QWidget):
             self.custom_cq_spin.setRange(0, _GPU_CQ_MAX.get(encoder, 51))
 
         self._emit_custom_strategy()
-
-    def _browse_temp_dir(self):
-        d = QFileDialog.getExistingDirectory(
-            self, UI_TEXT.STRATEGY_TEMP_DIALOG_TITLE, self.temp_dir_edit.text()
-        )
-        if d:
-            self.temp_dir_edit.setText(d)
-            self._temp_dir = d
 
     def _emit_custom_strategy(self):
         strategy = self.custom_strategy
@@ -478,10 +459,6 @@ class StrategyPanel(QWidget):
     @property
     def worker_count(self) -> int:
         return self.workers_spin.value()
-
-    @property
-    def temp_dir(self) -> str:
-        return self.temp_dir_edit.text().strip() or self._temp_dir
 
     @property
     def delete_source(self) -> bool:

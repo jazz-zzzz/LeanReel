@@ -108,7 +108,6 @@ class EncodingController:
             self._win.show_queue()
             self.active_manager = WorkerManager(
                 FFmpegExecutor(
-                    temp_dir=self._strategy_panel.temp_dir,
                     progress_callback=self._emit_task_progress,
                     delete_source=self._strategy_panel.delete_source,
                     db=self._db,

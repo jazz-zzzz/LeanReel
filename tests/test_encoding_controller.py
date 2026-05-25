@@ -101,8 +101,9 @@ def mock_strategy_panel(default_strategy):
     sp = MagicMock()
     sp.current_preset_strategy = None
     sp.current_strategy = default_strategy
-    sp.temp_dir = "/tmp/leanreel_encode"
+    sp._encode_lock = MagicMock()
     sp.worker_count = 3
+    sp.delete_source = False
     return sp
 
 
@@ -192,9 +193,8 @@ class TestEncodingControllerStart:
         assert mock_queue_panel.add_task_row.call_count == 2
         # 验证队列被显示
         mock_win.show_queue.assert_called_once()
-        # 验证 FFmpegExecutor 用正确的 temp_dir 创建
         mock_ffmpeg.assert_called_once()
-        assert mock_ffmpeg.call_args[1].get("temp_dir") == "/tmp/leanreel_encode"
+        assert "temp_dir" not in mock_ffmpeg.call_args[1]
         # 验证 WorkerManager 用正确的 worker_count 创建
         assert mock_worker_mgr.call_count == 1
         wm_args = mock_worker_mgr.call_args
