@@ -1,5 +1,5 @@
 {
-  "name": "x265 HEVC CRF 20 标准转码",
+  "name": "x265 CPU CRF 20 标准转码",
   "description": "CPU 软编码，体积和画质折中，适合多数 SDR H.264 片源。",
   "is_preset": true,
   "video": {"encoder": "libx265", "crf": 20, "preset": "slow", "pix_fmt": "yuv420p10le"},
