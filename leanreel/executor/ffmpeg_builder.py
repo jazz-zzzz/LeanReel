@@ -143,7 +143,10 @@ class FFmpegBuilder:
     @staticmethod
     def build(snapshot: FileSnapshot, strategy: Strategy,
               input_path: str, output_path: str) -> list[str]:
-        cmd = [get_ffmpeg_path(), "-nostdin", "-y", "-i", input_path]
+        cmd = [get_ffmpeg_path(), "-nostdin", "-y",
+               "-thread_queue_size", "8192",
+               "-buffer_size", "134217728",
+               "-i", input_path]
 
         v = strategy.video
         spec = _encoder_spec(v.encoder)
