@@ -100,6 +100,7 @@ class EncodingController:
                     progress_callback=lambda t: self._notifier.task_updated.emit(t),
                     sync_output=self._strategy_panel.sync_output,
                     keep_temp=self._strategy_panel.keep_temp,
+                    delete_source=self._strategy_panel.delete_source,
                     db=self._db,
                 ),
                 self._strategy_panel.worker_count,

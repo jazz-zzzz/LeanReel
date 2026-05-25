@@ -27,6 +27,17 @@ __all__ = [
 ]
 
 
+def _delete_source_file(filepath: str):
+    """删除源文件，失败静默处理。"""
+    try:
+        p = Path(filepath)
+        if p.exists():
+            p.chmod(0o777)
+            p.unlink()
+    except Exception:
+        pass
+
+
 def _safe_replace_output(temp_output, final_output):
     """原子替换输出文件，失败时保留已有文件。"""
     staging = str(final_output) + ".staging"
@@ -51,11 +62,13 @@ class FFmpegExecutor:
     """Executor adapter used by WorkerManager. 支持 Slotted Pipeline 阶段化编码。"""
 
     def __init__(self, progress_callback=None, temp_dir: Optional[str] = None,
-                 sync_output: bool = False, keep_temp: bool = False, db=None):
+                 sync_output: bool = False, keep_temp: bool = False, db=None,
+                 delete_source: bool = False):
         self.progress_callback = progress_callback
         self.temp_dir = temp_dir
         self.sync_output = sync_output
         self.keep_temp = keep_temp
+        self._delete_source = delete_source
         self._db = db
         self._cancel_events: dict[str, threading.Event] = {}
         self._cancel_lock = threading.Lock()
@@ -86,6 +99,7 @@ class FFmpegExecutor:
         plan = build_pipeline(task)
         task.pipeline_plan = plan
         task._db = self._db
+        task._delete_source = self._delete_source
 
         final_output = Path(task.output_path)
         temp_dir = self._get_temp_dir()
@@ -334,6 +348,9 @@ class FFmpegExecutor:
                     except Exception:
                         import traceback
                         traceback.print_exc()
+
+                if getattr(task, "_delete_source", False) and task.status.value == "completed":
+                    _delete_source_file(task.input_path)
             except Exception:
                 import traceback
                 traceback.print_exc()

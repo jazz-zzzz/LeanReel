@@ -348,6 +348,10 @@ class StrategyPanel(QWidget):
         self.keep_temp_cb.setChecked(False)
         encode_layout.addRow(self.keep_temp_cb)
 
+        self.delete_source_cb = QCheckBox("删除源文件（压缩成功后永久删除）")
+        self.delete_source_cb.setChecked(False)
+        encode_layout.addRow(self.delete_source_cb)
+
         layout.addWidget(encode_group)
 
         # ── 开始按钮 ──
@@ -475,6 +479,10 @@ class StrategyPanel(QWidget):
     @property
     def keep_temp(self) -> bool:
         return self.keep_temp_cb.isChecked()
+
+    @property
+    def delete_source(self) -> bool:
+        return self.delete_source_cb.isChecked()
 
     @property
     def current_strategy(self):
