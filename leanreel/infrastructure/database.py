@@ -269,6 +269,27 @@ class Database(LibraryStore):
             leanreel_version=r.get("leanreel_version", ""),
         ) for r in rows]
 
+    def get_all_history(self) -> list[dict]:
+        """返回所有压缩历史记录，JOIN 出库名和文件夹路径，按时间倒序。"""
+        rows = self.execute("""
+            SELECT
+                ch.id, ch.file_snapshot_id, ch.strategy_name,
+                ch.original_size, ch.compressed_size, ch.output_size_bytes,
+                ch.savings_pct, ch.encoder, ch.cq_value, ch.preset,
+                ch.duration_seconds, ch.status, ch.error_message,
+                ch.output_path, ch.sidecar_path, ch.created_at,
+                ch.source_deleted, ch.leanreel_version,
+                fs.file_name, fs.relative_path, fs.video_codec, fs.library_folder_id,
+                lf.path AS folder_path,
+                lib.name AS library_name
+            FROM compression_history ch
+            JOIN file_snapshot fs ON ch.file_snapshot_id = fs.id
+            JOIN library_folder lf ON fs.library_folder_id = lf.id
+            JOIN library lib ON lf.library_id = lib.id
+            ORDER BY ch.created_at DESC
+        """)
+        return rows
+
     def get_compression_records_for_folders(self, folder_ids: set[int]) -> dict[tuple[int, str], CompressionRecord]:
         """Return the latest completed compression record keyed by source file."""
         if not folder_ids:
