@@ -109,6 +109,25 @@ class Database(LibraryStore):
         if "probe_error" not in existing:
             conn.execute("ALTER TABLE file_snapshot ADD COLUMN probe_error TEXT DEFAULT ''")
 
+        existing_ch = {row[1] for row in conn.execute("PRAGMA table_info(compression_history)")}
+        ch_migrations = [
+            ("output_path", "TEXT DEFAULT ''"),
+            ("output_size_bytes", "INTEGER DEFAULT 0"),
+            ("savings_pct", "REAL DEFAULT 0"),
+            ("encoder", "TEXT DEFAULT ''"),
+            ("cq_value", "INTEGER DEFAULT 0"),
+            ("preset", "TEXT DEFAULT ''"),
+            ("pix_fmt", "TEXT DEFAULT ''"),
+            ("audio_mode", "TEXT DEFAULT ''"),
+            ("sub_mode", "TEXT DEFAULT ''"),
+            ("ffmpeg_command", "TEXT DEFAULT ''"),
+            ("sidecar_path", "TEXT DEFAULT ''"),
+            ("leanreel_version", "TEXT DEFAULT ''"),
+        ]
+        for col_name, col_def in ch_migrations:
+            if col_name not in existing_ch:
+                conn.execute(f"ALTER TABLE compression_history ADD COLUMN {col_name} {col_def}")
+
     def execute(self, sql: str, params=None):
         conn = self._pool.get()
         try:
@@ -187,12 +206,35 @@ class Database(LibraryStore):
         self.execute("DELETE FROM library_folder WHERE id=?", [folder_id])
 
     def insert_compression(self, record: CompressionRecord) -> int:
+        """插入压缩历史记录，返回记录 ID。"""
+        cols = [
+            "file_snapshot_id", "strategy_name", "original_size", "compressed_size",
+            "status", "duration_seconds", "error_message",
+            "output_path", "output_size_bytes", "savings_pct",
+            "encoder", "cq_value", "preset", "pix_fmt",
+            "audio_mode", "sub_mode", "ffmpeg_command", "sidecar_path", "leanreel_version",
+        ]
+        values = [
+            record.file_snapshot_id, record.strategy_name, record.original_size,
+            record.compressed_size, record.status, record.duration_seconds,
+            getattr(record, "error_message", ""),
+            getattr(record, "output_path", ""),
+            getattr(record, "output_size_bytes", 0),
+            getattr(record, "savings_pct", 0.0),
+            getattr(record, "encoder", ""),
+            getattr(record, "cq_value", 0),
+            getattr(record, "preset", ""),
+            getattr(record, "pix_fmt", ""),
+            getattr(record, "audio_mode", ""),
+            getattr(record, "sub_mode", ""),
+            getattr(record, "ffmpeg_command", ""),
+            getattr(record, "sidecar_path", ""),
+            getattr(record, "leanreel_version", ""),
+        ]
+        placeholders = ",".join("?" * len(cols))
         self.execute(
-            """INSERT INTO compression_history
-               (file_snapshot_id, strategy_name, original_size, compressed_size, status, duration_seconds, error_message)
-               VALUES (?,?,?,?,?,?,?)""",
-            [record.file_snapshot_id, record.strategy_name, record.original_size,
-             record.compressed_size, record.status, record.duration_seconds, record.error_message]
+            f"INSERT INTO compression_history ({','.join(cols)}) VALUES ({placeholders})",
+            values,
         )
         return self.last_insert_id
 
