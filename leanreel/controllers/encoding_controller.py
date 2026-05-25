@@ -8,7 +8,7 @@ from leanreel.executor.worker import EncodeTask, WorkerManager
 
 
 def make_output_path(source: Path) -> Path:
-    return source.with_name(f"{source.stem}_SS{source.suffix}")
+    return source.with_name(f"{source.stem}_zcompressed{source.suffix}")
 
 
 def compute_encode_summary(results: list[EncodeTask]) -> tuple[int, int, int]:
