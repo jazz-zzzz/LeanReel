@@ -152,7 +152,6 @@ class FFmpegBuilder:
             cmd.extend(["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"])
         cmd.extend([
             "-thread_queue_size", "16384",
-            "-buffer_size", "134217728",
             "-i", input_path,
         ])
 
