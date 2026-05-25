@@ -722,6 +722,20 @@ class FileListPanel(QWidget):
         self.selection_label.setText(f"已选中 {checked_count}/{processable_total} 个可处理文件")
 
     def _decision_display(self, snap: Any, match: MatchResult | None) -> FileDecisionDisplay:
+        if (
+            getattr(snap, "probe_ok", None) is False
+            and not getattr(snap, "video_codec", "")
+            and not getattr(snap, "probe_error", "")
+        ):
+            return FileDecisionDisplay(
+                status_key="pending",
+                strategy_text="探测中...",
+                result_text="...",
+                result_sort=-4,
+                processable=False,
+                tooltip="正在探测编码信息",
+            )
+
         skip_reason = get_skip_reason(snap)
         if skip_reason:
             return FileDecisionDisplay(

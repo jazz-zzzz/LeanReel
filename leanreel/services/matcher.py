@@ -12,10 +12,11 @@ class Matcher:
         """为给定文件匹配最佳策略"""
         if is_protected_source(snapshot):
             return None
+        if not snapshot.video_codec:
+            return None
         for strategy in self.strategies:
             if self._check_filters(snapshot, strategy):
                 return strategy
-        # 兜底：返回第一条策略（通常是最保守的）
         if self.strategies:
             return self.strategies[0]
         raise ValueError("没有可用策略")

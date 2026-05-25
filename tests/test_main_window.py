@@ -703,7 +703,7 @@ def test_file_list_can_update_row_with_custom_strategy():
 
     app = get_app()
     panel = FileListPanel()
-    snap = FileSnapshot(relative_path="movie.mkv", file_name="movie.mkv", size_bytes=10 * 1024**3)
+    snap = FileSnapshot(relative_path="movie.mkv", file_name="movie.mkv", size_bytes=10 * 1024**3, probe_ok=True, video_codec="h264")
     panel.populate([snap], {"movie.mkv": None})
 
     custom = Strategy(name="自定义", estimated_savings="50-70%")
