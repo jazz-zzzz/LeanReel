@@ -85,6 +85,18 @@ class CompressionRecord:
     duration_seconds: int = 0
     error_message: str = ""
     created_at: str = ""
+    output_path: str = ""
+    output_size_bytes: int = 0
+    savings_pct: float = 0.0
+    encoder: str = ""
+    cq_value: int = 0
+    preset: str = ""
+    pix_fmt: str = ""
+    audio_mode: str = ""
+    sub_mode: str = ""
+    ffmpeg_command: str = ""
+    sidecar_path: str = ""
+    leanreel_version: str = ""
 
 
 @dataclass
