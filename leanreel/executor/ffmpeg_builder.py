@@ -270,14 +270,15 @@ def run_ffmpeg(cmd: list[str], progress_callback=None,
     stderr_lines: list[str] = []
     for line in proc.stderr:
         stderr_lines.append(line)
-        if len(stderr_lines) > 50:
-            stderr_lines.pop(0)
         if progress_callback and "time=" in line:
             progress_callback(line)
         if cancel_event and cancel_event.is_set():
             proc.terminate()
             break
     exit_code = proc.wait()
+    all_stderr = "".join(stderr_lines)
+    if exit_code != 0:
+        return exit_code, all_stderr
     return exit_code, "".join(stderr_lines[-20:])
 
 

@@ -719,12 +719,30 @@ def test_run_ffmpeg_returns_exit_code_and_stderr_tail():
 
 
 def test_run_ffmpeg_captures_stderr_tail():
-    """Mock Popen 返回 30 行 stderr — 验证只返回最后 20 行"""
+    """Mock Popen success — 验证返回最后 20 行"""
     from unittest.mock import patch, MagicMock
-    import subprocess
     from leanreel.executor.ffmpeg_builder import run_ffmpeg
 
-    # 30 行 stderr（非平凡数据，非空值）
+    stderr_30_lines = [f"ffmpeg log line #{i}\n" for i in range(1, 31)]
+    mock_proc = MagicMock()
+    mock_proc.stderr = stderr_30_lines
+    mock_proc.wait.return_value = 0
+
+    cmd = ["ffmpeg", "-i", "input.mkv", "output.mkv"]
+    with patch("leanreel.executor.ffmpeg_builder.subprocess.Popen", return_value=mock_proc) as mock_popen:
+        exit_code, stderr_tail = run_ffmpeg(cmd)
+
+    assert exit_code == 0
+    expected_tail = "".join(stderr_30_lines[-20:])
+    assert stderr_tail == expected_tail
+
+
+def test_run_ffmpeg_returns_full_stderr_on_failure():
+    """Mock Popen failure — 验证返回完整 stderr"""
+    import subprocess
+    from unittest.mock import patch, MagicMock
+    from leanreel.executor.ffmpeg_builder import run_ffmpeg
+
     stderr_30_lines = [f"ffmpeg log line #{i}\n" for i in range(1, 31)]
     mock_proc = MagicMock()
     mock_proc.stderr = stderr_30_lines
@@ -732,18 +750,10 @@ def test_run_ffmpeg_captures_stderr_tail():
 
     cmd = ["ffmpeg", "-i", "input.mkv", "output.mkv"]
     with patch("leanreel.executor.ffmpeg_builder.subprocess.Popen", return_value=mock_proc) as mock_popen:
-        exit_code, stderr_tail = run_ffmpeg(cmd)
+        exit_code, stderr_full = run_ffmpeg(cmd)
 
     assert exit_code == 1
-    # 只有最后 20 行
-    expected_tail = "".join(stderr_30_lines[-20:])
-    assert stderr_tail == expected_tail
-    # 前 10 行（索引 0-9）不应出现在尾部
-    # 使用换行符锚定精确行，避免 "line #1" 误匹配 "line #11"
-    for i in range(1, 11):
-        assert f"ffmpeg log line #{i}\n" not in stderr_tail, f"line #{i} should not be in tail"
-    # 最后一行应在尾部
-    assert "ffmpeg log line #30\n" in stderr_tail
+    assert stderr_full == "".join(stderr_30_lines)
 
     mock_popen.assert_called_once_with(
         cmd,

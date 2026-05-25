@@ -117,6 +117,7 @@ class QueuePanel(QWidget):
         info_label = QLabel(info)
         info_label.setObjectName("queue_info")
         info_label.setStyleSheet("color: #8a857c; font-size: 11px;")
+        info_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         if task.status == TaskStatus.FAILED:
             info_label.setToolTip(getattr(task, "error_message", "") or UI_TEXT.UNKNOWN_ERROR)
         row_layout.addWidget(info_label)
