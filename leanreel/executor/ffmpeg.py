@@ -134,7 +134,7 @@ class FFmpegExecutor:
                         local_input = task_temp_dir / source_path.name
                         bytes_copied = 0
 
-                        _COPY_CHUNK = 64 * 1024 * 1024  # 64 MB，减少 NAS 协议往返
+                        _COPY_CHUNK = 128 * 1024 * 1024  # 128 MB，减少 NAS 协议往返
                         with open(source_path, "rb") as src, open(local_input, "wb") as dst:
                             while chunk := src.read(_COPY_CHUNK):
                                 if cancel_event.is_set():
