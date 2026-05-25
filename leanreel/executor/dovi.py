@@ -53,3 +53,16 @@ class DoviTool:
         result = subprocess.run(cmd, capture_output=True, text=True,
                                 encoding="utf-8", errors="replace", timeout=120)
         return result.returncode == 0, result.stderr.strip()
+
+
+def get_dovi_tool_version() -> str:
+    """返回 dovi_tool 版本字符串，例如 'dovi_tool 2.1.0'"""
+    import subprocess
+    try:
+        proc = subprocess.run(
+            [get_dovi_tool_path(), "--version"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return proc.stdout.strip().split("\n")[0] if proc.returncode == 0 else "unknown"
+    except Exception:
+        return "unknown"

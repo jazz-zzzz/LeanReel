@@ -164,3 +164,16 @@ def run_ffmpeg(cmd: list[str], progress_callback=None,
             break
     exit_code = proc.wait()
     return exit_code, "".join(stderr_lines[-20:])
+
+
+def get_ffmpeg_version() -> str:
+    """返回 FFmpeg 版本字符串，例如 'ffmpeg version 7.1...'"""
+    import subprocess
+    try:
+        proc = subprocess.run(
+            [get_ffmpeg_path(), "-version"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return proc.stdout.split("\n")[0].strip() if proc.returncode == 0 else "unknown"
+    except Exception:
+        return "unknown"
