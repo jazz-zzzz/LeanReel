@@ -94,6 +94,24 @@ def test_load_strategies_skips_corrupted_json(tmp_path: Path):
     assert len(strategies) == 2  # 损坏文件被跳过
 
 
+def test_load_strategies_skips_duplicate_strategy_names(tmp_path: Path):
+    d = tmp_path / "strategies"
+    d.mkdir()
+    (d / "01_current.json").write_text(SAMPLE_STRATEGY_JSON, encoding="utf-8")
+    duplicate = json.loads(SAMPLE_STRATEGY_JSON)
+    duplicate["estimated_savings"] = "duplicate"
+    (d / "legacy_duplicate.json").write_text(
+        json.dumps(duplicate, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    strategies = load_strategies(str(d))
+
+    assert len(strategies) == 1
+    assert strategies[0].name == "均衡压缩"
+    assert strategies[0].estimated_savings == "35-50%"
+
+
 def test_builtin_presets_are_three_av1_cpu_tiers():
     """内置主预设只保留两个 AV1 档和一个 CPU 保画质档。"""
     strategy_dir = Path(__file__).resolve().parents[1] / "leanreel" / "resources" / "strategies"

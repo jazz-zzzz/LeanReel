@@ -7,10 +7,13 @@ _OBSOLETE_BUILTIN_STRATEGIES = {
     "balanced.json",
     "extreme.json",
     "light.json",
+    "av1_balanced.json",
+    "av1_quality.json",
     "nvenc_balanced.json",
     "nvenc_quality.json",
     "strip_only.json",
     "x265_fast.json",
+    "x265_quality.json",
     "x265_turbo.json",
 }
 

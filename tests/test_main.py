@@ -81,6 +81,18 @@ def test_get_strategies_dir_refreshes_builtin_strategy_files(monkeypatch, tmp_pa
         '{"name": "旧内置预设", "is_preset": true}',
         encoding="utf-8",
     )
+    (user_dir / "av1_quality.json").write_text(
+        '{"name": "AV1 NVENC CQ32 保画质", "is_preset": true}',
+        encoding="utf-8",
+    )
+    (user_dir / "av1_balanced.json").write_text(
+        '{"name": "AV1 NVENC CQ34 均衡快速", "is_preset": true}',
+        encoding="utf-8",
+    )
+    (user_dir / "x265_quality.json").write_text(
+        '{"name": "CPU x265 CRF18 慢速保画质", "is_preset": true}',
+        encoding="utf-8",
+    )
     (user_dir / "my_custom.json").write_text(
         '{"name": "我的自定义策略", "is_preset": false}',
         encoding="utf-8",
@@ -92,6 +104,9 @@ def test_get_strategies_dir_refreshes_builtin_strategy_files(monkeypatch, tmp_pa
     custom = json.loads((strategies_dir / "my_custom.json").read_text(encoding="utf-8"))
     assert av1_quality["name"] == "AV1 NVENC CQ32 保画质"
     assert not (strategies_dir / "balanced.json").exists()
+    assert not (strategies_dir / "av1_quality.json").exists()
+    assert not (strategies_dir / "av1_balanced.json").exists()
+    assert not (strategies_dir / "x265_quality.json").exists()
     assert custom["name"] == "我的自定义策略"
 
 def test_init_services_does_not_run_nvenc_detection_synchronously(monkeypatch, tmp_path):
@@ -403,4 +418,3 @@ def test_compute_encode_summary_returns_zero_for_empty_list():
     assert done == 0
     assert failed == 0
     assert cancelled == 0
-
