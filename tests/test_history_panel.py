@@ -13,7 +13,7 @@ def test_history_panel_creates_with_columns(qtbot):
     expected = [
         "源文件名", "进度", "库", "文件夹", "源体积", "输出体积",
         "节省量", "节省率", "策略", "编码器", "CQ/CRF",
-        "耗时", "完成时间", "源已删", "备注",
+        "耗时", "开始时间", "完成时间", "源已删", "备注",
     ]
     for i, col in enumerate(expected):
         assert model.headerData(i, Qt.Horizontal, Qt.DisplayRole) == col
@@ -189,8 +189,8 @@ def test_history_panel_colors_limited_to_progress_column(qtbot):
     assert model.data(model.index(1, 1), Qt.ForegroundRole) == QColor("#6b6560")
     assert model.data(model.index(1, 0), Qt.ForegroundRole) is None
     # 源已删列
-    assert model.data(model.index(0, 13), Qt.DisplayRole) == "是"
-    assert model.data(model.index(1, 13), Qt.DisplayRole) == "否"
+    assert model.data(model.index(0, 14), Qt.DisplayRole) == "是"
+    assert model.data(model.index(1, 14), Qt.DisplayRole) == "否"
     panel.close()
 
 

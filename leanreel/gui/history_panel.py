@@ -21,7 +21,7 @@ STATUS_ROLE = Qt.UserRole + 1
 _HEADERS = [
     "源文件名", "进度", "库", "文件夹", "源体积", "输出体积",
     "节省量", "节省率", "策略", "编码器", "CQ/CRF",
-    "耗时", "完成时间", "源已删", "备注",
+    "耗时", "开始时间", "完成时间", "源已删", "备注",
 ]
 
 _ENCODER_STATUS = {
@@ -132,9 +132,10 @@ class HistoryTableModel(QAbstractTableModel):
             9: lambda r: _encode_label(r.get("encoder", "")),
             10: lambda r: str(r.get("cq_value", "")) if r.get("cq_value") else "—",
             11: lambda r: _format_duration(r.get("duration_seconds", 0)),
-            12: lambda r: r.get("completed_at", "") or r.get("created_at", ""),
-            13: lambda r: "是" if r.get("source_deleted") else "否",
-            14: lambda r: r.get("error_message", "") or r.get("stage", "") or r.get("output_path", ""),
+            12: lambda r: r.get("started_at", "") or r.get("created_at", ""),
+            13: lambda r: r.get("completed_at", "") or r.get("created_at", ""),
+            14: lambda r: "是" if r.get("source_deleted") else "否",
+            15: lambda r: r.get("error_message", "") or r.get("stage", "") or r.get("output_path", ""),
         }
         fn = field_map.get(col)
         return fn(row) if fn else ""
