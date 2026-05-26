@@ -244,8 +244,8 @@ class FFmpegBuilder:
         # --- 附件（内嵌字体等）---
         cmd.extend(["-map", "0:t?", "-c:t", "copy"])
 
-        # --- 数据轨 ---
-        cmd.extend(["-map", "0:d?", "-c:d", "copy"])
+        # --- 数据轨（Matroska 不支持 data stream，跳过） ---
+        cmd.extend(["-dn"])
 
         # --- 全局元数据和章节 ---
         cmd.extend(["-map_metadata", "0", "-map_chapters", "0"])

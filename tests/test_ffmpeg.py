@@ -268,8 +268,8 @@ def test_build_preserves_chapters_and_attachments(balanced_strategy):
     assert "-copy_unknown" in joined
     assert "-map 0:t?" in joined
     assert "-c:t copy" in joined
-    assert "-map 0:d?" in joined
-    assert "-c:d copy" in joined
+    assert "-dn" in joined
+    assert "-c:d" not in joined
 
 
 def test_build_command_preserves_audio(balanced_strategy):
