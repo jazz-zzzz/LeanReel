@@ -106,7 +106,6 @@ class PipelinePlan:
 # ── 预定义的 stage slot 常量 ──
 
 SLOT_PREPARE = StageSlot("prepare", "准备", weight=1, category=SlotCategory.PRE_PROCESS, on_failure=FailurePolicy.ABORT)
-SLOT_COPY_IN = StageSlot("copy_in", "复制到临时目录", weight=2, category=SlotCategory.PRE_PROCESS, on_failure=FailurePolicy.RETRY, max_retries=2)
 SLOT_EXTRACT_RPU = StageSlot("extract_rpu", "提取 RPU", weight=2, category=SlotCategory.PRE_PROCESS, on_failure=FailurePolicy.ABORT, max_retries=1)
 SLOT_TRANSCODE = StageSlot("transcode", "压缩视频", weight=80, category=SlotCategory.MAIN_PROCESS, on_failure=FailurePolicy.ABORT)
 SLOT_INJECT_RPU = StageSlot("inject_rpu", "注入 RPU", weight=2, category=SlotCategory.POST_PROCESS, on_failure=FailurePolicy.ABORT, max_retries=1)

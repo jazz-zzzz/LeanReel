@@ -11,9 +11,9 @@ def test_history_panel_creates_with_columns(qtbot):
     model = panel.table.model()
 
     expected = [
-        "源文件名", "库", "文件夹", "源体积", "输出体积",
+        "源文件名", "进度", "库", "文件夹", "源体积", "输出体积",
         "节省量", "节省率", "策略", "编码器", "CQ/CRF",
-        "耗时", "完成时间", "状态", "源已删",
+        "耗时", "完成时间", "源已删", "备注",
     ]
     for i, col in enumerate(expected):
         assert model.headerData(i, Qt.Horizontal, Qt.DisplayRole) == col
@@ -48,8 +48,9 @@ def test_history_panel_populate_renders_rows(qtbot):
             "strategy_name": "AV1 NVENC CQ34 均衡快速",
             "encoder": "av1_nvenc", "cq_value": 34,
             "duration_seconds": 900, "created_at": "2026-05-28 12:00:00",
-            "status": "completed", "source_deleted": 0, "output_path": "/out.mkv",
-            "compressed_size": 0, "error_message": "",
+            "completed_at": "", "status": "completed", "source_deleted": 0,
+            "output_path": "/out.mkv", "compressed_size": 0, "error_message": "",
+            "progress": 100.0, "stage": "",
         },
     ]
     panel.populate(rows)
@@ -57,11 +58,14 @@ def test_history_panel_populate_renders_rows(qtbot):
     model = panel.table.model()
     assert model.rowCount() == 1
     assert model.data(model.index(0, 0), Qt.DisplayRole) == "movie.mkv"
-    # 避免精确匹配 — 验证业务不变性：包含大小单位
-    output_display = str(model.data(model.index(0, 4), Qt.DisplayRole))
-    assert output_display != "—"
+    # 进度列包含百分比和状态
+    progress_text = str(model.data(model.index(0, 1), Qt.DisplayRole))
+    assert "100%" in progress_text
+    assert "成功" in progress_text
+    # 输出体积列
+    output_display = str(model.data(model.index(0, 5), Qt.DisplayRole))
     assert "GB" in output_display or "MB" in output_display
-    assert model.data(model.index(0, 7), Qt.DisplayRole) == "AV1 NVENC CQ34 均衡快速"
+    assert model.data(model.index(0, 8), Qt.DisplayRole) == "AV1 NVENC CQ34 均衡快速"
     panel.close()
 
 
@@ -71,15 +75,15 @@ def test_history_panel_filter_by_status(qtbot):
     panel = HistoryPanel()
     qtbot.addWidget(panel)
     rows = [
-        {"status": "completed", "file_name": "a.mkv", "library_name": "",
+        {"status": "completed", "progress": 100.0, "stage": "", "file_name": "a.mkv", "library_name": "",
          "folder_path": "", "original_size": 1000, "output_size_bytes": 500,
          "savings_pct": 50.0, "strategy_name": "", "encoder": "",
-         "cq_value": 0, "duration_seconds": 0, "created_at": "",
+         "cq_value": 0, "duration_seconds": 0, "created_at": "", "completed_at": "",
          "source_deleted": 0, "output_path": "", "compressed_size": 0, "error_message": ""},
-        {"status": "failed", "file_name": "b.mkv", "library_name": "",
+        {"status": "failed", "progress": 25.0, "stage": "", "file_name": "b.mkv", "library_name": "",
          "folder_path": "", "original_size": 1000, "output_size_bytes": 0,
          "savings_pct": 0.0, "strategy_name": "", "encoder": "",
-         "cq_value": 0, "duration_seconds": 0, "created_at": "",
+         "cq_value": 0, "duration_seconds": 0, "created_at": "", "completed_at": "",
          "source_deleted": 0, "output_path": "", "compressed_size": 0, "error_message": ""},
     ]
     panel.populate(rows)
@@ -105,7 +109,6 @@ def test_history_panel_does_not_use_alternating_row_backgrounds(qtbot):
 
 
 def test_history_panel_empty_populate_does_not_crash(qtbot):
-    """空数据 populate 不应崩溃，rowCount 为 0"""
     from leanreel.gui.history_panel import HistoryPanel
 
     panel = HistoryPanel()
@@ -118,7 +121,6 @@ def test_history_panel_empty_populate_does_not_crash(qtbot):
 
 
 def test_history_panel_refresh_button_emits(qtbot):
-    """刷新按钮点击应发射 refresh_requested 信号"""
     from leanreel.gui.history_panel import HistoryPanel
 
     panel = HistoryPanel()
@@ -132,56 +134,91 @@ def test_history_panel_refresh_button_emits(qtbot):
     panel.close()
 
 
-def test_history_panel_status_column_has_explicit_label_and_color(qtbot):
-    """状态颜色只属于状态列，不污染整行文本。"""
+def test_history_panel_progress_column_has_label_and_color(qtbot):
     from leanreel.gui.history_panel import HistoryPanel
 
     panel = HistoryPanel()
     qtbot.addWidget(panel)
     rows = [
-        {"status": "failed", "file_name": "broken.mkv", "library_name": "",
+        {"status": "failed", "progress": 48.0, "stage": "转码", "file_name": "broken.mkv", "library_name": "",
          "folder_path": "", "original_size": 5000, "output_size_bytes": 0,
          "savings_pct": 0.0, "strategy_name": "", "encoder": "",
-         "cq_value": 0, "duration_seconds": 0, "created_at": "",
+         "cq_value": 0, "duration_seconds": 0, "created_at": "", "completed_at": "",
          "source_deleted": 0, "output_path": "", "compressed_size": 0, "error_message": "encoder crashed"},
     ]
     panel.populate(rows)
 
     model = panel.table.model()
+    progress_idx = model.index(0, 1)
     name_idx = model.index(0, 0)
-    status_idx = model.index(0, 12)
 
-    assert model.data(status_idx, Qt.DisplayRole) == "失败"
+    progress_text = str(model.data(progress_idx, Qt.DisplayRole))
+    assert "48%" in progress_text
+    assert "失败" in progress_text
     assert model.data(name_idx, Qt.ForegroundRole) is None
-    assert model.data(status_idx, Qt.ForegroundRole) == QColor("#c4554a")
-    assert model.data(status_idx, Qt.ToolTipRole) == "encoder crashed"
+    assert model.data(progress_idx, Qt.ForegroundRole) == QColor("#c4554a")
+    assert model.data(progress_idx, Qt.ToolTipRole) == "encoder crashed"
     panel.close()
 
 
-def test_history_panel_status_colors_are_limited_to_status_column(qtbot):
+def test_history_panel_colors_limited_to_progress_column(qtbot):
     from leanreel.gui.history_panel import HistoryPanel
 
     panel = HistoryPanel()
     qtbot.addWidget(panel)
     rows = [
-        {"status": "completed", "file_name": "done.mkv", "library_name": "",
+        {"status": "completed", "progress": 100.0, "stage": "", "file_name": "done.mkv", "library_name": "",
          "folder_path": "", "original_size": 5000, "output_size_bytes": 3000,
          "savings_pct": 40.0, "strategy_name": "", "encoder": "",
-         "cq_value": 0, "duration_seconds": 0, "created_at": "",
+         "cq_value": 0, "duration_seconds": 0, "created_at": "", "completed_at": "",
          "source_deleted": 1, "output_path": "", "compressed_size": 0, "error_message": ""},
-        {"status": "cancelled", "file_name": "cancel.mkv", "library_name": "",
+        {"status": "cancelled", "progress": 22.0, "stage": "", "file_name": "cancel.mkv", "library_name": "",
          "folder_path": "", "original_size": 5000, "output_size_bytes": 0,
          "savings_pct": 0.0, "strategy_name": "", "encoder": "",
-         "cq_value": 0, "duration_seconds": 0, "created_at": "",
+         "cq_value": 0, "duration_seconds": 0, "created_at": "", "completed_at": "",
          "source_deleted": 0, "output_path": "", "compressed_size": 0, "error_message": ""},
     ]
     panel.populate(rows)
 
     model = panel.table.model()
-    assert model.data(model.index(0, 12), Qt.DisplayRole) == "成功"
-    assert model.data(model.index(0, 12), Qt.ForegroundRole) == QColor("#6b9955")
+    # 进度列有颜色和状态文本
+    assert "成功" in str(model.data(model.index(0, 1), Qt.DisplayRole))
+    assert model.data(model.index(0, 1), Qt.ForegroundRole) == QColor("#6b9955")
     assert model.data(model.index(0, 0), Qt.ForegroundRole) is None
-    assert model.data(model.index(1, 12), Qt.DisplayRole) == "已取消"
-    assert model.data(model.index(1, 12), Qt.ForegroundRole) == QColor("#6b6560")
+    assert "已取消" in str(model.data(model.index(1, 1), Qt.DisplayRole))
+    assert model.data(model.index(1, 1), Qt.ForegroundRole) == QColor("#6b6560")
     assert model.data(model.index(1, 0), Qt.ForegroundRole) is None
+    # 源已删列
+    assert model.data(model.index(0, 13), Qt.DisplayRole) == "是"
+    assert model.data(model.index(1, 13), Qt.DisplayRole) == "否"
+    panel.close()
+
+
+def test_history_panel_running_status_filter(qtbot):
+    from leanreel.gui.history_panel import HistoryPanel
+
+    panel = HistoryPanel()
+    qtbot.addWidget(panel)
+    rows = [
+        {"status": "running", "progress": 37.0, "stage": "转码", "file_name": "run.mkv", "library_name": "",
+         "folder_path": "", "original_size": 1000, "output_size_bytes": 0,
+         "savings_pct": 0.0, "strategy_name": "", "encoder": "",
+         "cq_value": 0, "duration_seconds": 0, "created_at": "", "completed_at": "",
+         "source_deleted": 0, "output_path": "", "compressed_size": 0, "error_message": ""},
+        {"status": "discarded", "progress": 100.0, "stage": "", "file_name": "discard.mkv", "library_name": "",
+         "folder_path": "", "original_size": 1000, "output_size_bytes": 1000,
+         "savings_pct": 0.0, "strategy_name": "", "encoder": "",
+         "cq_value": 0, "duration_seconds": 0, "created_at": "", "completed_at": "",
+         "source_deleted": 0, "output_path": "", "compressed_size": 0, "error_message": "输出体积不小于源文件"},
+    ]
+    panel.populate(rows)
+
+    panel.status_filter.setCurrentText("进行中")
+    assert panel.table.model().rowCount() == 1
+    assert panel.table.model().data(panel.table.model().index(0, 0), Qt.DisplayRole) == "run.mkv"
+
+    panel.status_filter.setCurrentText("已丢弃")
+    assert panel.table.model().rowCount() == 1
+    assert panel.table.model().data(panel.table.model().index(0, 0), Qt.DisplayRole) == "discard.mkv"
+
     panel.close()

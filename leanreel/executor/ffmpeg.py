@@ -1,4 +1,4 @@
-﻿"""FFmpeg 执行器 — 编码编排，I/O 分离、临时文件管理、Dolby Vision 流程"""
+﻿"""FFmpeg 执行器 — 编码编排、Dolby Vision 流程、审计双写"""
 import hashlib
 import os
 import shutil
@@ -394,15 +394,8 @@ class FFmpegExecutor:
                             sidecar_path=sidecar_path,
                             leanreel_version=audit.leanreel_version,
                         )
-                        try:
-                            db_id = db.insert_compression(rec)
-                            audit.db_record_id = db_id
-                            if db_id:
-                                write_sidecar(audit)
-                        except Exception:
-                            import sys, traceback
-                            print(f"[LeanReel audit] DB insert failed: fsid={fsid}", file=sys.stderr)
-                            traceback.print_exc()
+                        audit.db_record_id = task.history_id
+                        write_sidecar(audit)
 
                         _update_terminal(
                             task,

@@ -19,28 +19,37 @@ from leanreel.gui.utils import _format_bytes
 STATUS_ROLE = Qt.UserRole + 1
 
 _HEADERS = [
-    "源文件名", "库", "文件夹", "源体积", "输出体积",
+    "源文件名", "进度", "库", "文件夹", "源体积", "输出体积",
     "节省量", "节省率", "策略", "编码器", "CQ/CRF",
-    "耗时", "完成时间", "状态", "源已删",
+    "耗时", "完成时间", "源已删", "备注",
 ]
 
 _ENCODER_STATUS = {
     "libx265": "HEVC",
     "hevc_nvenc": "HEVC",
+    "h264_nvenc": "H.264",
     "av1_nvenc": "AV1",
     "copy": "流复制",
 }
 
 _STATUS_LABELS = {
+    "pending": "等待中",
+    "running": "转码中",
     "completed": "成功",
     "failed": "失败",
     "cancelled": "已取消",
+    "discarded": "已丢弃",
+    "skipped": "已跳过",
 }
 
 _STATUS_COLORS = {
+    "pending": QColor("#5c5851"),
+    "running": QColor("#c8963e"),
     "completed": QColor("#6b9955"),
     "failed": QColor("#c4554a"),
     "cancelled": QColor("#6b6560"),
+    "discarded": QColor("#5b8db8"),
+    "skipped": QColor("#5b8db8"),
 }
 
 
@@ -93,30 +102,39 @@ class HistoryTableModel(QAbstractTableModel):
         if role == STATUS_ROLE:
             return row.get("status", "")
         if role == Qt.ForegroundRole:
-            if col == 12:
+            if col == 1:
                 return _STATUS_COLORS.get(row.get("status", ""))
         if role == Qt.ToolTipRole:
             return row.get("error_message", "") or row.get("output_path", "")
         return None
 
+    def _progress_text(self, row: dict) -> str:
+        status = row.get("status", "")
+        label = _STATUS_LABELS.get(status, status)
+        progress = float(row.get("progress") or 0)
+        if status in ("completed", "discarded", "skipped"):
+            progress = 100.0
+        return f"{progress:.0f}%  {label}"
+
     def _display_text(self, row: dict, col: int) -> str:
         field_map = {
             0: lambda r: r.get("file_name", ""),
-            1: lambda r: r.get("library_name", ""),
-            2: lambda r: r.get("folder_path", ""),
-            3: lambda r: _format_bytes(r.get("original_size", 0)),
-            4: lambda r: _format_bytes(r.get("output_size_bytes", 0) or r.get("compressed_size", 0)),
-            5: lambda r: _format_bytes(
+            1: self._progress_text,
+            2: lambda r: r.get("library_name", ""),
+            3: lambda r: r.get("folder_path", ""),
+            4: lambda r: _format_bytes(r.get("original_size", 0)),
+            5: lambda r: _format_bytes(r.get("output_size_bytes", 0) or r.get("compressed_size", 0)),
+            6: lambda r: _format_bytes(
                 (r.get("original_size", 0) or 0) - (r.get("output_size_bytes", 0) or r.get("compressed_size", 0) or 0)
             ),
-            6: lambda r: f"{r.get('savings_pct', 0):.1f}%" if r.get("savings_pct") else "—",
-            7: lambda r: r.get("strategy_name", ""),
-            8: lambda r: _encode_label(r.get("encoder", "")),
-            9: lambda r: str(r.get("cq_value", "")) if r.get("cq_value") else "—",
-            10: lambda r: _format_duration(r.get("duration_seconds", 0)),
-            11: lambda r: r.get("created_at", ""),
-            12: lambda r: _STATUS_LABELS.get(r.get("status", ""), r.get("status", "")),
+            7: lambda r: f"{r.get('savings_pct', 0):.1f}%" if r.get("savings_pct") else "—",
+            8: lambda r: r.get("strategy_name", ""),
+            9: lambda r: _encode_label(r.get("encoder", "")),
+            10: lambda r: str(r.get("cq_value", "")) if r.get("cq_value") else "—",
+            11: lambda r: _format_duration(r.get("duration_seconds", 0)),
+            12: lambda r: r.get("completed_at", "") or r.get("created_at", ""),
             13: lambda r: "是" if r.get("source_deleted") else "否",
+            14: lambda r: r.get("error_message", "") or r.get("stage", "") or r.get("output_path", ""),
         }
         fn = field_map.get(col)
         return fn(row) if fn else ""
@@ -135,7 +153,7 @@ class StatusProxyModel(QSortFilterProxyModel):
         if not self._status_filter or self._status_filter == "全部":
             return True
         model = self.sourceModel()
-        idx = model.index(source_row, 12)
+        idx = model.index(source_row, 1)
         return model.data(idx, STATUS_ROLE) == self._status_filter
 
 
@@ -151,7 +169,6 @@ class HistoryPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
 
-        # ── 顶部：返回按钮 + 筛选 ──
         top = QHBoxLayout()
 
         self.back_btn = QPushButton("← 返回文件列表")
@@ -180,7 +197,7 @@ class HistoryPanel(QWidget):
 
         top.addWidget(QLabel("状态:"))
         self.status_filter = QComboBox()
-        self.status_filter.addItems(["全部", "成功", "失败", "已取消"])
+        self.status_filter.addItems(["全部", "进行中", "成功", "失败", "已取消", "已丢弃"])
         self.status_filter.setMinimumWidth(100)
         self.status_filter.currentTextChanged.connect(self._on_status_changed)
         top.addWidget(self.status_filter)
@@ -191,7 +208,6 @@ class HistoryPanel(QWidget):
         top.addStretch()
         layout.addLayout(top)
 
-        # ── 表格 ──
         self.table = QTableView()
         self.table.setSelectionBehavior(QTableView.SelectRows)
         self.table.setEditTriggers(QTableView.NoEditTriggers)
@@ -236,22 +252,49 @@ class HistoryPanel(QWidget):
         total = len(rows)
         completed = sum(1 for r in rows if r.get("status") == "completed")
         failed = sum(1 for r in rows if r.get("status") == "failed")
+        running = sum(1 for r in rows if r.get("status") in ("pending", "running"))
         total_savings = sum(
             (r.get("original_size", 0) or 0) - (r.get("output_size_bytes", 0) or r.get("compressed_size", 0) or 0)
             for r in rows if r.get("status") == "completed"
         )
-        self.summary_label.setText(
-            f"共 {total} 条 · 成功 {completed} · 失败 {failed} · 累计节省 {_format_bytes(total_savings)}"
-        )
+        parts = [f"共 {total} 条", f"成功 {completed}", f"失败 {failed}"]
+        if running:
+            parts.append(f"进行中 {running}")
+        parts.append(f"累计节省 {_format_bytes(total_savings)}")
+        self.summary_label.setText(" · ".join(parts))
 
     def _on_status_changed(self, text: str):
-        status_map = {"成功": "completed", "失败": "failed", "已取消": "cancelled"}
+        status_map = {
+            "进行中": "running",
+            "成功": "completed",
+            "失败": "failed",
+            "已取消": "cancelled",
+            "已丢弃": "discarded",
+        }
         self._proxy.set_status_filter(status_map.get(text, ""))
 
     def _on_double_click(self, index: QModelIndex):
         source_idx = self._proxy.mapToSource(index)
         row = self._source_model._rows[source_idx.row()]
         output_path = row.get("output_path", "")
+        status = row.get("status", "")
+
+        if status in ("running", "pending"):
+            stage = row.get("stage", "") or _STATUS_LABELS.get(status, "")
+            QMessageBox.information(self, "任务状态", f"任务正在{stage}，尚未完成")
+            return
+
+        if status == "failed":
+            error = row.get("error_message", "未知错误")
+            tip = "错误信息：\n" + (error[:500] if error else "未知错误")
+            QMessageBox.critical(self, "转换失败", tip)
+            return
+
+        if status == "discarded":
+            reason = row.get("error_message", "输出体积不小于源文件")
+            QMessageBox.information(self, "已丢弃", reason)
+            return
+
         if output_path and Path(output_path).exists():
             os.startfile(str(Path(output_path).parent))
         else:

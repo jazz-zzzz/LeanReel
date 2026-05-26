@@ -654,22 +654,18 @@ def test_ffmpeg_executor_writes_completed_status_to_history_before_worker_finali
 
     class FakeDb:
         def __init__(self):
-            self.records = []
+            self.terminal_updates = []
 
         def execute(self, sql, params=None):
             if sql.strip().startswith("SELECT id FROM file_snapshot"):
                 return [{"id": 42}]
             return []
 
-        def insert_compression(self, record):
-            self.records.append(record)
-            return 7
-
         def update_compression_runtime(self, record_id, **kwargs):
-            pass  # runtime updates during transcode — silently accept
+            pass
 
         def update_compression_terminal(self, record_id, **kwargs):
-            pass  # terminal updates are handled via insert_compression in audit path
+            self.terminal_updates.append((record_id, kwargs))
 
     def fake_run_ffmpeg(cmd, progress_callback=None, cancel_event=None):
         Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
@@ -713,10 +709,10 @@ def test_ffmpeg_executor_writes_completed_status_to_history_before_worker_finali
     task.completed_at = task.started_at + 1.0
 
     assert task.status == TaskStatus.COMPLETED
-    assert len(db.records) == 1
-    assert db.records[0].status == TaskStatus.COMPLETED.value
-    assert task.completed_at > task.started_at
-    assert db.records[0].duration_seconds >= 0
+    assert len(db.terminal_updates) >= 1
+    _, kwargs = db.terminal_updates[-1]
+    assert kwargs["status"] == TaskStatus.COMPLETED.value
+    assert kwargs["progress"] == 100.0
 
 
 def test_ffmpeg_executor_writes_failed_status_to_history(monkeypatch, tmp_path):

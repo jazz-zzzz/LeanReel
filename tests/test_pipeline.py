@@ -2,7 +2,7 @@
 import pytest
 from leanreel.services.pipeline import (
     StageSlot, StageTask, PipelinePlan, ProgressType, SlotCategory, FailurePolicy,
-    SLOT_PREPARE, SLOT_COPY_IN, SLOT_EXTRACT_RPU, SLOT_TRANSCODE, SLOT_INJECT_RPU, SLOT_MOVE_OUT,
+    SLOT_PREPARE, SLOT_EXTRACT_RPU, SLOT_TRANSCODE, SLOT_INJECT_RPU, SLOT_MOVE_OUT,
 )
 
 
@@ -83,9 +83,9 @@ def test_skip_remaining():
 
 def test_dv_pipeline_uses_all_slots():
     """集成：DV_P7 管线使用完整 slot 集合"""
-    slots = [SLOT_PREPARE, SLOT_COPY_IN, SLOT_EXTRACT_RPU, SLOT_TRANSCODE, SLOT_INJECT_RPU, SLOT_MOVE_OUT]
+    slots = [SLOT_PREPARE, SLOT_EXTRACT_RPU, SLOT_TRANSCODE, SLOT_INJECT_RPU, SLOT_MOVE_OUT]
     plan = PipelinePlan(stages=[StageTask(slot=s) for s in slots])
-    assert len(plan.stages) == 6
+    assert len(plan.stages) == 5
     # 验证权重都是正的
     total = sum(s.slot.weight for s in plan.stages)
     assert total > 0
