@@ -147,7 +147,8 @@ class FFmpegBuilder:
         spec = _encoder_spec(v.encoder)
         encoder = spec.name
 
-        cmd = [get_ffmpeg_path(), "-nostdin", "-y"]
+        cmd = [get_ffmpeg_path(), "-nostdin", "-y",
+               "-fflags", "+genpts+discardcorrupt"]
         if spec.kind == "nvenc":
             cmd.extend(["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"])
         cmd.extend([
