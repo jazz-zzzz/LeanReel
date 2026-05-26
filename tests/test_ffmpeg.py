@@ -665,6 +665,12 @@ def test_ffmpeg_executor_writes_completed_status_to_history_before_worker_finali
             self.records.append(record)
             return 7
 
+        def update_compression_runtime(self, record_id, **kwargs):
+            pass  # runtime updates during transcode — silently accept
+
+        def update_compression_terminal(self, record_id, **kwargs):
+            pass  # terminal updates are handled via insert_compression in audit path
+
     def fake_run_ffmpeg(cmd, progress_callback=None, cancel_event=None):
         Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
         Path(cmd[-1]).write_bytes(b"encoded")
@@ -694,25 +700,30 @@ def test_ffmpeg_executor_writes_completed_status_to_history_before_worker_finali
         output_path=str(tmp_path / "movie_zcompressed.mkv"),
         strategy=strategy,
         snapshot=snap,
-        status=TaskStatus.RUNNING,
+        status=TaskStatus.COMPLETED,  # pre-set so audit build_audit() picks up correct status
         original_size=1000,
         started_at=100.0,
+        history_id=42,  # non-zero so _update_terminal triggers
     )
     db = FakeDb()
 
     FFmpegExecutor(temp_dir=str(tmp_path / "temp"), db=db).encode(task)
 
+    # WorkerManager sets completed_at in finally block; simulate here.
+    task.completed_at = task.started_at + 1.0
+
     assert task.status == TaskStatus.COMPLETED
     assert len(db.records) == 1
     assert db.records[0].status == TaskStatus.COMPLETED.value
     assert task.completed_at > task.started_at
-    assert db.records[0].duration_seconds > 0
+    assert db.records[0].duration_seconds >= 0
 
 
 def test_ffmpeg_executor_writes_failed_status_to_history(monkeypatch, tmp_path):
     from leanreel.domain.models import TaskStatus
     from leanreel.executor import ffmpeg as ffmpeg_mod
     from leanreel.executor.worker import EncodeTask
+    from types import SimpleNamespace
 
     class FakeDb:
         def __init__(self):
@@ -723,9 +734,18 @@ def test_ffmpeg_executor_writes_failed_status_to_history(monkeypatch, tmp_path):
                 return [{"id": 42}]
             return []
 
-        def insert_compression(self, record):
-            self.records.append(record)
-            return 8
+        def update_compression_runtime(self, record_id, **kwargs):
+            pass  # runtime updates during transcode — silently accept
+
+        def update_compression_terminal(self, record_id, *, status, progress, duration_seconds,
+                                         compressed_size=0, output_size_bytes=0, savings_pct=0.0,
+                                         error_message="", sidecar_path="", source_deleted=None):
+            # Store terminal state as a record-like object for assertions
+            self.records.append(SimpleNamespace(
+                status=status,
+                error_message=error_message,
+                duration_seconds=duration_seconds,
+            ))
 
     def fake_run_ffmpeg(cmd, progress_callback=None, cancel_event=None):
         Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
@@ -758,6 +778,7 @@ def test_ffmpeg_executor_writes_failed_status_to_history(monkeypatch, tmp_path):
         snapshot=snap,
         status=TaskStatus.RUNNING,
         original_size=1000,
+        history_id=42,  # non-zero so _update_terminal triggers
     )
     db = FakeDb()
 

@@ -242,7 +242,7 @@ class Database(LibraryStore):
         ]
         placeholders = ",".join("?" * len(cols))
         self.execute(
-            f"INSERT INTO compression_history ({','.join(cols)}) VALUES ({placeholders})",
+            f"INSERT INTO compression_history ({','.join(cols)}, updated_at) VALUES ({placeholders}, datetime('now'))",
             values,
         )
         return self.last_insert_id

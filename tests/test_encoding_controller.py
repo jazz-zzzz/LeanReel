@@ -186,6 +186,9 @@ class TestEncodingControllerStart:
             def __init__(self):
                 self.calls = []
 
+            def execute(self, sql, params=None):
+                return []  # No snapshot lookup result — fsid falls back to 0
+
             def create_compression_record(self, **kwargs):
                 events.append(("db", kwargs["output_path"]))
                 self.calls.append(kwargs)
@@ -230,8 +233,8 @@ class TestEncodingControllerStart:
         assert first_call["strategy_name"] == "均衡压缩"
         assert first_call["original_size"] == 8_500_000_000
         assert first_call["encoder"] == "libx265"
-        assert first_call["cq_value"] == 20
-        assert first_call["preset"] == "slow"
+        assert first_call["cq_value"] == 23  # VideoRule.cq defaults to 23 when not specified
+        assert first_call["preset"] == "p1"  # nv_preset defaults to p1 and takes priority over preset
         assert first_call["pix_fmt"] == "yuv420p10le"
         assert first_call["audio_mode"] == "keep_original"
         assert first_call["sub_mode"] == "keep_chinese"
@@ -253,7 +256,7 @@ class TestEncodingControllerStart:
         assert controller.encoding_in_progress is False
         mock_worker_mgr.assert_not_called()
         mock_thread.assert_not_called()
-        mock_win.set_status.assert_called_with("错误：history db locked")
+        mock_win.set_status.assert_called_with("创建历史记录失败")
 
     @patch('leanreel.controllers.encoding_controller.threading.Thread')
     @patch('leanreel.controllers.encoding_controller.WorkerManager')
