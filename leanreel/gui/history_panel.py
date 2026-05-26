@@ -64,6 +64,12 @@ def _format_duration(seconds):
     return f"{h}h {m}m"
 
 
+def _normalize_time(t: str) -> str:
+    if not t:
+        return ""
+    return t.replace("T", " ")[:19]
+
+
 def _encode_label(encoder: str) -> str:
     return _ENCODER_STATUS.get(encoder, encoder)
 
@@ -132,8 +138,8 @@ class HistoryTableModel(QAbstractTableModel):
             9: lambda r: _encode_label(r.get("encoder", "")),
             10: lambda r: str(r.get("cq_value", "")) if r.get("cq_value") else "—",
             11: lambda r: _format_duration(r.get("duration_seconds", 0)),
-            12: lambda r: r.get("started_at", "") or r.get("created_at", ""),
-            13: lambda r: r.get("completed_at", "") or r.get("created_at", ""),
+            12: lambda r: _normalize_time(r.get("started_at", "") or r.get("created_at", "")),
+            13: lambda r: _normalize_time(r.get("completed_at", "") or r.get("created_at", "")),
             14: lambda r: "是" if r.get("source_deleted") else "否",
             15: lambda r: r.get("error_message", "") or r.get("stage", "") or r.get("output_path", ""),
         }
