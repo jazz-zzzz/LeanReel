@@ -9,3 +9,36 @@ build/
 venv/
 *.egg
 .worktrees
+
+# Local Codex/superpowers state
+.superpowers/
+
+# Urusei local subtitle/NFO working artifacts
+.urusei_nfo_archive/
+.urusei_plex_nfo_cache.json
+.urusei_subtitle_work/
+Urusei_CN_acgrip.zip
+Urusei_JA_kitsunekko_part1.zip
+kitsunekko_check/
+urusei_plex_nfo_after_direct_rewrite.csv
+urusei_plex_nfo_preprocess.csv
+urusei_plex_nfo_preview.csv
+urusei_plex_nfo_review.html
+urusei_plex_nfo_review_only.csv
+urusei_subtitle_report.csv
+
+# Local generated notes/scripts from subtitle metadata cleanup
+docs/superpowers/plans/2026-05-23-urusei-bilingual-subtitle-quality.md
+docs/superpowers/plans/2026-05-26-unified-transcode-history.md
+docs/superpowers/specs/2026-05-26-unified-transcode-history-design.md
+docs/urusei_subtitle_source_audit.md
+scripts/benchmark_io_strategies.py
+scripts/build_urusei_review_page.py
+scripts/restore_history_from_sidecars.py
+scripts/urusei_plex_nfo.py
+scripts/urusei_subtitles.py
+tests/test_theme.py
+tests/test_urusei_subtitles.py
+
+# Downloaded reference material
+视频压缩大测试结果报告：CPU编码、显卡编码、H264、H265、AV1 - 知乎.pdf

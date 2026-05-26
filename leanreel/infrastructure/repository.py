@@ -88,7 +88,7 @@ class SnapshotRepository(SnapshotStore):
                        duration_seconds=excluded.duration_seconds, bitrate_bps=excluded.bitrate_bps,
                        file_mtime=excluded.file_mtime, probe_ok=excluded.probe_ok,
                        probe_error=excluded.probe_error,
-                       scanned_at=datetime('now')""",
+                       scanned_at=datetime('now','localtime')""",
                     [
                         snap.library_folder_id,
                         snap.relative_path,

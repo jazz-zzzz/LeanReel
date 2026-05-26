@@ -4,6 +4,7 @@
 """
 import json
 import pytest
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from leanreel.infrastructure.database import Database
@@ -134,6 +135,28 @@ def test_load_all_returns_empty_list_for_folder_with_no_snapshots(repo, folder_i
     results = repo.load_all(folder_id)
     assert results == []
     assert isinstance(results, list)
+
+
+def test_save_records_scanned_at_in_local_time(repo, db, folder_id):
+    """scanned_at 应使用本机本地时间，和转换历史的 localtime 语义保持一致。"""
+    repo.save(make_snap(folder_id, rel_path="local-time.mkv", file_name="local-time.mkv"))
+
+    before = datetime.now() - timedelta(seconds=1)
+    repo.save(make_snap(
+        folder_id,
+        rel_path="local-time.mkv",
+        file_name="local-time.mkv",
+        size_bytes=9_000_000_000,
+    ))
+    after = datetime.now() + timedelta(seconds=1)
+
+    row = db.execute(
+        "SELECT scanned_at FROM file_snapshot WHERE library_folder_id=? AND relative_path=?",
+        [folder_id, "local-time.mkv"],
+    )[0]
+    scanned_at = datetime.strptime(row["scanned_at"], "%Y-%m-%d %H:%M:%S")
+
+    assert before <= scanned_at <= after
 
 
 # ── get_cached ──
