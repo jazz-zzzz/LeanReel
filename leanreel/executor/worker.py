@@ -27,6 +27,8 @@ class EncodeTask:
     completed_at: float = 0.0
     original_size: int = 0
     compressed_size: int = 0
+    history_id: int = 0
+    batch_id: str = ""
 
     # New fields for pipeline support
     pipeline_plan: object | None = None   # PipelinePlan | None

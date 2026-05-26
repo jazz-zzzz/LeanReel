@@ -4,7 +4,7 @@ import os
 import shutil
 import tempfile
 import threading
-import time
+import time as _time
 from pathlib import Path
 from typing import Optional
 
@@ -39,75 +39,62 @@ def _delete_source_file(filepath: str):
         pass
 
 
-def _lookup_file_snapshot_id(db, snapshot) -> int:
-    fsid = getattr(snapshot, "id", 0) or 0
-    if fsid:
-        return fsid
-    rows = db.execute(
-        "SELECT id FROM file_snapshot WHERE library_folder_id=? AND relative_path=?",
-        [snapshot.library_folder_id, snapshot.relative_path],
-    )
-    fsid = rows[0]["id"] if rows else 0
-    import sys
-    print(
-        f"[LeanReel audit] fsid_lookup: folder={snapshot.library_folder_id} "
-        f"rel={snapshot.relative_path} fsid={fsid}",
-        file=sys.stderr,
-    )
-    return fsid
+def _task_duration_seconds(task) -> int:
+    if getattr(task, "started_at", 0) and getattr(task, "completed_at", 0):
+        return max(0, int(task.completed_at - task.started_at))
+    if getattr(task, "started_at", 0):
+        return max(0, int(_time.time() - task.started_at))
+    return 0
 
 
-def _write_audit_history(task) -> tuple[int, object | None]:
-    from leanreel.services.audit import build_audit, write_sidecar
-    import json as _json
-    from leanreel.domain.models import CompressionRecord
-
-    cmd = getattr(task, "_ffmpeg_command", [])
-    cq_info = getattr(task, "_adaptive_cq", {})
-    audit = build_audit(
-        task=task,
-        ffmpeg_command=cmd,
-        adaptive_cq_original=cq_info.get("original", 0),
-        adaptive_cq_adjusted=cq_info.get("adjusted", 0),
-        adaptive_cq_reason=cq_info.get("reason", ""),
-    )
-    sidecar_path = write_sidecar(audit)
-
+def _update_runtime(task, *, status: str, progress: float, stage: str) -> None:
     db = getattr(task, "_db", None)
-    if db is None:
-        import sys
-        print("[LeanReel audit] db is None — skipping DB write", file=sys.stderr)
-        return 0, audit
-    if not sidecar_path:
-        return 0, audit
+    history_id = getattr(task, "history_id", 0)
+    if db is None or not history_id or not hasattr(db, "update_compression_runtime"):
+        return
+    try:
+        db.update_compression_runtime(
+            history_id,
+            status=status,
+            progress=progress,
+            stage=stage,
+            duration_seconds=_task_duration_seconds(task),
+        )
+    except Exception:
+        pass
 
-    fsid = _lookup_file_snapshot_id(db, task.snapshot)
-    rec = CompressionRecord(
-        file_snapshot_id=fsid,
-        strategy_name=audit.strategy_name,
-        original_size=audit.source_size_bytes,
-        compressed_size=audit.output_size_bytes,
-        status=audit.status,
-        duration_seconds=int(audit.duration_seconds),
-        error_message=getattr(task, "error_message", ""),
-        output_path=audit.output_path,
-        output_size_bytes=audit.output_size_bytes,
-        savings_pct=audit.savings_pct,
-        encoder=audit.encoder,
-        cq_value=audit.cq or audit.crf,
-        preset=audit.preset,
-        pix_fmt=audit.pix_fmt,
-        audio_mode=audit.audio_mode,
-        sub_mode=audit.sub_mode,
-        ffmpeg_command=_json.dumps(audit.ffmpeg_command),
-        sidecar_path=sidecar_path,
-        leanreel_version=audit.leanreel_version,
-    )
-    db_id = db.insert_compression(rec)
-    audit.db_record_id = db_id
-    if db_id:
-        write_sidecar(audit)
-    return db_id, rec
+
+def _update_terminal(
+    task,
+    *,
+    status: str,
+    progress: float,
+    error_message: str = "",
+    sidecar_path: str = "",
+    source_deleted: int | None = None,
+) -> None:
+    db = getattr(task, "_db", None)
+    history_id = getattr(task, "history_id", 0)
+    if db is None or not history_id or not hasattr(db, "update_compression_terminal"):
+        return
+    try:
+        original = max(int(getattr(task, "original_size", 0) or 0), 1)
+        compressed = int(getattr(task, "compressed_size", 0) or 0)
+        savings_pct = round((original - compressed) / original * 100, 1) if compressed else 0.0
+        db.update_compression_terminal(
+            history_id,
+            status=status,
+            progress=progress,
+            duration_seconds=_task_duration_seconds(task),
+            compressed_size=compressed,
+            output_size_bytes=compressed,
+            savings_pct=savings_pct,
+            error_message=error_message,
+            sidecar_path=sidecar_path,
+            source_deleted=source_deleted,
+        )
+    except Exception:
+        pass
 
 
 class CancelledError(Exception):
@@ -148,7 +135,6 @@ class FFmpegExecutor:
     def encode(self, task) -> None:
         if task.snapshot is None or task.strategy is None:
             raise ValueError("EncodeTask requires snapshot and strategy")
-        task.started_at = task.started_at or time.time()
 
         plan = build_pipeline(task)
         task.pipeline_plan = plan
@@ -185,6 +171,14 @@ class FFmpegExecutor:
                 task.current_stage_index = i
                 task.progress = plan.compute_overall_progress()
                 self._emit_progress(task)
+
+                stage_label = stage.slot.display_name
+                _update_runtime(
+                    task,
+                    status=TaskStatus.RUNNING.value,
+                    progress=float(task.progress),
+                    stage=stage_label,
+                )
 
                 slot_id = stage.slot.slot_id
 
@@ -253,8 +247,9 @@ class FFmpegExecutor:
                     estimated_output = int(input_size * (1 - savings_mid)) if input_size > 0 else 0
 
                     # 混合进度源：优先 time= 解析，回退到输出文件大小
+                    last_history_update = 0.0
                     def _transcode_progress(line: str):
-                        nonlocal duration
+                        nonlocal duration, last_history_update
                         if "time=" in line and duration > 0:
                             try:
                                 time_str = line.split("time=")[1].split()[0]
@@ -276,6 +271,15 @@ class FFmpegExecutor:
                                 pass
                         task.progress = plan.compute_overall_progress()
                         self._emit_progress(task)
+                        now = _time.time()
+                        if now - last_history_update >= 1.0:
+                            last_history_update = now
+                            _update_runtime(
+                                task,
+                                status=TaskStatus.RUNNING.value,
+                                progress=float(task.progress),
+                                stage="转码",
+                            )
 
                     exit_code, stderr_tail = run_ffmpeg(
                         cmd,
@@ -324,6 +328,15 @@ class FFmpegExecutor:
                             s.detail = "跳过（输出 ≥ 原体积）"
                             break
                 task._output_discarded = True
+                task.status = TaskStatus.DISCARDED
+                task.error_message = "输出体积不小于源文件，已丢弃"
+                task.completed_at = task.completed_at or _time.time()
+                _update_terminal(
+                    task,
+                    status=TaskStatus.DISCARDED.value,
+                    progress=100.0,
+                    error_message=task.error_message,
+                )
             else:
                 # 原子提交：将暂存文件移动到最终位置
                 final_output.parent.mkdir(parents=True, exist_ok=True)
@@ -331,13 +344,76 @@ class FFmpegExecutor:
 
             # ── 审计双写（仅当输出未被丢弃） ──
             if not getattr(task, "_output_discarded", False):
-                task.status = TaskStatus.COMPLETED
-                task.completed_at = task.completed_at or time.time()
                 try:
-                    db_id, rec = _write_audit_history(task)
+                    from leanreel.services.audit import build_audit, write_sidecar
+                    cmd = getattr(task, "_ffmpeg_command", [])
+                    cq_info = getattr(task, "_adaptive_cq", {})
+                    audit = build_audit(
+                        task=task,
+                        ffmpeg_command=cmd,
+                        adaptive_cq_original=cq_info.get("original", 0),
+                        adaptive_cq_adjusted=cq_info.get("adjusted", 0),
+                        adaptive_cq_reason=cq_info.get("reason", ""),
+                    )
+                    sidecar_path = write_sidecar(audit)
+
+                    db = getattr(task, "_db", None)
+                    if db is None:
+                        import sys
+                        print("[LeanReel audit] db is None — skipping DB write", file=sys.stderr)
+                    if db is not None and sidecar_path:
+                        import json as _json
+                        from leanreel.domain.models import CompressionRecord
+                        fsid = getattr(task.snapshot, "id", 0) or 0
+                        if not fsid:
+                            rows = db.execute(
+                                "SELECT id FROM file_snapshot WHERE library_folder_id=? AND relative_path=?",
+                                [task.snapshot.library_folder_id, task.snapshot.relative_path],
+                            )
+                            fsid = rows[0]["id"] if rows else 0
+                            import sys
+                            print(f"[LeanReel audit] fsid_lookup: folder={task.snapshot.library_folder_id} rel={task.snapshot.relative_path} fsid={fsid}", file=sys.stderr)
+                        rec = CompressionRecord(
+                            file_snapshot_id=fsid,
+                            strategy_name=audit.strategy_name,
+                            original_size=audit.source_size_bytes,
+                            compressed_size=audit.output_size_bytes,
+                            status=audit.status,
+                            duration_seconds=int(audit.duration_seconds),
+                            error_message=getattr(task, "error_message", ""),
+                            output_path=audit.output_path,
+                            output_size_bytes=audit.output_size_bytes,
+                            savings_pct=audit.savings_pct,
+                            encoder=audit.encoder,
+                            cq_value=audit.cq or audit.crf,
+                            preset=audit.preset,
+                            pix_fmt=audit.pix_fmt,
+                            audio_mode=audit.audio_mode,
+                            sub_mode=audit.sub_mode,
+                            ffmpeg_command=_json.dumps(audit.ffmpeg_command),
+                            sidecar_path=sidecar_path,
+                            leanreel_version=audit.leanreel_version,
+                        )
+                        try:
+                            db_id = db.insert_compression(rec)
+                            audit.db_record_id = db_id
+                            if db_id:
+                                write_sidecar(audit)
+                        except Exception:
+                            import sys, traceback
+                            print(f"[LeanReel audit] DB insert failed: fsid={fsid}", file=sys.stderr)
+                            traceback.print_exc()
+
+                        _update_terminal(
+                            task,
+                            status=TaskStatus.COMPLETED.value,
+                            progress=100.0,
+                            sidecar_path=sidecar_path,
+                        )
 
                     if getattr(task, "_delete_source", False) and 0 < task.compressed_size < task.original_size:
                         _delete_source_file(task.input_path)
+                        _update_terminal(task, status=TaskStatus.COMPLETED.value, progress=100.0, source_deleted=1)
                         rec.source_deleted = 1
                         try:
                             db.execute(
@@ -354,6 +430,13 @@ class FFmpegExecutor:
             current_idx = task.current_stage_index
             if current_idx >= 0:
                 plan.skip_remaining(current_idx)
+            task.completed_at = task.completed_at or _time.time()
+            _update_terminal(
+                task,
+                status=TaskStatus.CANCELLED.value,
+                progress=max(0.0, min(99.0, float(task.progress or 0))),
+                error_message="用户取消",
+            )
             task.status = TaskStatus.CANCELLED
             task.progress = plan.compute_overall_progress()
             self._emit_progress(task)
@@ -367,12 +450,13 @@ class FFmpegExecutor:
                 plan.skip_remaining(current_idx + 1)
             task.status = TaskStatus.FAILED
             task.error_message = str(e)
-            task.completed_at = task.completed_at or time.time()
-            try:
-                _write_audit_history(task)
-            except Exception:
-                import traceback
-                traceback.print_exc()
+            task.completed_at = task.completed_at or _time.time()
+            _update_terminal(
+                task,
+                status=TaskStatus.FAILED.value,
+                progress=max(0.0, min(99.0, float(task.progress or 0))),
+                error_message=str(e),
+            )
             task.progress = plan.compute_overall_progress()
             self._emit_progress(task)
             if staging_output.exists():
