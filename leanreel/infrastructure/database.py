@@ -128,7 +128,7 @@ class Database(LibraryStore):
             ("stage", "TEXT DEFAULT ''"),
             ("started_at", "TEXT DEFAULT ''"),
             ("completed_at", "TEXT DEFAULT ''"),
-            ("updated_at", "TEXT DEFAULT (datetime('now'))"),
+            ("updated_at", "TEXT DEFAULT ''"),
             ("batch_id", "TEXT DEFAULT ''"),
         ]
         for col_name, col_def in ch_migrations:
