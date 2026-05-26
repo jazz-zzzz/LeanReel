@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QTableView,
+    QApplication, QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QTableView,
     QHeaderView, QLabel, QHBoxLayout, QComboBox, QStackedWidget,
     QTreeWidget, QTreeWidgetItem, QPushButton, QProgressBar, QToolTip
 )
@@ -106,6 +106,7 @@ class FileListPanel(QWidget):
         self._store = None
         self._flat_adapter = None
         self._tree_adapter = None
+        self._last_check_anchor = None
         self.setup_ui()
 
     @staticmethod
@@ -340,9 +341,25 @@ class FileListPanel(QWidget):
         flags = self.table.model().flags(index)
         if not (flags & Qt.ItemIsEnabled) or not (flags & Qt.ItemIsUserCheckable):
             return False
-        current = self.table.model().data(index, Qt.CheckStateRole)
-        next_state = Qt.Unchecked if current == Qt.Checked else Qt.Checked
-        self.table.model().setData(index, next_state, Qt.CheckStateRole)
+
+        modifiers = QApplication.keyboardModifiers()
+        if modifiers & Qt.ShiftModifier and self._last_check_anchor is not None:
+            anchor = self._last_check_anchor
+            clicked = index.row()
+            start, end = (anchor, clicked) if anchor < clicked else (clicked, anchor)
+            anchor_state = self.table.model().data(self.table.model().index(anchor, 0), Qt.CheckStateRole)
+            next_state = Qt.Unchecked if anchor_state == Qt.Checked else Qt.Checked
+            for row in range(start, end + 1):
+                ri = self.table.model().index(row, 0)
+                rflags = self.table.model().flags(ri)
+                if (rflags & Qt.ItemIsEnabled) and (rflags & Qt.ItemIsUserCheckable):
+                    self.table.model().setData(ri, next_state, Qt.CheckStateRole)
+        else:
+            current = self.table.model().data(index, Qt.CheckStateRole)
+            next_state = Qt.Unchecked if current == Qt.Checked else Qt.Checked
+            self.table.model().setData(index, next_state, Qt.CheckStateRole)
+            self._last_check_anchor = index.row()
+
         self._apply_filter()
         return True
 
