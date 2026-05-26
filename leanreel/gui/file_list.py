@@ -107,6 +107,7 @@ class FileListPanel(QWidget):
         self._flat_adapter = None
         self._tree_adapter = None
         self._last_check_anchor = None
+        self._last_tree_check_anchor = None
         self.setup_ui()
 
     @staticmethod
@@ -376,6 +377,17 @@ class FileListPanel(QWidget):
         QToolTip.showText(self.table.viewport().mapToGlobal(pos), reason, self.table)
         return True
 
+    def _tree_leaf_items(self) -> list:
+        """返回树中所有叶子节点（文件）的扁平列表。"""
+        leaves = []
+        for i in range(self.tree.topLevelItemCount()):
+            folder = self.tree.topLevelItem(i)
+            for j in range(folder.childCount()):
+                child = folder.child(j)
+                if child.childCount() == 0:
+                    leaves.append(child)
+        return leaves
+
     def _toggle_tree_check_at(self, pos) -> bool:
         if self._store is None:
             return False
@@ -385,10 +397,34 @@ class FileListPanel(QWidget):
         flags = item.flags()
         if not (flags & Qt.ItemIsEnabled) or not (flags & Qt.ItemIsUserCheckable):
             return False
-        key = self._coerce_key(item.data(0, Qt.UserRole))
-        if key is None:
-            return False
-        self._store.set_checked(key, item.checkState(0) != Qt.Checked)
+
+        leaves = self._tree_leaf_items()
+        modifiers = QApplication.keyboardModifiers()
+        if modifiers & Qt.ShiftModifier and self._last_tree_check_anchor is not None:
+            anchor = self._last_tree_check_anchor
+            try:
+                clicked_idx = leaves.index(item)
+            except ValueError:
+                clicked_idx = -1
+            if clicked_idx >= 0 and anchor < len(leaves):
+                start, end = (anchor, clicked_idx) if anchor < clicked_idx else (clicked_idx, anchor)
+                anchor_item = leaves[anchor]
+                next_checked = anchor_item.checkState(0) != Qt.Checked
+                for idx in range(start, end + 1):
+                    leaf = leaves[idx]
+                    key = self._coerce_key(leaf.data(0, Qt.UserRole))
+                    if key is not None:
+                        self._store.set_checked(key, next_checked)
+        else:
+            key = self._coerce_key(item.data(0, Qt.UserRole))
+            if key is None:
+                return False
+            self._store.set_checked(key, item.checkState(0) != Qt.Checked)
+            try:
+                self._last_tree_check_anchor = leaves.index(item)
+            except ValueError:
+                pass
+
         self._apply_filter()
         return True
 
