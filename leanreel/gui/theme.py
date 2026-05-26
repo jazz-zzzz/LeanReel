@@ -361,7 +361,7 @@ QToolButton:hover {{
 
 def apply_theme(app: QApplication):
     from leanreel.executor.resources import bundled_resource_path
-    check_icon = bundled_resource_path("icons", "checkmark.svg").resolve().as_uri()
+    check_icon = bundled_resource_path("icons", "checkmark.svg").resolve().as_posix()
     app.setStyle("Fusion")
     app.setStyleSheet(QSS.replace("{CHECK_ICON}", check_icon))
 
