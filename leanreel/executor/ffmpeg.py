@@ -273,6 +273,9 @@ class FFmpegExecutor:
                     sidecar_path = write_sidecar(audit)
 
                     db = getattr(task, "_db", None)
+                    if db is None:
+                        import sys
+                        print("[LeanReel audit] db is None — skipping DB write", file=sys.stderr)
                     if db is not None and sidecar_path:
                         import json as _json
                         from leanreel.domain.models import CompressionRecord
@@ -283,6 +286,8 @@ class FFmpegExecutor:
                                 [task.snapshot.library_folder_id, task.snapshot.relative_path],
                             )
                             fsid = rows[0]["id"] if rows else 0
+                            import sys
+                            print(f"[LeanReel audit] fsid_lookup: folder={task.snapshot.library_folder_id} rel={task.snapshot.relative_path} fsid={fsid}", file=sys.stderr)
                         rec = CompressionRecord(
                             file_snapshot_id=fsid,
                             strategy_name=audit.strategy_name,
@@ -310,7 +315,8 @@ class FFmpegExecutor:
                             if db_id:
                                 write_sidecar(audit)
                         except Exception:
-                            import traceback
+                            import sys, traceback
+                            print(f"[LeanReel audit] DB insert failed: fsid={fsid}", file=sys.stderr)
                             traceback.print_exc()
 
                     if getattr(task, "_delete_source", False) and 0 < task.compressed_size < task.original_size:
