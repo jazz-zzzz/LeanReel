@@ -272,6 +272,7 @@ class FileListPanel(QWidget):
         # 文件表格 (QTableView + FileTableModel)
         self.table = QTableView()
         self.table.setSelectionBehavior(QTableView.SelectRows)
+        self.table.setSelectionMode(QTableView.ExtendedSelection)
         self.table.setEditTriggers(QTableView.NoEditTriggers)
         self.table.setSortingEnabled(False)
         self.table.setAutoScroll(False)
