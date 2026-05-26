@@ -58,7 +58,7 @@ class Database(LibraryStore):
         CREATE TABLE IF NOT EXISTS library (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
-            created_at TEXT DEFAULT (datetime('now'))
+            created_at TEXT DEFAULT (datetime('now','localtime'))
         );
         CREATE TABLE IF NOT EXISTS library_folder (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,7 +83,7 @@ class Database(LibraryStore):
             file_mtime REAL DEFAULT 0,
             probe_ok INTEGER DEFAULT 0,
             probe_error TEXT DEFAULT '',
-            scanned_at TEXT DEFAULT (datetime('now')),
+            scanned_at TEXT DEFAULT (datetime('now','localtime')),
             UNIQUE(library_folder_id, relative_path)
         );
         CREATE TABLE IF NOT EXISTS compression_history (
@@ -95,7 +95,7 @@ class Database(LibraryStore):
             status TEXT DEFAULT 'pending',
             duration_seconds INTEGER DEFAULT 0,
             error_message TEXT DEFAULT '',
-            created_at TEXT DEFAULT (datetime('now'))
+            created_at TEXT DEFAULT (datetime('now','localtime'))
         );
         """)
         self._migrate(conn)
@@ -242,7 +242,7 @@ class Database(LibraryStore):
         ]
         placeholders = ",".join("?" * len(cols))
         self.execute(
-            f"INSERT INTO compression_history ({','.join(cols)}, updated_at) VALUES ({placeholders}, datetime('now'))",
+            f"INSERT INTO compression_history ({','.join(cols)}, updated_at) VALUES ({placeholders}, datetime('now','localtime'))",
             values,
         )
         return self.last_insert_id
@@ -269,7 +269,7 @@ class Database(LibraryStore):
                 encoder, cq_value, preset, pix_fmt, audio_mode, sub_mode,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, 0, ?, 'pending', 0, '', ?, ?, ?, ?, ?, ?, datetime('now'))
+            VALUES (?, ?, ?, ?, 0, ?, 'pending', 0, '', ?, ?, ?, ?, ?, ?, datetime('now','localtime'))
         """, [
             file_snapshot_id, batch_id, strategy_name, original_size,
             output_path, encoder, cq_value, preset, pix_fmt, audio_mode, sub_mode,
@@ -291,8 +291,8 @@ class Database(LibraryStore):
                 progress = ?,
                 stage = ?,
                 duration_seconds = ?,
-                started_at = CASE WHEN started_at = '' THEN datetime('now') ELSE started_at END,
-                updated_at = datetime('now')
+                started_at = CASE WHEN started_at = '' THEN datetime('now','localtime') ELSE started_at END,
+                updated_at = datetime('now','localtime')
             WHERE id = ?
         """, [status, float(progress), stage, int(duration_seconds), record_id])
 
@@ -319,8 +319,8 @@ class Database(LibraryStore):
             "savings_pct = ?",
             "error_message = ?",
             "sidecar_path = ?",
-            "completed_at = datetime('now')",
-            "updated_at = datetime('now')",
+            "completed_at = datetime('now','localtime')",
+            "updated_at = datetime('now','localtime')",
         ]
         values: list = [
             status, float(progress), int(duration_seconds), int(compressed_size),
