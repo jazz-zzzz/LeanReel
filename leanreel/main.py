@@ -116,7 +116,7 @@ class Application:
         def _toggle_history():
             if self.win.stack.currentIndex() == 0:
                 self.win.show_history()
-                self.history_ctrl.load()
+                self.history_ctrl.refresh()
             else:
                 self.win.show_file_list()
 
@@ -200,6 +200,10 @@ class Application:
         )
         self.notifier.task_progress.connect(self.encoding_ctrl.on_task_updated)
         self.notifier.encoding_done.connect(self.encoding_ctrl.on_encoding_done)
+
+        # 历史面板：编码完成后自动刷新 + 手动刷新按钮
+        self.notifier.encoding_done.connect(lambda: self.history_ctrl.refresh())
+        self.history_panel.refresh_requested.connect(lambda: self.history_ctrl.refresh())
 
         # 注入 Store 到 FileListPanel（新数据路径）
         self.file_panel.set_store(self.store)

@@ -16,6 +16,8 @@ from PySide6.QtGui import QColor
 
 from leanreel.gui.utils import _format_bytes
 
+STATUS_ROLE = Qt.UserRole + 1
+
 _HEADERS = [
     "源文件名", "库", "文件夹", "源体积", "输出体积",
     "节省量", "节省率", "策略", "编码器", "CQ/CRF",
@@ -27,6 +29,18 @@ _ENCODER_STATUS = {
     "hevc_nvenc": "HEVC",
     "av1_nvenc": "AV1",
     "copy": "流复制",
+}
+
+_STATUS_LABELS = {
+    "completed": "成功",
+    "failed": "失败",
+    "cancelled": "已取消",
+}
+
+_STATUS_COLORS = {
+    "completed": QColor("#6b9955"),
+    "failed": QColor("#c4554a"),
+    "cancelled": QColor("#6b6560"),
 }
 
 
@@ -76,12 +90,11 @@ class HistoryTableModel(QAbstractTableModel):
             return self._display_text(row, col)
         if role == Qt.UserRole:
             return row.get("output_path", "")
+        if role == STATUS_ROLE:
+            return row.get("status", "")
         if role == Qt.ForegroundRole:
-            status = row.get("status", "")
-            if status == "failed":
-                return QColor("#c4554a")
-            if status == "cancelled":
-                return QColor("#6b6560")
+            if col == 12:
+                return _STATUS_COLORS.get(row.get("status", ""))
         if role == Qt.ToolTipRole:
             return row.get("error_message", "") or row.get("output_path", "")
         return None
@@ -102,7 +115,7 @@ class HistoryTableModel(QAbstractTableModel):
             9: lambda r: str(r.get("cq_value", "")) if r.get("cq_value") else "—",
             10: lambda r: _format_duration(r.get("duration_seconds", 0)),
             11: lambda r: r.get("created_at", ""),
-            12: lambda r: r.get("status", ""),
+            12: lambda r: _STATUS_LABELS.get(r.get("status", ""), r.get("status", "")),
             13: lambda r: "是" if r.get("source_deleted") else "否",
         }
         fn = field_map.get(col)
@@ -123,11 +136,12 @@ class StatusProxyModel(QSortFilterProxyModel):
             return True
         model = self.sourceModel()
         idx = model.index(source_row, 12)
-        return model.data(idx, Qt.DisplayRole) == self._status_filter
+        return model.data(idx, STATUS_ROLE) == self._status_filter
 
 
 class HistoryPanel(QWidget):
     back_requested = Signal()
+    refresh_requested = Signal()
 
     def __init__(self):
         super().__init__()
@@ -144,6 +158,11 @@ class HistoryPanel(QWidget):
         self.back_btn.setFixedWidth(140)
         self.back_btn.clicked.connect(self.back_requested.emit)
         top.addWidget(self.back_btn)
+
+        self.refresh_btn = QPushButton("刷新")
+        self.refresh_btn.setFixedWidth(60)
+        self.refresh_btn.clicked.connect(self.refresh_requested.emit)
+        top.addWidget(self.refresh_btn)
 
         top.addSpacing(16)
 
@@ -178,7 +197,7 @@ class HistoryPanel(QWidget):
         self.table.setEditTriggers(QTableView.NoEditTriggers)
         self.table.setSortingEnabled(True)
         self.table.setShowGrid(False)
-        self.table.setAlternatingRowColors(True)
+        self.table.setAlternatingRowColors(False)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.doubleClicked.connect(self._on_double_click)
 

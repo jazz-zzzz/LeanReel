@@ -1,4 +1,5 @@
 """SQLite 数据库操作 — 无 ORM，原生 SQL"""
+import json
 import sqlite3
 import threading
 from pathlib import Path
@@ -93,12 +94,19 @@ class Database(LibraryStore):
             original_size INTEGER DEFAULT 0,
             compressed_size INTEGER DEFAULT 0,
             status TEXT DEFAULT 'pending',
+            progress REAL DEFAULT 0,
+            stage TEXT DEFAULT '',
+            started_at TEXT DEFAULT '',
+            completed_at TEXT DEFAULT '',
+            updated_at TEXT DEFAULT (datetime('now')),
+            batch_id TEXT DEFAULT '',
             duration_seconds INTEGER DEFAULT 0,
             error_message TEXT DEFAULT '',
             created_at TEXT DEFAULT (datetime('now'))
         );
         """)
         self._migrate(conn)
+        conn.commit()
 
     def _migrate(self, conn: sqlite3.Connection):
         existing = {row[1] for row in conn.execute("PRAGMA table_info(file_snapshot)")}
@@ -124,10 +132,17 @@ class Database(LibraryStore):
             ("sidecar_path", "TEXT DEFAULT ''"),
             ("leanreel_version", "TEXT DEFAULT ''"),
             ("source_deleted", "INTEGER DEFAULT 0"),
+            ("progress", "REAL DEFAULT 0"),
+            ("stage", "TEXT DEFAULT ''"),
+            ("started_at", "TEXT DEFAULT ''"),
+            ("completed_at", "TEXT DEFAULT ''"),
+            ("updated_at", "TEXT DEFAULT ''"),
+            ("batch_id", "TEXT DEFAULT ''"),
         ]
         for col_name, col_def in ch_migrations:
             if col_name not in existing_ch:
                 conn.execute(f"ALTER TABLE compression_history ADD COLUMN {col_name} {col_def}")
+        conn.execute("UPDATE compression_history SET updated_at = COALESCE(NULLIF(updated_at, ''), created_at, datetime('now'))")
 
     def execute(self, sql: str, params=None):
         conn = self._pool.get()
@@ -206,6 +221,193 @@ class Database(LibraryStore):
     def delete_folder(self, folder_id: int):
         self.execute("DELETE FROM library_folder WHERE id=?", [folder_id])
 
+    def save(self, snap: FileSnapshot) -> int:
+        """Insert or update a file snapshot and return its database id."""
+        self.execute(
+            """INSERT INTO file_snapshot
+               (library_folder_id, relative_path, file_name, size_bytes,
+                video_codec, video_width, video_height, hdr_type,
+                audio_tracks, subtitle_tracks, duration_seconds, bitrate_bps,
+                file_mtime, probe_ok, probe_error)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(library_folder_id, relative_path) DO UPDATE SET
+               file_name=excluded.file_name,
+               size_bytes=excluded.size_bytes,
+               video_codec=excluded.video_codec,
+               video_width=excluded.video_width,
+               video_height=excluded.video_height,
+               hdr_type=excluded.hdr_type,
+               audio_tracks=excluded.audio_tracks,
+               subtitle_tracks=excluded.subtitle_tracks,
+               duration_seconds=excluded.duration_seconds,
+               bitrate_bps=excluded.bitrate_bps,
+               file_mtime=excluded.file_mtime,
+               probe_ok=excluded.probe_ok,
+               probe_error=excluded.probe_error,
+               scanned_at=datetime('now')""",
+            [
+                snap.library_folder_id,
+                snap.relative_path,
+                snap.file_name,
+                snap.size_bytes,
+                snap.video_codec,
+                snap.video_width,
+                snap.video_height,
+                snap.hdr_type.value,
+                json.dumps([vars(track) for track in snap.audio_tracks], ensure_ascii=False),
+                json.dumps([vars(track) for track in snap.subtitle_tracks], ensure_ascii=False),
+                snap.duration_seconds,
+                snap.bitrate_bps,
+                snap.file_mtime,
+                1 if snap.probe_ok else 0,
+                snap.probe_error,
+            ],
+        )
+        rows = self.execute(
+            "SELECT id FROM file_snapshot WHERE library_folder_id=? AND relative_path=?",
+            [snap.library_folder_id, snap.relative_path],
+        )
+        return int(rows[0]["id"]) if rows else self.last_insert_id
+
+    def create_compression_record(
+        self,
+        *,
+        file_snapshot_id: int,
+        batch_id: str,
+        strategy_name: str,
+        original_size: int,
+        output_path: str,
+        encoder: str = "",
+        cq_value: int = 0,
+        preset: str = "",
+        pix_fmt: str = "",
+        audio_mode: str = "",
+        sub_mode: str = "",
+    ) -> int:
+        self.execute("""
+            INSERT INTO compression_history (
+                file_snapshot_id, batch_id, strategy_name, original_size,
+                compressed_size, output_path, status, progress, stage,
+                encoder, cq_value, preset, pix_fmt, audio_mode, sub_mode,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, 0, ?, 'pending', 0, '', ?, ?, ?, ?, ?, ?, datetime('now'))
+        """, [
+            file_snapshot_id, batch_id, strategy_name, original_size,
+            output_path, encoder, cq_value, preset, pix_fmt, audio_mode, sub_mode,
+        ])
+        return self.last_insert_id
+
+    def update_compression_runtime(
+        self,
+        record_id: int,
+        *,
+        status: str,
+        progress: float,
+        stage: str,
+        duration_seconds: int,
+    ) -> None:
+        self.execute("""
+            UPDATE compression_history
+            SET status = ?,
+                progress = ?,
+                stage = ?,
+                duration_seconds = ?,
+                started_at = CASE WHEN started_at = '' THEN datetime('now') ELSE started_at END,
+                updated_at = datetime('now')
+            WHERE id = ?
+        """, [status, float(progress), stage, int(duration_seconds), record_id])
+
+    def update_compression_terminal(
+        self,
+        record_id: int,
+        *,
+        status: str,
+        progress: float,
+        duration_seconds: int,
+        compressed_size: int = 0,
+        output_size_bytes: int = 0,
+        savings_pct: float = 0.0,
+        error_message: str = "",
+        sidecar_path: str = "",
+        source_deleted: int | None = None,
+    ) -> None:
+        assignments = [
+            "status = ?",
+            "progress = ?",
+            "duration_seconds = ?",
+            "compressed_size = ?",
+            "output_size_bytes = ?",
+            "savings_pct = ?",
+            "error_message = ?",
+            "sidecar_path = ?",
+            "started_at = CASE WHEN started_at = '' THEN datetime('now') ELSE started_at END",
+            "completed_at = datetime('now')",
+            "updated_at = datetime('now')",
+        ]
+        values: list[object] = [
+            status,
+            float(progress),
+            int(duration_seconds),
+            int(compressed_size),
+            int(output_size_bytes),
+            float(savings_pct),
+            error_message,
+            sidecar_path,
+        ]
+        if source_deleted is not None:
+            assignments.append("source_deleted = ?")
+            values.append(int(source_deleted))
+        values.append(record_id)
+        self.execute(
+            f"UPDATE compression_history SET {', '.join(assignments)} WHERE id = ?",
+            values,
+        )
+
+    def get_compression_record(self, record_id: int) -> dict:
+        rows = self.execute("SELECT * FROM compression_history WHERE id = ?", [record_id])
+        return rows[0] if rows else {}
+
+    def get_batch_progress(self, batch_id: str) -> dict:
+        rows = self.execute(
+            "SELECT status, progress FROM compression_history WHERE batch_id = ?",
+            [batch_id],
+        )
+        total = len(rows)
+        completed = sum(1 for r in rows if r["status"] == TaskStatus.COMPLETED.value)
+        failed = sum(1 for r in rows if r["status"] == TaskStatus.FAILED.value)
+        cancelled = sum(1 for r in rows if r["status"] == TaskStatus.CANCELLED.value)
+        discarded = sum(1 for r in rows if r["status"] == TaskStatus.DISCARDED.value)
+        skipped = sum(1 for r in rows if r["status"] == TaskStatus.SKIPPED.value)
+        pending = sum(1 for r in rows if r["status"] == TaskStatus.PENDING.value)
+        running = sum(1 for r in rows if r["status"] == TaskStatus.RUNNING.value)
+        terminal_statuses = {
+            TaskStatus.COMPLETED.value,
+            TaskStatus.FAILED.value,
+            TaskStatus.CANCELLED.value,
+            TaskStatus.DISCARDED.value,
+            TaskStatus.SKIPPED.value,
+        }
+        contribution = 0.0
+        for row in rows:
+            if row["status"] in terminal_statuses:
+                contribution += 100.0
+                continue
+            progress = max(0.0, min(100.0, float(row.get("progress") or 0)))
+            contribution += progress
+        percentage = contribution / total if total else 0.0
+        return {
+            "total": total,
+            "completed": completed,
+            "failed": failed,
+            "cancelled": cancelled,
+            "discarded": discarded,
+            "skipped": skipped,
+            "pending": pending,
+            "running": running,
+            "percentage": percentage,
+        }
+
     def insert_compression(self, record: CompressionRecord) -> int:
         """插入压缩历史记录，返回记录 ID。"""
         cols = [
@@ -214,7 +416,8 @@ class Database(LibraryStore):
             "output_path", "output_size_bytes", "savings_pct",
             "encoder", "cq_value", "preset", "pix_fmt",
             "audio_mode", "sub_mode", "ffmpeg_command", "sidecar_path", "leanreel_version",
-            "source_deleted",
+            "source_deleted", "progress", "stage", "started_at", "completed_at",
+            "updated_at", "batch_id",
         ]
         values = [
             record.file_snapshot_id, record.strategy_name, record.original_size,
@@ -233,8 +436,15 @@ class Database(LibraryStore):
             getattr(record, "sidecar_path", ""),
             getattr(record, "leanreel_version", ""),
             getattr(record, "source_deleted", 0),
+            getattr(record, "progress", 0.0),
+            getattr(record, "stage", ""),
+            getattr(record, "started_at", ""),
+            getattr(record, "completed_at", ""),
+            getattr(record, "updated_at", ""),
+            getattr(record, "batch_id", ""),
         ]
-        placeholders = ",".join("?" * len(cols))
+        placeholders = ",".join("?" * (len(cols) - 2))
+        placeholders = f"{placeholders},COALESCE(NULLIF(?, ''), datetime('now')),?"
         self.execute(
             f"INSERT INTO compression_history ({','.join(cols)}) VALUES ({placeholders})",
             values,
@@ -267,6 +477,13 @@ class Database(LibraryStore):
             ffmpeg_command=r.get("ffmpeg_command", ""),
             sidecar_path=r.get("sidecar_path", ""),
             leanreel_version=r.get("leanreel_version", ""),
+            source_deleted=r.get("source_deleted", 0),
+            progress=r.get("progress", 0.0),
+            stage=r.get("stage", ""),
+            started_at=r.get("started_at", ""),
+            completed_at=r.get("completed_at", ""),
+            updated_at=r.get("updated_at", ""),
+            batch_id=r.get("batch_id", ""),
         ) for r in rows]
 
     def get_all_history(self) -> list[dict]:
@@ -276,8 +493,9 @@ class Database(LibraryStore):
                 ch.id, ch.file_snapshot_id, ch.strategy_name,
                 ch.original_size, ch.compressed_size, ch.output_size_bytes,
                 ch.savings_pct, ch.encoder, ch.cq_value, ch.preset,
-                ch.duration_seconds, ch.status, ch.error_message,
-                ch.output_path, ch.sidecar_path, ch.created_at,
+                ch.duration_seconds, ch.status, ch.progress, ch.stage,
+                ch.started_at, ch.completed_at, ch.updated_at, ch.batch_id,
+                ch.error_message, ch.output_path, ch.sidecar_path, ch.created_at,
                 ch.source_deleted, ch.leanreel_version,
                 fs.file_name, fs.relative_path, fs.video_codec, fs.library_folder_id,
                 lf.path AS folder_path,
@@ -286,7 +504,7 @@ class Database(LibraryStore):
             JOIN file_snapshot fs ON ch.file_snapshot_id = fs.id
             JOIN library_folder lf ON fs.library_folder_id = lf.id
             JOIN library lib ON lf.library_id = lib.id
-            ORDER BY ch.created_at DESC
+            ORDER BY ch.updated_at DESC, ch.created_at DESC, ch.id DESC
         """)
         return rows
 
@@ -336,6 +554,13 @@ class Database(LibraryStore):
                 ffmpeg_command=r.get("ffmpeg_command", ""),
                 sidecar_path=r.get("sidecar_path", ""),
                 leanreel_version=r.get("leanreel_version", ""),
+                source_deleted=r.get("source_deleted", 0),
+                progress=r.get("progress", 0.0),
+                stage=r.get("stage", ""),
+                started_at=r.get("started_at", ""),
+                completed_at=r.get("completed_at", ""),
+                updated_at=r.get("updated_at", ""),
+                batch_id=r.get("batch_id", ""),
             )
         return records
 

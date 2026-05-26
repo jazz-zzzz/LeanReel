@@ -647,6 +647,130 @@ def test_ffmpeg_executor_dovi_flow(monkeypatch, tmp_path):
     assert (tmp_path / "dv_movie_SS.mkv").exists()
 
 
+def test_ffmpeg_executor_writes_completed_status_to_history_before_worker_finalizes(monkeypatch, tmp_path):
+    from leanreel.domain.models import TaskStatus
+    from leanreel.executor import ffmpeg as ffmpeg_mod
+    from leanreel.executor.worker import EncodeTask
+
+    class FakeDb:
+        def __init__(self):
+            self.records = []
+
+        def execute(self, sql, params=None):
+            if sql.strip().startswith("SELECT id FROM file_snapshot"):
+                return [{"id": 42}]
+            return []
+
+        def insert_compression(self, record):
+            self.records.append(record)
+            return 7
+
+    def fake_run_ffmpeg(cmd, progress_callback=None, cancel_event=None):
+        Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
+        Path(cmd[-1]).write_bytes(b"encoded")
+        return 0, ""
+
+    monkeypatch.setattr(ffmpeg_mod, "run_ffmpeg", fake_run_ffmpeg)
+    monkeypatch.setattr("leanreel.services.audit._ffmpeg_version", lambda: "ffmpeg-test")
+    monkeypatch.setattr("leanreel.services.audit._dovi_version", lambda: "")
+
+    strategy = Strategy.from_dict({
+        "name": "x265 status test",
+        "video": {"encoder": "libx265", "crf": 20, "preset": "slow", "pix_fmt": "yuv420p10le"},
+        "audio": {"mode": "keep_original"},
+        "subtitle": {"mode": "keep_all"},
+        "filters": {},
+    })
+    snap = FileSnapshot(
+        video_codec="h264",
+        library_folder_id=3,
+        relative_path="movie.mkv",
+        file_name="movie.mkv",
+        size_bytes=1000,
+    )
+    task = EncodeTask(
+        file_name="movie.mkv",
+        input_path=str(tmp_path / "movie.mkv"),
+        output_path=str(tmp_path / "movie_zcompressed.mkv"),
+        strategy=strategy,
+        snapshot=snap,
+        status=TaskStatus.RUNNING,
+        original_size=1000,
+        started_at=100.0,
+    )
+    db = FakeDb()
+
+    FFmpegExecutor(temp_dir=str(tmp_path / "temp"), db=db).encode(task)
+
+    assert task.status == TaskStatus.COMPLETED
+    assert len(db.records) == 1
+    assert db.records[0].status == TaskStatus.COMPLETED.value
+    assert task.completed_at > task.started_at
+    assert db.records[0].duration_seconds > 0
+
+
+def test_ffmpeg_executor_writes_failed_status_to_history(monkeypatch, tmp_path):
+    from leanreel.domain.models import TaskStatus
+    from leanreel.executor import ffmpeg as ffmpeg_mod
+    from leanreel.executor.worker import EncodeTask
+
+    class FakeDb:
+        def __init__(self):
+            self.records = []
+
+        def execute(self, sql, params=None):
+            if sql.strip().startswith("SELECT id FROM file_snapshot"):
+                return [{"id": 42}]
+            return []
+
+        def insert_compression(self, record):
+            self.records.append(record)
+            return 8
+
+    def fake_run_ffmpeg(cmd, progress_callback=None, cancel_event=None):
+        Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
+        Path(cmd[-1]).write_bytes(b"partial")
+        return 1, "mock encoder failed"
+
+    monkeypatch.setattr(ffmpeg_mod, "run_ffmpeg", fake_run_ffmpeg)
+    monkeypatch.setattr("leanreel.services.audit._ffmpeg_version", lambda: "ffmpeg-test")
+    monkeypatch.setattr("leanreel.services.audit._dovi_version", lambda: "")
+
+    strategy = Strategy.from_dict({
+        "name": "x265 failure test",
+        "video": {"encoder": "libx265", "crf": 20, "preset": "slow", "pix_fmt": "yuv420p10le"},
+        "audio": {"mode": "keep_original"},
+        "subtitle": {"mode": "keep_all"},
+        "filters": {},
+    })
+    snap = FileSnapshot(
+        video_codec="h264",
+        library_folder_id=3,
+        relative_path="broken.mkv",
+        file_name="broken.mkv",
+        size_bytes=1000,
+    )
+    task = EncodeTask(
+        file_name="broken.mkv",
+        input_path=str(tmp_path / "broken.mkv"),
+        output_path=str(tmp_path / "broken_zcompressed.mkv"),
+        strategy=strategy,
+        snapshot=snap,
+        status=TaskStatus.RUNNING,
+        original_size=1000,
+    )
+    db = FakeDb()
+
+    with pytest.raises(RuntimeError):
+        FFmpegExecutor(temp_dir=str(tmp_path / "temp"), db=db).encode(task)
+
+    assert task.status == TaskStatus.FAILED
+    assert len(db.records) == 1
+    assert db.records[0].status == TaskStatus.FAILED.value
+    assert "mock encoder failed" in db.records[0].error_message
+    assert db.records[0].duration_seconds >= 0
+
+
 def test_ffmpeg_executor_dovi_cleanup_rpu_on_failure(monkeypatch, tmp_path):
     from leanreel.executor import ffmpeg as ffmpeg_mod
     from leanreel.executor.worker import EncodeTask

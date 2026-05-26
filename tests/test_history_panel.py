@@ -1,5 +1,6 @@
 """历史面板测试"""
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 
 
 def test_history_panel_creates_with_columns(qtbot):
@@ -93,6 +94,16 @@ def test_history_panel_filter_by_status(qtbot):
     panel.close()
 
 
+def test_history_panel_does_not_use_alternating_row_backgrounds(qtbot):
+    from leanreel.gui.history_panel import HistoryPanel
+
+    panel = HistoryPanel()
+    qtbot.addWidget(panel)
+
+    assert panel.table.alternatingRowColors() is False
+    panel.close()
+
+
 def test_history_panel_empty_populate_does_not_crash(qtbot):
     """空数据 populate 不应崩溃，rowCount 为 0"""
     from leanreel.gui.history_panel import HistoryPanel
@@ -106,8 +117,23 @@ def test_history_panel_empty_populate_does_not_crash(qtbot):
     panel.close()
 
 
-def test_history_panel_failed_row_has_red_foreground(qtbot):
-    """失败状态的行应显示红色前景色"""
+def test_history_panel_refresh_button_emits(qtbot):
+    """刷新按钮点击应发射 refresh_requested 信号"""
+    from leanreel.gui.history_panel import HistoryPanel
+
+    panel = HistoryPanel()
+    qtbot.addWidget(panel)
+    signal_fired = []
+
+    panel.refresh_requested.connect(lambda: signal_fired.append(True))
+    panel.refresh_btn.click()
+
+    assert len(signal_fired) == 1
+    panel.close()
+
+
+def test_history_panel_status_column_has_explicit_label_and_color(qtbot):
+    """状态颜色只属于状态列，不污染整行文本。"""
     from leanreel.gui.history_panel import HistoryPanel
 
     panel = HistoryPanel()
@@ -117,13 +143,45 @@ def test_history_panel_failed_row_has_red_foreground(qtbot):
          "folder_path": "", "original_size": 5000, "output_size_bytes": 0,
          "savings_pct": 0.0, "strategy_name": "", "encoder": "",
          "cq_value": 0, "duration_seconds": 0, "created_at": "",
+         "source_deleted": 0, "output_path": "", "compressed_size": 0, "error_message": "encoder crashed"},
+    ]
+    panel.populate(rows)
+
+    model = panel.table.model()
+    name_idx = model.index(0, 0)
+    status_idx = model.index(0, 12)
+
+    assert model.data(status_idx, Qt.DisplayRole) == "失败"
+    assert model.data(name_idx, Qt.ForegroundRole) is None
+    assert model.data(status_idx, Qt.ForegroundRole) == QColor("#c4554a")
+    assert model.data(status_idx, Qt.ToolTipRole) == "encoder crashed"
+    panel.close()
+
+
+def test_history_panel_status_colors_are_limited_to_status_column(qtbot):
+    from leanreel.gui.history_panel import HistoryPanel
+
+    panel = HistoryPanel()
+    qtbot.addWidget(panel)
+    rows = [
+        {"status": "completed", "file_name": "done.mkv", "library_name": "",
+         "folder_path": "", "original_size": 5000, "output_size_bytes": 3000,
+         "savings_pct": 40.0, "strategy_name": "", "encoder": "",
+         "cq_value": 0, "duration_seconds": 0, "created_at": "",
+         "source_deleted": 1, "output_path": "", "compressed_size": 0, "error_message": ""},
+        {"status": "cancelled", "file_name": "cancel.mkv", "library_name": "",
+         "folder_path": "", "original_size": 5000, "output_size_bytes": 0,
+         "savings_pct": 0.0, "strategy_name": "", "encoder": "",
+         "cq_value": 0, "duration_seconds": 0, "created_at": "",
          "source_deleted": 0, "output_path": "", "compressed_size": 0, "error_message": ""},
     ]
     panel.populate(rows)
 
     model = panel.table.model()
-    source_idx = model.index(0, 0)
-    color = model.data(source_idx, Qt.ForegroundRole)
-    # 验证颜色为红色系的 QColor
-    assert color is not None
+    assert model.data(model.index(0, 12), Qt.DisplayRole) == "成功"
+    assert model.data(model.index(0, 12), Qt.ForegroundRole) == QColor("#6b9955")
+    assert model.data(model.index(0, 0), Qt.ForegroundRole) is None
+    assert model.data(model.index(1, 12), Qt.DisplayRole) == "已取消"
+    assert model.data(model.index(1, 12), Qt.ForegroundRole) == QColor("#6b6560")
+    assert model.data(model.index(1, 0), Qt.ForegroundRole) is None
     panel.close()

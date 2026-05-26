@@ -1,5 +1,6 @@
 """LeanReel 暗色主题 — OKLCH 色彩系统，类似 TMM 风格"""
 from PySide6.QtWidgets import QApplication
+from pathlib import Path
 
 # ── 色彩标记 ──
 C_BASE = "#12100e"        # 基色 ~12%L，暖色底
@@ -359,11 +360,19 @@ QToolButton:hover {{
 """
 
 
+def _qss_file_url(path: Path) -> str:
+    return path.resolve().as_posix()
+
+
+def build_stylesheet(check_icon: Path) -> str:
+    return QSS.replace("{CHECK_ICON}", _qss_file_url(check_icon))
+
+
 def apply_theme(app: QApplication):
     from leanreel.executor.resources import bundled_resource_path
-    check_icon = bundled_resource_path("icons", "checkmark.svg").resolve().as_posix()
+    check_icon = bundled_resource_path("icons", "checkmark.svg")
     app.setStyle("Fusion")
-    app.setStyleSheet(QSS.replace("{CHECK_ICON}", check_icon))
+    app.setStyleSheet(build_stylesheet(check_icon))
 
 
 # ── 列配色 (QColor, 供表格/树控件使用) ──

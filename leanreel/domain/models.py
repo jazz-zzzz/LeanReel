@@ -21,6 +21,7 @@ class TaskStatus(StrEnum):
     SKIPPED = "skipped"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    DISCARDED = "discarded"
 
 
 @dataclass
@@ -97,6 +98,13 @@ class CompressionRecord:
     ffmpeg_command: str = ""
     sidecar_path: str = ""
     leanreel_version: str = ""
+    source_deleted: int = 0
+    progress: float = 0.0
+    stage: str = ""
+    started_at: str = ""
+    completed_at: str = ""
+    updated_at: str = ""
+    batch_id: str = ""
 
 
 @dataclass

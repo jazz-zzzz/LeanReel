@@ -175,6 +175,86 @@ class TestEncodingControllerInit:
 class TestEncodingControllerStart:
     """start() 方法测试 — 编码入口"""
 
+    def test_start_creates_pending_history_before_worker_start(
+        self, controller, mock_strategy_panel, mock_win, mock_queue_panel,
+        sample_snapshots, sample_folder_paths,
+    ):
+        """正向用例：有 DB 时先创建 pending 历史记录，再启动 worker。"""
+        events = []
+
+        class FakeDb:
+            def __init__(self):
+                self.calls = []
+
+            def create_compression_record(self, **kwargs):
+                events.append(("db", kwargs["output_path"]))
+                self.calls.append(kwargs)
+                return 1000 + len(self.calls)
+
+        class FakeManager:
+            def __init__(self, *_args, **_kwargs):
+                self.started_tasks = []
+
+            def start(self, tasks):
+                events.append(("start", [task.history_id for task in tasks]))
+                self.started_tasks = list(tasks)
+
+        class ImmediateThread:
+            def __init__(self, target, daemon=False):
+                self.target = target
+                self.daemon = daemon
+
+            def start(self):
+                self.target()
+
+        fake_db = FakeDb()
+        controller._db = fake_db
+
+        with patch('leanreel.controllers.encoding_controller.WorkerManager', FakeManager), \
+             patch('leanreel.controllers.encoding_controller.threading.Thread', ImmediateThread):
+            result = controller.start(sample_snapshots, sample_folder_paths, None)
+
+        assert result is True
+        assert len(fake_db.calls) == 2
+        assert events[0][0] == "db"
+        assert events[1][0] == "db"
+        assert events[2] == ("start", [1001, 1002])
+
+        added_tasks = [call_args[0][0] for call_args in mock_queue_panel.add_task_row.call_args_list]
+        assert {task.history_id for task in added_tasks} == {1001, 1002}
+        assert len({task.batch_id for task in added_tasks}) == 1
+        assert all(task.batch_id for task in added_tasks)
+
+        first_call = fake_db.calls[0]
+        assert first_call["batch_id"] == added_tasks[0].batch_id
+        assert first_call["strategy_name"] == "均衡压缩"
+        assert first_call["original_size"] == 8_500_000_000
+        assert first_call["encoder"] == "libx265"
+        assert first_call["cq_value"] == 20
+        assert first_call["preset"] == "slow"
+        assert first_call["pix_fmt"] == "yuv420p10le"
+        assert first_call["audio_mode"] == "keep_original"
+        assert first_call["sub_mode"] == "keep_chinese"
+
+    @patch('leanreel.controllers.encoding_controller.threading.Thread')
+    @patch('leanreel.controllers.encoding_controller.WorkerManager')
+    def test_start_does_not_start_worker_when_pending_history_creation_fails(
+        self, mock_worker_mgr, mock_thread,
+        controller, mock_win, sample_snapshots, sample_folder_paths,
+    ):
+        """负向用例：pending 历史记录创建失败时不启动任何 worker/thread。"""
+        fake_db = MagicMock()
+        fake_db.create_compression_record.side_effect = RuntimeError("history db locked")
+        controller._db = fake_db
+
+        result = controller.start(sample_snapshots, sample_folder_paths, None)
+
+        assert result is False
+        assert controller.encoding_in_progress is False
+        mock_worker_mgr.assert_not_called()
+        mock_thread.assert_not_called()
+        mock_win.set_status.assert_called_with("错误：history db locked")
+
     @patch('leanreel.controllers.encoding_controller.threading.Thread')
     @patch('leanreel.controllers.encoding_controller.WorkerManager')
     @patch('leanreel.controllers.encoding_controller.FFmpegExecutor')

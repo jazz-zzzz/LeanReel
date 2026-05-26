@@ -1,4 +1,5 @@
 ﻿"""数据库层测试"""
+import sqlite3
 import pytest
 from pathlib import Path
 from leanreel.infrastructure.database import Database
@@ -135,3 +136,320 @@ def test_get_compression_records_for_folders_returns_latest_completed_sidecar(db
     assert set(records) == {(fid, "movie.mkv")}
     assert records[(fid, "movie.mkv")].strategy_name == "SQL 压缩记录"
     assert records[(fid, "movie.mkv")].sidecar_path.endswith(".leanreel.json")
+
+
+def test_compression_history_runtime_columns_exist(db):
+    cols = {row["name"] for row in db.execute("PRAGMA table_info(compression_history)")}
+
+    assert "progress" in cols
+    assert "stage" in cols
+    assert "started_at" in cols
+    assert "completed_at" in cols
+    assert "updated_at" in cols
+    assert "batch_id" in cols
+
+
+def test_create_pending_compression_records_for_batch(db):
+    from leanreel.domain.models import Library, LibraryFolder, FileSnapshot
+
+    lib_id = db.insert_library(Library(name="Movies"))
+    folder_id = db.insert_folder(LibraryFolder(library_id=lib_id, path="/movies"))
+    snap_id = db.save(FileSnapshot(
+        library_folder_id=folder_id,
+        relative_path="a.mkv",
+        file_name="a.mkv",
+        size_bytes=1000,
+        video_codec="h264",
+    ))
+
+    record_id = db.create_compression_record(
+        file_snapshot_id=snap_id,
+        batch_id="batch-1",
+        strategy_name="AV1 NVENC CQ34",
+        original_size=1000,
+        output_path="/movies/a_zcompressed.mkv",
+        encoder="av1_nvenc",
+        cq_value=34,
+    )
+
+    rows = db.get_all_history()
+    assert len(rows) == 1
+    assert record_id == rows[0]["id"]
+    assert rows[0]["status"] == "pending"
+    assert rows[0]["progress"] == 0
+    assert rows[0]["stage"] == ""
+    assert rows[0]["batch_id"] == "batch-1"
+
+
+def test_update_compression_runtime_and_terminal_state(db):
+    from leanreel.domain.models import Library, LibraryFolder, FileSnapshot
+
+    lib_id = db.insert_library(Library(name="Movies"))
+    folder_id = db.insert_folder(LibraryFolder(library_id=lib_id, path="/movies"))
+    snap_id = db.save(FileSnapshot(
+        library_folder_id=folder_id,
+        relative_path="a.mkv",
+        file_name="a.mkv",
+        size_bytes=1000,
+        video_codec="h264",
+    ))
+    record_id = db.create_compression_record(
+        file_snapshot_id=snap_id,
+        batch_id="batch-1",
+        strategy_name="AV1 NVENC CQ34",
+        original_size=1000,
+        output_path="/movies/a_zcompressed.mkv",
+        encoder="av1_nvenc",
+        cq_value=34,
+    )
+
+    db.update_compression_runtime(
+        record_id,
+        status="running",
+        progress=42.5,
+        stage="转码",
+        duration_seconds=12,
+    )
+    running = db.get_compression_record(record_id)
+    assert running["status"] == "running"
+    assert running["progress"] == 42.5
+    assert running["stage"] == "转码"
+    assert running["duration_seconds"] == 12
+
+    db.update_compression_terminal(
+        record_id,
+        status="completed",
+        progress=100.0,
+        duration_seconds=30,
+        compressed_size=600,
+        output_size_bytes=600,
+        savings_pct=40.0,
+        error_message="",
+        sidecar_path="/movies/a_zcompressed.mkv.leanreel.json",
+    )
+    completed = db.get_compression_record(record_id)
+    assert completed["status"] == "completed"
+    assert completed["progress"] == 100.0
+    assert completed["completed_at"] != ""
+    assert completed["compressed_size"] == 600
+    assert completed["savings_pct"] == 40.0
+
+
+def test_get_batch_progress_aggregates_statuses(db):
+    from leanreel.domain.models import Library, LibraryFolder, FileSnapshot
+
+    lib_id = db.insert_library(Library(name="Movies"))
+    folder_id = db.insert_folder(LibraryFolder(library_id=lib_id, path="/movies"))
+    ids = []
+    for name in ("a.mkv", "b.mkv", "c.mkv"):
+        snap_id = db.save(FileSnapshot(
+            library_folder_id=folder_id,
+            relative_path=name,
+            file_name=name,
+            size_bytes=1000,
+            video_codec="h264",
+        ))
+        ids.append(db.create_compression_record(
+            file_snapshot_id=snap_id,
+            batch_id="batch-1",
+            strategy_name="AV1",
+            original_size=1000,
+            output_path=f"/movies/{name}.out.mkv",
+            encoder="av1_nvenc",
+            cq_value=34,
+        ))
+
+    db.update_compression_terminal(ids[0], status="completed", progress=100, duration_seconds=10)
+    db.update_compression_terminal(ids[1], status="failed", progress=25, duration_seconds=3, error_message="boom")
+
+    progress = db.get_batch_progress("batch-1")
+    assert progress == {
+        "total": 3,
+        "completed": 1,
+        "failed": 1,
+        "cancelled": 0,
+        "discarded": 0,
+        "skipped": 0,
+        "pending": 1,
+        "running": 0,
+        "percentage": pytest.approx(66.66666666666666),
+    }
+
+
+def test_insert_compression_sets_updated_at_and_sorts_after_migration(tmp_path: Path):
+    from leanreel.domain.models import CompressionRecord, FileSnapshot
+
+    db_path = tmp_path / "migrated.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript("""
+        CREATE TABLE library (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE TABLE library_folder (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            library_id INTEGER NOT NULL REFERENCES library(id) ON DELETE CASCADE,
+            path TEXT NOT NULL,
+            UNIQUE(library_id, path)
+        );
+        CREATE TABLE file_snapshot (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            library_folder_id INTEGER NOT NULL REFERENCES library_folder(id) ON DELETE CASCADE,
+            relative_path TEXT NOT NULL,
+            file_name TEXT NOT NULL,
+            size_bytes INTEGER DEFAULT 0,
+            video_codec TEXT DEFAULT '',
+            video_width INTEGER DEFAULT 0,
+            video_height INTEGER DEFAULT 0,
+            hdr_type TEXT DEFAULT 'SDR',
+            audio_tracks TEXT DEFAULT '[]',
+            subtitle_tracks TEXT DEFAULT '[]',
+            duration_seconds REAL DEFAULT 0,
+            bitrate_bps INTEGER DEFAULT 0,
+            scanned_at TEXT DEFAULT (datetime('now')),
+            UNIQUE(library_folder_id, relative_path)
+        );
+        CREATE TABLE compression_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_snapshot_id INTEGER NOT NULL REFERENCES file_snapshot(id) ON DELETE CASCADE,
+            strategy_name TEXT NOT NULL,
+            original_size INTEGER DEFAULT 0,
+            compressed_size INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'pending',
+            duration_seconds INTEGER DEFAULT 0,
+            error_message TEXT DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+        INSERT INTO library (name) VALUES ('Movies');
+        INSERT INTO library_folder (library_id, path) VALUES (1, '/movies');
+        INSERT INTO file_snapshot (
+            library_folder_id, relative_path, file_name, size_bytes, video_codec,
+            video_width, video_height, hdr_type
+        ) VALUES (1, 'old.mkv', 'old.mkv', 1000, 'h264', 1920, 1080, 'SDR');
+        INSERT INTO compression_history (
+            file_snapshot_id, strategy_name, status, created_at
+        ) VALUES (1, 'old', 'completed', '2000-01-01 00:00:00');
+    """)
+    conn.commit()
+    conn.close()
+
+    migrated = Database(str(db_path))
+    try:
+        snap_id = migrated.save(FileSnapshot(
+            library_folder_id=1,
+            relative_path="new.mkv",
+            file_name="new.mkv",
+            size_bytes=1000,
+            video_codec="h264",
+        ))
+        new_id = migrated.insert_compression(CompressionRecord(
+            file_snapshot_id=snap_id,
+            strategy_name="new",
+            status=TaskStatus.COMPLETED,
+        ))
+
+        new_row = migrated.get_compression_record(new_id)
+        rows = migrated.get_all_history()
+    finally:
+        migrated.close()
+
+    assert new_row["updated_at"] != ""
+    assert [row["strategy_name"] for row in rows[:2]] == ["new", "old"]
+
+
+def test_insert_compression_sets_updated_at_on_fresh_schema(db):
+    from leanreel.domain.models import CompressionRecord, FileSnapshot
+
+    lib_id = db.insert_library(Library(name="Movies"))
+    folder_id = db.insert_folder(LibraryFolder(library_id=lib_id, path="/movies"))
+    snap_id = db.save(FileSnapshot(
+        library_folder_id=folder_id,
+        relative_path="a.mkv",
+        file_name="a.mkv",
+        size_bytes=1000,
+        video_codec="h264",
+    ))
+
+    record_id = db.insert_compression(CompressionRecord(
+        file_snapshot_id=snap_id,
+        strategy_name="legacy",
+        status=TaskStatus.COMPLETED,
+    ))
+
+    assert db.get_compression_record(record_id)["updated_at"] != ""
+
+
+def test_get_batch_progress_bounds_each_row_and_includes_skipped(db):
+    from leanreel.domain.models import FileSnapshot
+
+    lib_id = db.insert_library(Library(name="Movies"))
+    folder_id = db.insert_folder(LibraryFolder(library_id=lib_id, path="/movies"))
+    ids = []
+    for name in ("a.mkv", "b.mkv", "c.mkv", "d.mkv", "e.mkv"):
+        snap_id = db.save(FileSnapshot(
+            library_folder_id=folder_id,
+            relative_path=name,
+            file_name=name,
+            size_bytes=1000,
+            video_codec="h264",
+        ))
+        ids.append(db.create_compression_record(
+            file_snapshot_id=snap_id,
+            batch_id="batch-1",
+            strategy_name="AV1",
+            original_size=1000,
+            output_path=f"/movies/{name}.out.mkv",
+        ))
+
+    db.update_compression_terminal(ids[0], status="completed", progress=100, duration_seconds=10)
+    db.update_compression_terminal(ids[1], status="failed", progress=25, duration_seconds=3)
+    db.update_compression_terminal(ids[2], status="skipped", progress=10, duration_seconds=0)
+    db.update_compression_runtime(ids[3], status="running", progress=150, stage="转码", duration_seconds=1)
+    db.update_compression_runtime(ids[4], status="pending", progress=-10, stage="", duration_seconds=0)
+
+    progress = db.get_batch_progress("batch-1")
+
+    assert progress["skipped"] == 1
+    assert sum(progress[key] for key in (
+        "completed", "failed", "cancelled", "discarded", "skipped", "pending", "running"
+    )) == progress["total"]
+    assert progress["percentage"] == 80.0
+    assert progress["percentage"] <= 100.0
+
+
+def test_compression_record_runtime_fields_round_trip_through_typed_history(db):
+    from leanreel.domain.models import CompressionRecord, FileSnapshot
+
+    lib_id = db.insert_library(Library(name="Movies"))
+    folder_id = db.insert_folder(LibraryFolder(library_id=lib_id, path="/movies"))
+    snap_id = db.save(FileSnapshot(
+        library_folder_id=folder_id,
+        relative_path="a.mkv",
+        file_name="a.mkv",
+        size_bytes=1000,
+        video_codec="h264",
+    ))
+
+    db.insert_compression(CompressionRecord(
+        file_snapshot_id=snap_id,
+        strategy_name="runtime",
+        status=TaskStatus.RUNNING,
+        source_deleted=1,
+        progress=37.5,
+        stage="转码",
+        started_at="2026-05-26 01:00:00",
+        completed_at="2026-05-26 01:30:00",
+        updated_at="2026-05-26 01:15:00",
+        batch_id="batch-1",
+    ))
+
+    record = db.get_history_for_library(lib_id)[0]
+
+    assert record.source_deleted == 1
+    assert record.progress == 37.5
+    assert record.stage == "转码"
+    assert record.started_at == "2026-05-26 01:00:00"
+    assert record.completed_at == "2026-05-26 01:30:00"
+    assert record.updated_at == "2026-05-26 01:15:00"
+    assert record.batch_id == "batch-1"
