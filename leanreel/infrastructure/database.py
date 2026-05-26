@@ -124,6 +124,12 @@ class Database(LibraryStore):
             ("sidecar_path", "TEXT DEFAULT ''"),
             ("leanreel_version", "TEXT DEFAULT ''"),
             ("source_deleted", "INTEGER DEFAULT 0"),
+            ("progress", "REAL DEFAULT 0"),
+            ("stage", "TEXT DEFAULT ''"),
+            ("started_at", "TEXT DEFAULT ''"),
+            ("completed_at", "TEXT DEFAULT ''"),
+            ("updated_at", "TEXT DEFAULT (datetime('now'))"),
+            ("batch_id", "TEXT DEFAULT ''"),
         ]
         for col_name, col_def in ch_migrations:
             if col_name not in existing_ch:
@@ -241,6 +247,123 @@ class Database(LibraryStore):
         )
         return self.last_insert_id
 
+    def create_compression_record(
+        self,
+        *,
+        file_snapshot_id: int,
+        batch_id: str,
+        strategy_name: str,
+        original_size: int,
+        output_path: str,
+        encoder: str = "",
+        cq_value: int = 0,
+        preset: str = "",
+        pix_fmt: str = "",
+        audio_mode: str = "",
+        sub_mode: str = "",
+    ) -> int:
+        self.execute("""
+            INSERT INTO compression_history (
+                file_snapshot_id, batch_id, strategy_name, original_size,
+                compressed_size, output_path, status, progress, stage,
+                encoder, cq_value, preset, pix_fmt, audio_mode, sub_mode,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, 0, ?, 'pending', 0, '', ?, ?, ?, ?, ?, ?, datetime('now'))
+        """, [
+            file_snapshot_id, batch_id, strategy_name, original_size,
+            output_path, encoder, cq_value, preset, pix_fmt, audio_mode, sub_mode,
+        ])
+        return self.last_insert_id
+
+    def update_compression_runtime(
+        self,
+        record_id: int,
+        *,
+        status: str,
+        progress: float,
+        stage: str,
+        duration_seconds: int,
+    ) -> None:
+        self.execute("""
+            UPDATE compression_history
+            SET status = ?,
+                progress = ?,
+                stage = ?,
+                duration_seconds = ?,
+                started_at = CASE WHEN started_at = '' THEN datetime('now') ELSE started_at END,
+                updated_at = datetime('now')
+            WHERE id = ?
+        """, [status, float(progress), stage, int(duration_seconds), record_id])
+
+    def update_compression_terminal(
+        self,
+        record_id: int,
+        *,
+        status: str,
+        progress: float,
+        duration_seconds: int,
+        compressed_size: int = 0,
+        output_size_bytes: int = 0,
+        savings_pct: float = 0.0,
+        error_message: str = "",
+        sidecar_path: str = "",
+        source_deleted: int | None = None,
+    ) -> None:
+        assignments = [
+            "status = ?",
+            "progress = ?",
+            "duration_seconds = ?",
+            "compressed_size = ?",
+            "output_size_bytes = ?",
+            "savings_pct = ?",
+            "error_message = ?",
+            "sidecar_path = ?",
+            "completed_at = datetime('now')",
+            "updated_at = datetime('now')",
+        ]
+        values: list = [
+            status, float(progress), int(duration_seconds), int(compressed_size),
+            int(output_size_bytes), float(savings_pct), error_message, sidecar_path,
+        ]
+        if source_deleted is not None:
+            assignments.append("source_deleted = ?")
+            values.append(int(source_deleted))
+        values.append(record_id)
+        self.execute(
+            f"UPDATE compression_history SET {', '.join(assignments)} WHERE id = ?",
+            values,
+        )
+
+    def get_compression_record(self, record_id: int) -> dict:
+        rows = self.execute("SELECT * FROM compression_history WHERE id = ?", [record_id])
+        return rows[0] if rows else {}
+
+    def get_batch_progress(self, batch_id: str) -> dict:
+        rows = self.execute("""
+            SELECT status, progress FROM compression_history WHERE batch_id = ?
+        """, [batch_id])
+        total = len(rows)
+        completed = sum(1 for r in rows if r["status"] == "completed")
+        failed = sum(1 for r in rows if r["status"] == "failed")
+        cancelled = sum(1 for r in rows if r["status"] == "cancelled")
+        discarded = sum(1 for r in rows if r["status"] == "discarded")
+        running = sum(1 for r in rows if r["status"] == "running")
+        pending = sum(1 for r in rows if r["status"] == "pending")
+        terminal = completed + failed + cancelled + discarded
+        progress_sum = sum(float(r.get("progress") or 0) for r in rows)
+        percentage = progress_sum / max(total, 1)
+        return {
+            "total": total,
+            "completed": completed,
+            "failed": failed,
+            "cancelled": cancelled,
+            "discarded": discarded,
+            "pending": pending,
+            "running": running,
+            "percentage": percentage,
+        }
+
     def get_history_for_library(self, lib_id: int) -> list[CompressionRecord]:
         rows = self.execute("""
             SELECT ch.* FROM compression_history ch
@@ -277,6 +400,7 @@ class Database(LibraryStore):
                 ch.original_size, ch.compressed_size, ch.output_size_bytes,
                 ch.savings_pct, ch.encoder, ch.cq_value, ch.preset,
                 ch.duration_seconds, ch.status, ch.error_message,
+                ch.progress, ch.stage, ch.started_at, ch.completed_at, ch.updated_at, ch.batch_id,
                 ch.output_path, ch.sidecar_path, ch.created_at,
                 ch.source_deleted, ch.leanreel_version,
                 fs.file_name, fs.relative_path, fs.video_codec, fs.library_folder_id,
@@ -286,7 +410,7 @@ class Database(LibraryStore):
             JOIN file_snapshot fs ON ch.file_snapshot_id = fs.id
             JOIN library_folder lf ON fs.library_folder_id = lf.id
             JOIN library lib ON lf.library_id = lib.id
-            ORDER BY ch.created_at DESC
+            ORDER BY ch.updated_at DESC, ch.created_at DESC, ch.id DESC
         """)
         return rows
 
