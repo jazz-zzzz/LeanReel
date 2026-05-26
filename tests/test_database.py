@@ -212,7 +212,7 @@ def test_update_compression_runtime_and_terminal_state(db):
     assert running["stage"] == "转码"
     assert running["duration_seconds"] == 12
 
-    db.update_compression_terminal(
+    db.finish_compression(
         record_id,
         status="completed",
         progress=100.0,
@@ -253,8 +253,8 @@ def test_get_batch_progress_aggregates_statuses(db):
             cq_value=34,
         ))
 
-    db.update_compression_terminal(ids[0], status="completed", progress=100, duration_seconds=10)
-    db.update_compression_terminal(ids[1], status="failed", progress=25, duration_seconds=3, error_message="boom")
+    db.finish_compression(ids[0], status="completed", progress=100, duration_seconds=10)
+    db.finish_compression(ids[1], status="failed", progress=25, duration_seconds=3, error_message="boom")
 
     progress = db.get_batch_progress("batch-1")
     # get_batch_progress does not track "skipped" as a separate status.
@@ -392,9 +392,9 @@ def test_get_batch_progress_bounds_each_row_and_includes_skipped(db):
             output_path=f"/movies/{name}.out.mkv",
         ))
 
-    db.update_compression_terminal(ids[0], status="completed", progress=100, duration_seconds=10)
-    db.update_compression_terminal(ids[1], status="failed", progress=25, duration_seconds=3)
-    db.update_compression_terminal(ids[2], status="skipped", progress=10, duration_seconds=0)
+    db.finish_compression(ids[0], status="completed", progress=100, duration_seconds=10)
+    db.finish_compression(ids[1], status="failed", progress=25, duration_seconds=3)
+    db.finish_compression(ids[2], status="skipped", progress=10, duration_seconds=0)
     db.update_compression_runtime(ids[3], status="running", progress=150, stage="转码", duration_seconds=1)
     db.update_compression_runtime(ids[4], status="pending", progress=-10, stage="", duration_seconds=0)
 

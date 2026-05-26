@@ -664,7 +664,7 @@ def test_ffmpeg_executor_writes_completed_status_to_history_before_worker_finali
         def update_compression_runtime(self, record_id, **kwargs):
             pass
 
-        def update_compression_terminal(self, record_id, **kwargs):
+        def finish_compression(self, record_id, **kwargs):
             self.terminal_updates.append((record_id, kwargs))
 
     def fake_run_ffmpeg(cmd, progress_callback=None, cancel_event=None):
@@ -699,7 +699,7 @@ def test_ffmpeg_executor_writes_completed_status_to_history_before_worker_finali
         status=TaskStatus.COMPLETED,  # pre-set so audit build_audit() picks up correct status
         original_size=1000,
         started_at=100.0,
-        history_id=42,  # non-zero so _update_terminal triggers
+        history_id=42,  # non-zero so _finish_task triggers
     )
     db = FakeDb()
 
@@ -733,7 +733,7 @@ def test_ffmpeg_executor_writes_failed_status_to_history(monkeypatch, tmp_path):
         def update_compression_runtime(self, record_id, **kwargs):
             pass  # runtime updates during transcode — silently accept
 
-        def update_compression_terminal(self, record_id, *, status, progress, duration_seconds,
+        def finish_compression(self, record_id, *, status, progress, duration_seconds,
                                          compressed_size=0, output_size_bytes=0, savings_pct=0.0,
                                          error_message="", sidecar_path="", source_deleted=None):
             # Store terminal state as a record-like object for assertions
@@ -774,7 +774,7 @@ def test_ffmpeg_executor_writes_failed_status_to_history(monkeypatch, tmp_path):
         snapshot=snap,
         status=TaskStatus.RUNNING,
         original_size=1000,
-        history_id=42,  # non-zero so _update_terminal triggers
+        history_id=42,  # non-zero so _finish_task triggers
     )
     db = FakeDb()
 

@@ -296,7 +296,7 @@ class Database(LibraryStore):
             WHERE id = ?
         """, [status, float(progress), stage, int(duration_seconds), record_id])
 
-    def update_compression_terminal(
+    def finish_compression(
         self,
         record_id: int,
         *,

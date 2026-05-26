@@ -64,7 +64,7 @@ def _update_runtime(task, *, status: str, progress: float, stage: str) -> None:
         pass
 
 
-def _update_terminal(
+def _finish_task(
     task,
     *,
     status: str,
@@ -75,13 +75,13 @@ def _update_terminal(
 ) -> None:
     db = getattr(task, "_db", None)
     history_id = getattr(task, "history_id", 0)
-    if db is None or not history_id or not hasattr(db, "update_compression_terminal"):
+    if db is None or not history_id or not hasattr(db, "finish_compression"):
         return
     try:
         original = max(int(getattr(task, "original_size", 0) or 0), 1)
         compressed = int(getattr(task, "compressed_size", 0) or 0)
         savings_pct = round((original - compressed) / original * 100, 1) if compressed else 0.0
-        db.update_compression_terminal(
+        db.finish_compression(
             history_id,
             status=status,
             progress=progress,
@@ -331,7 +331,7 @@ class FFmpegExecutor:
                 task.status = TaskStatus.DISCARDED
                 task.error_message = "输出体积不小于源文件，已丢弃"
                 task.completed_at = task.completed_at or _time.time()
-                _update_terminal(
+                _finish_task(
                     task,
                     status=TaskStatus.DISCARDED.value,
                     progress=100.0,
@@ -397,7 +397,7 @@ class FFmpegExecutor:
                         audit.db_record_id = task.history_id
                         write_sidecar(audit)
 
-                        _update_terminal(
+                        _finish_task(
                             task,
                             status=TaskStatus.COMPLETED.value,
                             progress=100.0,
@@ -406,7 +406,7 @@ class FFmpegExecutor:
 
                     if getattr(task, "_delete_source", False) and 0 < task.compressed_size < task.original_size:
                         _delete_source_file(task.input_path)
-                        _update_terminal(task, status=TaskStatus.COMPLETED.value, progress=100.0, source_deleted=1)
+                        _finish_task(task, status=TaskStatus.COMPLETED.value, progress=100.0, source_deleted=1)
                         rec.source_deleted = 1
                         try:
                             db.execute(
@@ -424,7 +424,7 @@ class FFmpegExecutor:
             if current_idx >= 0:
                 plan.skip_remaining(current_idx)
             task.completed_at = task.completed_at or _time.time()
-            _update_terminal(
+            _finish_task(
                 task,
                 status=TaskStatus.CANCELLED.value,
                 progress=max(0.0, min(99.0, float(task.progress or 0))),
@@ -444,7 +444,7 @@ class FFmpegExecutor:
             task.status = TaskStatus.FAILED
             task.error_message = str(e)
             task.completed_at = task.completed_at or _time.time()
-            _update_terminal(
+            _finish_task(
                 task,
                 status=TaskStatus.FAILED.value,
                 progress=max(0.0, min(99.0, float(task.progress or 0))),
