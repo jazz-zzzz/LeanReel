@@ -4,6 +4,7 @@ import os
 import shutil
 import tempfile
 import threading
+import time as _time
 from pathlib import Path
 from typing import Optional
 
@@ -37,6 +38,63 @@ def _delete_source_file(filepath: str):
     except Exception:
         pass
 
+
+def _task_duration_seconds(task) -> int:
+    if getattr(task, "started_at", 0) and getattr(task, "completed_at", 0):
+        return max(0, int(task.completed_at - task.started_at))
+    if getattr(task, "started_at", 0):
+        return max(0, int(_time.time() - task.started_at))
+    return 0
+
+
+def _update_runtime(task, *, status: str, progress: float, stage: str) -> None:
+    db = getattr(task, "_db", None)
+    history_id = getattr(task, "history_id", 0)
+    if db is None or not history_id or not hasattr(db, "update_compression_runtime"):
+        return
+    try:
+        db.update_compression_runtime(
+            history_id,
+            status=status,
+            progress=progress,
+            stage=stage,
+            duration_seconds=_task_duration_seconds(task),
+        )
+    except Exception:
+        pass
+
+
+def _update_terminal(
+    task,
+    *,
+    status: str,
+    progress: float,
+    error_message: str = "",
+    sidecar_path: str = "",
+    source_deleted: int | None = None,
+) -> None:
+    db = getattr(task, "_db", None)
+    history_id = getattr(task, "history_id", 0)
+    if db is None or not history_id or not hasattr(db, "update_compression_terminal"):
+        return
+    try:
+        original = max(int(getattr(task, "original_size", 0) or 0), 1)
+        compressed = int(getattr(task, "compressed_size", 0) or 0)
+        savings_pct = round((original - compressed) / original * 100, 1) if compressed else 0.0
+        db.update_compression_terminal(
+            history_id,
+            status=status,
+            progress=progress,
+            duration_seconds=_task_duration_seconds(task),
+            compressed_size=compressed,
+            output_size_bytes=compressed,
+            savings_pct=savings_pct,
+            error_message=error_message,
+            sidecar_path=sidecar_path,
+            source_deleted=source_deleted,
+        )
+    except Exception:
+        pass
 
 
 class CancelledError(Exception):
@@ -114,6 +172,14 @@ class FFmpegExecutor:
                 task.progress = plan.compute_overall_progress()
                 self._emit_progress(task)
 
+                stage_label = stage.slot.display_name
+                _update_runtime(
+                    task,
+                    status=TaskStatus.RUNNING.value,
+                    progress=float(task.progress),
+                    stage=stage_label,
+                )
+
                 slot_id = stage.slot.slot_id
 
                 if slot_id == "prepare":
@@ -181,8 +247,9 @@ class FFmpegExecutor:
                     estimated_output = int(input_size * (1 - savings_mid)) if input_size > 0 else 0
 
                     # 混合进度源：优先 time= 解析，回退到输出文件大小
+                    last_history_update = 0.0
                     def _transcode_progress(line: str):
-                        nonlocal duration
+                        nonlocal duration, last_history_update
                         if "time=" in line and duration > 0:
                             try:
                                 time_str = line.split("time=")[1].split()[0]
@@ -204,6 +271,15 @@ class FFmpegExecutor:
                                 pass
                         task.progress = plan.compute_overall_progress()
                         self._emit_progress(task)
+                        now = _time.time()
+                        if now - last_history_update >= 1.0:
+                            last_history_update = now
+                            _update_runtime(
+                                task,
+                                status=TaskStatus.RUNNING.value,
+                                progress=float(task.progress),
+                                stage="转码",
+                            )
 
                     exit_code, stderr_tail = run_ffmpeg(
                         cmd,
@@ -252,6 +328,15 @@ class FFmpegExecutor:
                             s.detail = "跳过（输出 ≥ 原体积）"
                             break
                 task._output_discarded = True
+                task.status = TaskStatus.DISCARDED
+                task.error_message = "输出体积不小于源文件，已丢弃"
+                task.completed_at = task.completed_at or _time.time()
+                _update_terminal(
+                    task,
+                    status=TaskStatus.DISCARDED.value,
+                    progress=100.0,
+                    error_message=task.error_message,
+                )
             else:
                 # 原子提交：将暂存文件移动到最终位置
                 final_output.parent.mkdir(parents=True, exist_ok=True)
@@ -319,8 +404,16 @@ class FFmpegExecutor:
                             print(f"[LeanReel audit] DB insert failed: fsid={fsid}", file=sys.stderr)
                             traceback.print_exc()
 
+                        _update_terminal(
+                            task,
+                            status=TaskStatus.COMPLETED.value,
+                            progress=100.0,
+                            sidecar_path=sidecar_path,
+                        )
+
                     if getattr(task, "_delete_source", False) and 0 < task.compressed_size < task.original_size:
                         _delete_source_file(task.input_path)
+                        _update_terminal(task, status=TaskStatus.COMPLETED.value, progress=100.0, source_deleted=1)
                         rec.source_deleted = 1
                         try:
                             db.execute(
@@ -337,6 +430,13 @@ class FFmpegExecutor:
             current_idx = task.current_stage_index
             if current_idx >= 0:
                 plan.skip_remaining(current_idx)
+            task.completed_at = task.completed_at or _time.time()
+            _update_terminal(
+                task,
+                status=TaskStatus.CANCELLED.value,
+                progress=max(0.0, min(99.0, float(task.progress or 0))),
+                error_message="用户取消",
+            )
             task.status = TaskStatus.CANCELLED
             task.progress = plan.compute_overall_progress()
             self._emit_progress(task)
@@ -350,6 +450,13 @@ class FFmpegExecutor:
                 plan.skip_remaining(current_idx + 1)
             task.status = TaskStatus.FAILED
             task.error_message = str(e)
+            task.completed_at = task.completed_at or _time.time()
+            _update_terminal(
+                task,
+                status=TaskStatus.FAILED.value,
+                progress=max(0.0, min(99.0, float(task.progress or 0))),
+                error_message=str(e),
+            )
             task.progress = plan.compute_overall_progress()
             self._emit_progress(task)
             if staging_output.exists():

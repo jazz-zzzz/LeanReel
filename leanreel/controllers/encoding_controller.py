@@ -1,5 +1,6 @@
 """编码控制器 — 管理编码生命周期（开始/暂停/取消/完成）"""
 import threading
+import uuid
 from pathlib import Path
 
 from leanreel.controllers.events import TaskProgressEvent
@@ -51,6 +52,37 @@ def build_encode_tasks(
     return tasks
 
 
+def attach_history_records(db, tasks: list, batch_id: str) -> None:
+    if db is None:
+        return
+    for task in tasks:
+        snap = task.snapshot
+        fsid = getattr(snap, "id", 0) or 0
+        if not fsid:
+            rows = db.execute(
+                "SELECT id FROM file_snapshot WHERE library_folder_id=? AND relative_path=?",
+                [snap.library_folder_id, snap.relative_path],
+            )
+            fsid = rows[0]["id"] if rows else 0
+        video = getattr(task.strategy, "video", None)
+        audio = getattr(task.strategy, "audio", None)
+        subtitle = getattr(task.strategy, "subtitle", None)
+        task.batch_id = batch_id
+        task.history_id = db.create_compression_record(
+            file_snapshot_id=fsid,
+            batch_id=batch_id,
+            strategy_name=task.strategy_name or getattr(task.strategy, "name", ""),
+            original_size=task.original_size,
+            output_path=task.output_path,
+            encoder=getattr(video, "encoder", ""),
+            cq_value=getattr(video, "cq", 0) or getattr(video, "crf", 0),
+            preset=getattr(video, "nv_preset", "") or getattr(video, "preset", ""),
+            pix_fmt=getattr(video, "pix_fmt", ""),
+            audio_mode=getattr(audio, "mode", ""),
+            sub_mode=getattr(subtitle, "mode", ""),
+        )
+
+
 class EncodingController:
     """编码控制器 — 管理编码生命周期（开始/暂停/取消/完成）"""
 
@@ -97,6 +129,16 @@ class EncodingController:
             )
             if not tasks:
                 self._win.set_status(UI_TEXT.NO_ENCODABLE_FILES)
+                with self._encode_lock:
+                    self.encoding_in_progress = False
+                return False
+
+            try:
+                batch_id = uuid.uuid4().hex
+                attach_history_records(self._db, tasks, batch_id)
+                self._active_batch_id = batch_id
+            except Exception:
+                self._win.set_status("创建历史记录失败")
                 with self._encode_lock:
                     self.encoding_in_progress = False
                 return False

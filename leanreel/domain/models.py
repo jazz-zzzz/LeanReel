@@ -21,6 +21,7 @@ class TaskStatus(StrEnum):
     SKIPPED = "skipped"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    DISCARDED = "discarded"
 
 
 @dataclass
