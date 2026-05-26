@@ -355,48 +355,10 @@ class FFmpegExecutor:
                         adaptive_cq_adjusted=cq_info.get("adjusted", 0),
                         adaptive_cq_reason=cq_info.get("reason", ""),
                     )
-                    sidecar_path = write_sidecar(audit)
-
                     db = getattr(task, "_db", None)
-                    if db is None:
-                        import sys
-                        print("[LeanReel audit] db is None — skipping DB write", file=sys.stderr)
+                    audit.db_record_id = getattr(task, "history_id", 0) or 0
+                    sidecar_path = write_sidecar(audit)
                     if db is not None and sidecar_path:
-                        import json as _json
-                        from leanreel.domain.models import CompressionRecord
-                        fsid = getattr(task.snapshot, "id", 0) or 0
-                        if not fsid:
-                            rows = db.execute(
-                                "SELECT id FROM file_snapshot WHERE library_folder_id=? AND relative_path=?",
-                                [task.snapshot.library_folder_id, task.snapshot.relative_path],
-                            )
-                            fsid = rows[0]["id"] if rows else 0
-                            import sys
-                            print(f"[LeanReel audit] fsid_lookup: folder={task.snapshot.library_folder_id} rel={task.snapshot.relative_path} fsid={fsid}", file=sys.stderr)
-                        rec = CompressionRecord(
-                            file_snapshot_id=fsid,
-                            strategy_name=audit.strategy_name,
-                            original_size=audit.source_size_bytes,
-                            compressed_size=audit.output_size_bytes,
-                            status=audit.status,
-                            duration_seconds=int(audit.duration_seconds),
-                            error_message=getattr(task, "error_message", ""),
-                            output_path=audit.output_path,
-                            output_size_bytes=audit.output_size_bytes,
-                            savings_pct=audit.savings_pct,
-                            encoder=audit.encoder,
-                            cq_value=audit.cq or audit.crf,
-                            preset=audit.preset,
-                            pix_fmt=audit.pix_fmt,
-                            audio_mode=audit.audio_mode,
-                            sub_mode=audit.sub_mode,
-                            ffmpeg_command=_json.dumps(audit.ffmpeg_command),
-                            sidecar_path=sidecar_path,
-                            leanreel_version=audit.leanreel_version,
-                        )
-                        audit.db_record_id = task.history_id
-                        write_sidecar(audit)
-
                         _finish_task(
                             task,
                             status=TaskStatus.COMPLETED.value,
@@ -407,14 +369,6 @@ class FFmpegExecutor:
                     if getattr(task, "_delete_source", False) and 0 < task.compressed_size < task.original_size:
                         _delete_source_file(task.input_path)
                         _finish_task(task, status=TaskStatus.COMPLETED.value, progress=100.0, source_deleted=1)
-                        rec.source_deleted = 1
-                        try:
-                            db.execute(
-                                "UPDATE compression_history SET source_deleted = 1 WHERE id = ?",
-                                [db_id],
-                            )
-                        except Exception:
-                            pass
                 except Exception:
                     import traceback
                     traceback.print_exc()

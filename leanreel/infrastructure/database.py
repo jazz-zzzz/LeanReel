@@ -88,13 +88,38 @@ class Database(LibraryStore):
         );
         CREATE TABLE IF NOT EXISTS compression_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_snapshot_id INTEGER NOT NULL REFERENCES file_snapshot(id) ON DELETE CASCADE,
+            file_snapshot_id INTEGER REFERENCES file_snapshot(id) ON DELETE SET NULL,
             strategy_name TEXT NOT NULL,
             original_size INTEGER DEFAULT 0,
             compressed_size INTEGER DEFAULT 0,
             status TEXT DEFAULT 'pending',
             duration_seconds INTEGER DEFAULT 0,
             error_message TEXT DEFAULT '',
+            output_path TEXT DEFAULT '',
+            output_size_bytes INTEGER DEFAULT 0,
+            savings_pct REAL DEFAULT 0,
+            encoder TEXT DEFAULT '',
+            cq_value INTEGER DEFAULT 0,
+            preset TEXT DEFAULT '',
+            pix_fmt TEXT DEFAULT '',
+            audio_mode TEXT DEFAULT '',
+            sub_mode TEXT DEFAULT '',
+            ffmpeg_command TEXT DEFAULT '',
+            sidecar_path TEXT DEFAULT '',
+            leanreel_version TEXT DEFAULT '',
+            source_deleted INTEGER DEFAULT 0,
+            progress REAL DEFAULT 0,
+            stage TEXT DEFAULT '',
+            started_at TEXT DEFAULT '',
+            completed_at TEXT DEFAULT '',
+            updated_at TEXT DEFAULT '',
+            batch_id TEXT DEFAULT '',
+            source_library_id INTEGER DEFAULT 0,
+            source_library_folder_id INTEGER DEFAULT 0,
+            source_library_name TEXT DEFAULT '',
+            source_folder_path TEXT DEFAULT '',
+            source_relative_path TEXT DEFAULT '',
+            source_file_name TEXT DEFAULT '',
             created_at TEXT DEFAULT (datetime('now','localtime'))
         );
         """)
@@ -130,10 +155,137 @@ class Database(LibraryStore):
             ("completed_at", "TEXT DEFAULT ''"),
             ("updated_at", "TEXT DEFAULT ''"),
             ("batch_id", "TEXT DEFAULT ''"),
+            ("source_library_id", "INTEGER DEFAULT 0"),
+            ("source_library_folder_id", "INTEGER DEFAULT 0"),
+            ("source_library_name", "TEXT DEFAULT ''"),
+            ("source_folder_path", "TEXT DEFAULT ''"),
+            ("source_relative_path", "TEXT DEFAULT ''"),
+            ("source_file_name", "TEXT DEFAULT ''"),
         ]
         for col_name, col_def in ch_migrations:
             if col_name not in existing_ch:
                 conn.execute(f"ALTER TABLE compression_history ADD COLUMN {col_name} {col_def}")
+        conn.commit()
+        self._migrate_compression_history_fk(conn)
+        self._snapshot_history_sources(conn)
+        conn.commit()
+
+    def _migrate_compression_history_fk(self, conn: sqlite3.Connection):
+        fk_rows = conn.execute("PRAGMA foreign_key_list(compression_history)").fetchall()
+        cascade_fk = any(row[2] == "file_snapshot" and str(row[6]).upper() == "CASCADE" for row in fk_rows)
+        nullable = any(
+            row[1] == "file_snapshot_id" and int(row[3] or 0) == 0
+            for row in conn.execute("PRAGMA table_info(compression_history)")
+        )
+        if not cascade_fk and nullable:
+            return
+
+        conn.execute("PRAGMA foreign_keys=OFF")
+        conn.execute("ALTER TABLE compression_history RENAME TO compression_history_old")
+        conn.executescript("""
+        CREATE TABLE compression_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_snapshot_id INTEGER REFERENCES file_snapshot(id) ON DELETE SET NULL,
+            strategy_name TEXT NOT NULL,
+            original_size INTEGER DEFAULT 0,
+            compressed_size INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'pending',
+            duration_seconds INTEGER DEFAULT 0,
+            error_message TEXT DEFAULT '',
+            output_path TEXT DEFAULT '',
+            output_size_bytes INTEGER DEFAULT 0,
+            savings_pct REAL DEFAULT 0,
+            encoder TEXT DEFAULT '',
+            cq_value INTEGER DEFAULT 0,
+            preset TEXT DEFAULT '',
+            pix_fmt TEXT DEFAULT '',
+            audio_mode TEXT DEFAULT '',
+            sub_mode TEXT DEFAULT '',
+            ffmpeg_command TEXT DEFAULT '',
+            sidecar_path TEXT DEFAULT '',
+            leanreel_version TEXT DEFAULT '',
+            source_deleted INTEGER DEFAULT 0,
+            progress REAL DEFAULT 0,
+            stage TEXT DEFAULT '',
+            started_at TEXT DEFAULT '',
+            completed_at TEXT DEFAULT '',
+            updated_at TEXT DEFAULT '',
+            batch_id TEXT DEFAULT '',
+            source_library_id INTEGER DEFAULT 0,
+            source_library_folder_id INTEGER DEFAULT 0,
+            source_library_name TEXT DEFAULT '',
+            source_folder_path TEXT DEFAULT '',
+            source_relative_path TEXT DEFAULT '',
+            source_file_name TEXT DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now','localtime'))
+        );
+        """)
+        old_cols = {row[1] for row in conn.execute("PRAGMA table_info(compression_history_old)")}
+        new_cols = [row[1] for row in conn.execute("PRAGMA table_info(compression_history)")]
+        common = [col for col in new_cols if col in old_cols]
+        quoted = ", ".join(common)
+        conn.execute(
+            f"INSERT INTO compression_history ({quoted}) SELECT {quoted} FROM compression_history_old"
+        )
+        conn.execute("DROP TABLE compression_history_old")
+        conn.execute("PRAGMA foreign_keys=ON")
+
+    def _snapshot_history_sources(self, conn: sqlite3.Connection, record_id: int | None = None):
+        where = "WHERE ch.file_snapshot_id IS NOT NULL"
+        params: list = []
+        if record_id is not None:
+            where += " AND ch.id = ?"
+            params.append(record_id)
+        conn.execute(f"""
+            UPDATE compression_history AS ch
+            SET source_library_id = COALESCE((
+                    SELECT lf.library_id
+                    FROM file_snapshot fs
+                    JOIN library_folder lf ON fs.library_folder_id = lf.id
+                    WHERE fs.id = ch.file_snapshot_id
+                ), source_library_id),
+                source_library_folder_id = COALESCE((
+                    SELECT fs.library_folder_id FROM file_snapshot fs WHERE fs.id = ch.file_snapshot_id
+                ), source_library_folder_id),
+                source_library_name = COALESCE((
+                    SELECT lib.name
+                    FROM file_snapshot fs
+                    JOIN library_folder lf ON fs.library_folder_id = lf.id
+                    JOIN library lib ON lf.library_id = lib.id
+                    WHERE fs.id = ch.file_snapshot_id
+                ), source_library_name),
+                source_folder_path = COALESCE((
+                    SELECT lf.path
+                    FROM file_snapshot fs
+                    JOIN library_folder lf ON fs.library_folder_id = lf.id
+                    WHERE fs.id = ch.file_snapshot_id
+                ), source_folder_path),
+                source_relative_path = COALESCE((
+                    SELECT fs.relative_path FROM file_snapshot fs WHERE fs.id = ch.file_snapshot_id
+                ), source_relative_path),
+                source_file_name = COALESCE((
+                    SELECT fs.file_name FROM file_snapshot fs WHERE fs.id = ch.file_snapshot_id
+                ), source_file_name)
+            {where}
+        """, params)
+
+    def _snapshot_history_sources_for_folder(self, folder_id: int):
+        conn = self._pool.get()
+        self._snapshot_history_sources(conn)
+        if self._pool.get_explicit() is None:
+            conn.commit()
+
+    def _snapshot_history_sources_for_library(self, lib_id: int):
+        conn = self._pool.get()
+        self._snapshot_history_sources(conn)
+        if self._pool.get_explicit() is None:
+            conn.commit()
+
+    def _snapshot_history_record(self, record_id: int):
+        conn = self._pool.get()
+        self._snapshot_history_sources(conn, record_id=record_id)
+        if self._pool.get_explicit() is None:
+            conn.commit()
 
     def execute(self, sql: str, params=None):
         conn = self._pool.get()
@@ -193,6 +345,7 @@ class Database(LibraryStore):
         return [Library(id=r["id"], name=r["name"]) for r in rows]
 
     def delete_library(self, lib_id: int):
+        self._snapshot_history_sources_for_library(lib_id)
         self.execute("DELETE FROM library WHERE id=?", [lib_id])
 
     def insert_folder(self, folder: LibraryFolder) -> int:
@@ -210,6 +363,7 @@ class Database(LibraryStore):
         return [LibraryFolder(id=r["id"], library_id=r["library_id"], path=r["path"]) for r in rows]
 
     def delete_folder(self, folder_id: int):
+        self._snapshot_history_sources_for_folder(folder_id)
         self.execute("DELETE FROM library_folder WHERE id=?", [folder_id])
 
     def insert_compression(self, record: CompressionRecord) -> int:
@@ -245,7 +399,9 @@ class Database(LibraryStore):
             f"INSERT INTO compression_history ({','.join(cols)}, updated_at) VALUES ({placeholders}, datetime('now','localtime'))",
             values,
         )
-        return self.last_insert_id
+        record_id = self.last_insert_id
+        self._snapshot_history_record(record_id)
+        return record_id
 
     def create_compression_record(
         self,
@@ -274,7 +430,9 @@ class Database(LibraryStore):
             file_snapshot_id, batch_id, strategy_name, original_size,
             output_path, encoder, cq_value, preset, pix_fmt, audio_mode, sub_mode,
         ])
-        return self.last_insert_id
+        record_id = self.last_insert_id
+        self._snapshot_history_record(record_id)
+        return record_id
 
     def update_compression_runtime(
         self,
@@ -345,17 +503,18 @@ class Database(LibraryStore):
         """, [batch_id])
         total = len(rows)
         completed = sum(1 for r in rows if r["status"] == "completed")
+        skipped = sum(1 for r in rows if r["status"] == "skipped")
         failed = sum(1 for r in rows if r["status"] == "failed")
         cancelled = sum(1 for r in rows if r["status"] == "cancelled")
         discarded = sum(1 for r in rows if r["status"] == "discarded")
         running = sum(1 for r in rows if r["status"] == "running")
         pending = sum(1 for r in rows if r["status"] == "pending")
-        terminal = completed + failed + cancelled + discarded
-        progress_sum = sum(float(r.get("progress") or 0) for r in rows)
+        progress_sum = sum(max(0.0, min(100.0, float(r.get("progress") or 0))) for r in rows)
         percentage = progress_sum / max(total, 1)
         return {
             "total": total,
             "completed": completed,
+            "skipped": skipped,
             "failed": failed,
             "cancelled": cancelled,
             "discarded": discarded,
@@ -367,10 +526,10 @@ class Database(LibraryStore):
     def get_history_for_library(self, lib_id: int) -> list[CompressionRecord]:
         rows = self.execute("""
             SELECT ch.* FROM compression_history ch
-            JOIN file_snapshot fs ON ch.file_snapshot_id = fs.id
-            JOIN library_folder lf ON fs.library_folder_id = lf.id
-            WHERE lf.library_id = ?
-            ORDER BY ch.created_at DESC
+            LEFT JOIN file_snapshot fs ON ch.file_snapshot_id = fs.id
+            LEFT JOIN library_folder lf ON fs.library_folder_id = lf.id
+            WHERE COALESCE(lf.library_id, ch.source_library_id) = ?
+            ORDER BY ch.updated_at DESC, ch.created_at DESC, ch.id DESC
         """, [lib_id])
         return [CompressionRecord(
             id=r["id"], file_snapshot_id=r["file_snapshot_id"],
@@ -403,13 +562,16 @@ class Database(LibraryStore):
                 ch.progress, ch.stage, ch.started_at, ch.completed_at, ch.updated_at, ch.batch_id,
                 ch.output_path, ch.sidecar_path, ch.created_at,
                 ch.source_deleted, ch.leanreel_version,
-                fs.file_name, fs.relative_path, fs.video_codec, fs.library_folder_id,
-                lf.path AS folder_path,
-                lib.name AS library_name
+                COALESCE(fs.file_name, ch.source_file_name, '') AS file_name,
+                COALESCE(fs.relative_path, ch.source_relative_path, '') AS relative_path,
+                fs.video_codec,
+                COALESCE(fs.library_folder_id, ch.source_library_folder_id, 0) AS library_folder_id,
+                COALESCE(lf.path, ch.source_folder_path, '') AS folder_path,
+                COALESCE(lib.name, ch.source_library_name, '') AS library_name
             FROM compression_history ch
-            JOIN file_snapshot fs ON ch.file_snapshot_id = fs.id
-            JOIN library_folder lf ON fs.library_folder_id = lf.id
-            JOIN library lib ON lf.library_id = lib.id
+            LEFT JOIN file_snapshot fs ON ch.file_snapshot_id = fs.id
+            LEFT JOIN library_folder lf ON fs.library_folder_id = lf.id
+            LEFT JOIN library lib ON lf.library_id = lib.id
             ORDER BY ch.updated_at DESC, ch.created_at DESC, ch.id DESC
         """)
         return rows
@@ -422,15 +584,14 @@ class Database(LibraryStore):
         placeholders = ",".join("?" * len(ordered_ids))
         rows = self.execute(f"""
             SELECT
-                fs.library_folder_id,
-                fs.relative_path,
+                COALESCE(fs.library_folder_id, ch.source_library_folder_id, 0) AS library_folder_id,
+                COALESCE(fs.relative_path, ch.source_relative_path, '') AS relative_path,
                 ch.*
             FROM compression_history ch
-            JOIN file_snapshot fs ON ch.file_snapshot_id = fs.id
-            WHERE fs.library_folder_id IN ({placeholders})
+            LEFT JOIN file_snapshot fs ON ch.file_snapshot_id = fs.id
+            WHERE COALESCE(fs.library_folder_id, ch.source_library_folder_id, 0) IN ({placeholders})
               AND ch.status = ?
-              AND ch.sidecar_path <> ''
-            ORDER BY ch.created_at DESC, ch.id DESC
+            ORDER BY ch.updated_at DESC, ch.created_at DESC, ch.id DESC
         """, [*ordered_ids, TaskStatus.COMPLETED.value])
 
         records: dict[tuple[int, str], CompressionRecord] = {}

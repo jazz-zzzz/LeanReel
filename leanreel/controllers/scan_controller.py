@@ -1,4 +1,6 @@
 """Scan controller: file discovery, cache resolution, probing, and list updates."""
+from dataclasses import asdict, is_dataclass
+import inspect
 import os
 import threading
 
@@ -38,6 +40,34 @@ def remove_folder_from_current_state(snapshots, folder_paths, strategy_overrides
         )
     }
     return remaining_snapshots, remaining_paths, remaining_overrides
+
+
+def _compression_record_dict(record):
+    if record is None:
+        return None
+    if isinstance(record, dict):
+        return record
+    if is_dataclass(record):
+        data = asdict(record)
+        status = data.get("status")
+        if hasattr(status, "value"):
+            data["status"] = status.value
+        return data
+    if hasattr(record, "__dict__"):
+        return dict(vars(record))
+    return dict(record)
+
+
+def _decision_display(file_panel, snap, match, compressed_record=None):
+    fn = file_panel._decision_display
+    try:
+        params = inspect.signature(fn).parameters.values()
+        accepts_record = any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params) or len(params) >= 3
+    except (TypeError, ValueError):
+        accepts_record = True
+    if accepts_record:
+        return fn(snap, match, compressed_record)
+    return fn(snap, match)
 
 
 class ScanController:
@@ -200,22 +230,38 @@ class ScanController:
         # ── 检测已压缩文件（从 DB 查询） ──
         compressed_info: dict = {}
         try:
-            history_rows = self._services.db.get_all_history()
-            for h in history_rows:
-                if h.get("status") == "completed":
-                    folder_id = h.get("library_folder_id")
-                    rel_path = h.get("relative_path", "")
-                    if folder_id is not None and rel_path:
-                        compressed_info[(int(folder_id), str(rel_path))] = h
-        except Exception:
+            db = getattr(self._services, "db", None)
+            if db is None:
+                raise AttributeError("db is not configured")
+            folder_ids = {int(s.library_folder_id or 0) for s in snapshots if int(s.library_folder_id or 0)}
+            if hasattr(db, "get_compression_records_for_folders"):
+                records = db.get_compression_records_for_folders(folder_ids)
+                compressed_info = {
+                    key: _compression_record_dict(record)
+                    for key, record in records.items()
+                }
+            else:
+                history_rows = db.get_all_history()
+                for h in history_rows:
+                    if h.get("status") == "completed":
+                        folder_id = h.get("library_folder_id")
+                        rel_path = h.get("relative_path", "")
+                        if folder_id is not None and rel_path:
+                            compressed_info[(int(folder_id), str(rel_path))] = h
+        except AttributeError:
             pass
+        except Exception as exc:
+            win = getattr(self, "_win", None)
+            if hasattr(win, "set_status"):
+                win.set_status(f"读取压缩历史失败：{exc}")
 
         rows = []
         for s in snapshots:
             key = (int(s.library_folder_id or 0), str(s.relative_path))
             m = matched.get(key)
-            d = self._file_panel._decision_display(s, m, compressed_info.get(key))
-            rows.append(FileRow(snap=s, match=m, decision=d))
+            compressed_record = compressed_info.get(key)
+            d = _decision_display(self._file_panel, s, m, compressed_record)
+            rows.append(FileRow(snap=s, match=m, decision=d, compressed_record=compressed_record))
         self._file_panel.set_strategy_lookup(self._services.strategies)
         self._store.rebuild(rows, strategies=self._services.strategies, keep_checked=False)
         self._file_panel._show_current_view()
@@ -513,7 +559,10 @@ class ScanController:
             else:
                 match = None
             self._notifier.probed.emit(snap, match)
-            decision = self._file_panel._decision_display(snap, match)
+            key = (int(snap.library_folder_id or 0), str(snap.relative_path))
+            existing_row = self._store.row_by_key(key) if hasattr(self._store, "row_by_key") else None
+            compressed_record = getattr(existing_row, "compressed_record", None)
+            decision = _decision_display(self._file_panel, snap, match, compressed_record)
             self._store.update_row((snap.library_folder_id, snap.relative_path), snap, match, decision=decision)
             ScanController._sync_visible_scan_progress(self, st)
             self._notifier.progress.emit(st.done_files, st.total_files)

@@ -690,7 +690,7 @@ def test_f1_library_cache_loader_rejects_main_thread_cache_work(qtbot):
     threading_contract._reset_for_tests()
 
 
-def test_populate_file_list_uses_sql_compression_records_not_sidecar_scan(monkeypatch):
+def test_populate_file_list_uses_targeted_sql_compression_records_not_sidecar_scan(monkeypatch):
     """Compressed state comes from SQL records, not per-file NAS glob calls."""
     from types import SimpleNamespace
     from leanreel.controllers.scan_controller import ScanController
@@ -717,7 +717,10 @@ def test_populate_file_list_uses_sql_compression_records_not_sidecar_scan(monkey
         services=SimpleNamespace(
             matcher=NoMatch(),
             strategies=[],
-            db=SimpleNamespace(get_all_history=lambda: [expected_record]),
+            db=SimpleNamespace(
+                get_all_history=lambda: (_ for _ in ()).throw(AssertionError("full history scan should not be used")),
+                get_compression_records_for_folders=lambda folder_ids: {(1, "cached.mkv"): expected_record},
+            ),
         ),
         file_panel=SimpleNamespace(
             _decision_display=lambda snap, match, compressed_record=None: seen_records.append(compressed_record) or SimpleNamespace(processable=False),
@@ -734,6 +737,94 @@ def test_populate_file_list_uses_sql_compression_records_not_sidecar_scan(monkey
     ctrl._populate_file_list([_snap(library_folder_id=1, relative_path="cached.mkv")])
 
     assert seen_records == [expected_record]
+
+
+def test_visible_probe_update_preserves_compressed_decision(qtbot):
+    """A probe refresh must not turn a known compressed row back into a processable row."""
+    _qapp()
+    from types import SimpleNamespace
+    from leanreel.controllers.scan_controller import ScanController
+    from leanreel.domain.models import FileRow
+    from leanreel.state.file_store import FileTableStore
+
+    compressed_record = {
+        "status": "completed",
+        "library_folder_id": 1,
+        "relative_path": "cached.mkv",
+        "strategy_name": "SQL 压缩记录",
+        "encoder": "av1_nvenc",
+        "savings_pct": 30.0,
+    }
+    store = FileTableStore()
+    compressed_decision = _decision(status_key="compressed", processable=False)
+    store.rebuild([
+        FileRow(
+            snap=_snap(library_folder_id=1, relative_path="cached.mkv", file_name="cached.mkv", probe_ok=False),
+            decision=compressed_decision,
+            compressed_record=compressed_record,
+        )
+    ])
+
+    decisions_seen = []
+
+    class Matcher:
+        def match(self, _snap):
+            return SimpleNamespace(name="AV1", estimated_savings="20%")
+
+    class FilePanel:
+        def _decision_display(self, snap, match, compressed_record=None):
+            decisions_seen.append(compressed_record)
+            if compressed_record:
+                return _decision(status_key="compressed", processable=False)
+            return _decision(status_key="processable", processable=True)
+
+        def refresh_summary(self, snapshots):
+            pass
+
+        def set_progress(self, done, total):
+            pass
+
+        refresh_btn = SimpleNamespace(setEnabled=lambda value: None)
+        set_progress_visible = lambda self, value: None
+
+    state = SimpleNamespace(
+        current_folder_paths={1: r"\\nas\media"},
+        current_snapshots=[
+            _snap(library_folder_id=1, relative_path="cached.mkv", file_name="cached.mkv", probe_ok=False)
+        ],
+        scan_states={1: SimpleNamespace(
+            token=1,
+            running=True,
+            library_id=None,
+            done_files=0,
+            total_files=1,
+            folder_ids={1},
+            anchor_folder_id=1,
+            owns_any_folder=lambda folder_ids: bool({1} & set(folder_ids)),
+            finished=False,
+        )},
+    )
+    ctrl = ScanController(
+        state=state,
+        services=SimpleNamespace(matcher=Matcher(), strategies=[]),
+        file_panel=FilePanel(),
+        win=SimpleNamespace(set_status=lambda text: None),
+        store=store,
+        notifier=SimpleNamespace(
+            probed=SimpleNamespace(emit=lambda snap, match: None),
+            progress=SimpleNamespace(emit=lambda done, total: None),
+            all_done=SimpleNamespace(emit=lambda: None),
+        ),
+    )
+
+    ScanController._on_probe_result(
+        ctrl,
+        _snap(library_folder_id=1, relative_path="cached.mkv", file_name="cached.mkv", probe_ok=True),
+        1,
+    )
+
+    assert decisions_seen == [compressed_record]
+    assert store.row_by_key((1, "cached.mkv")).decision.status_key == "compressed"
 
 
 def test_f1_probe_results_are_committed_on_main_thread(qtbot):

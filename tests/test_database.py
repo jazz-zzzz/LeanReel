@@ -108,7 +108,7 @@ def test_compression_history(db: Database):
     assert records[0].strategy_name == "均衡压缩"
 
 
-def test_get_compression_records_for_folders_returns_latest_completed_sidecar(db: Database):
+def test_get_compression_records_for_folders_returns_latest_completed_record(db: Database):
     from leanreel.domain.models import CompressionRecord
 
     lib_id = db.insert_library(Library(name="Film"))
@@ -128,14 +128,15 @@ def test_get_compression_records_for_folders_returns_latest_completed_sidecar(db
         file_snapshot_id=snap_id,
         strategy_name="SQL 压缩记录",
         status=TaskStatus.COMPLETED,
-        sidecar_path="/mnt/f/movie_zcompressed.mkv.leanreel.json",
+        sidecar_path="",
+        output_path="/mnt/f/movie_zcompressed.mkv",
     ))
 
     records = db.get_compression_records_for_folders({fid})
 
     assert set(records) == {(fid, "movie.mkv")}
     assert records[(fid, "movie.mkv")].strategy_name == "SQL 压缩记录"
-    assert records[(fid, "movie.mkv")].sidecar_path.endswith(".leanreel.json")
+    assert records[(fid, "movie.mkv")].output_path.endswith("_zcompressed.mkv")
 
 
 def test_compression_history_runtime_columns_exist(db):
@@ -262,6 +263,7 @@ def test_get_batch_progress_aggregates_statuses(db):
     assert progress == {
         "total": 3,
         "completed": 1,
+        "skipped": 0,
         "failed": 1,
         "cancelled": 0,
         "discarded": 0,
@@ -400,17 +402,41 @@ def test_get_batch_progress_bounds_each_row_and_includes_skipped(db):
 
     progress = db.get_batch_progress("batch-1")
 
-    # "skipped" is not tracked as a separate category in get_batch_progress.
-    # The skipped row (ids[2], status="skipped") is not counted in any status bucket,
-    # so the counted statuses sum to 4 while total is 5.
     assert progress["completed"] == 1
+    assert progress["skipped"] == 1
     assert progress["failed"] == 1
     assert progress["pending"] == 1
     assert progress["running"] == 1
     assert progress["total"] == 5
-    # percentage = sum of all progress values / total = (100+25+10+150+(-10)) / 5 = 55.0
-    assert progress["percentage"] == 55.0
-    assert progress["percentage"] <= 100.0
+    # percentage clamps each row first: (100+25+10+100+0) / 5 = 47.0
+    assert progress["percentage"] == 47.0
+
+
+def test_history_survives_deleted_folder_using_denormalized_source_fields(db: Database):
+    lib_id = db.insert_library(Library(name="Movies"))
+    folder_id = db.insert_folder(LibraryFolder(library_id=lib_id, path="/movies"))
+    db.execute(
+        "INSERT INTO file_snapshot (library_folder_id, relative_path, file_name, size_bytes, video_codec) VALUES (?,?,?,?,?)",
+        [folder_id, "gone.mkv", "gone.mkv", 1000, "h264"],
+    )
+    snap_id = db.last_insert_id
+    db.create_compression_record(
+        file_snapshot_id=snap_id,
+        batch_id="batch-1",
+        strategy_name="AV1",
+        original_size=1000,
+        output_path="/movies/gone_zcompressed.mkv",
+    )
+
+    db.delete_folder(folder_id)
+
+    rows = db.get_all_history()
+    assert len(rows) == 1
+    assert rows[0]["library_name"] == "Movies"
+    assert rows[0]["folder_path"] == "/movies"
+    assert rows[0]["relative_path"] == "gone.mkv"
+    assert rows[0]["file_name"] == "gone.mkv"
+    assert rows[0]["library_folder_id"] == folder_id
 
 
 def test_compression_record_runtime_fields_round_trip_through_typed_history(db):

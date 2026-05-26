@@ -344,6 +344,7 @@ class FileRow:
     snap: FileSnapshot
     match: MatchResult | None = field(default=None, repr=False)
     decision: FileDecisionDisplay | None = field(default=None, repr=False)
+    compressed_record: dict | None = field(default=None, repr=False)
 
     @property
     def key(self) -> FileKey:

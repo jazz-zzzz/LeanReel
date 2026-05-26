@@ -3,6 +3,32 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
 
+def _history_row(**overrides):
+    row = {
+        "status": "completed",
+        "progress": 100.0,
+        "stage": "",
+        "file_name": "movie.mkv",
+        "library_name": "电影",
+        "folder_path": "/movies",
+        "original_size": 1000,
+        "output_size_bytes": 500,
+        "savings_pct": 50.0,
+        "strategy_name": "AV1",
+        "encoder": "av1_nvenc",
+        "cq_value": 34,
+        "duration_seconds": 0,
+        "created_at": "",
+        "completed_at": "",
+        "source_deleted": 0,
+        "output_path": "",
+        "compressed_size": 0,
+        "error_message": "",
+    }
+    row.update(overrides)
+    return row
+
+
 def test_history_panel_creates_with_columns(qtbot):
     from leanreel.gui.history_panel import HistoryPanel
 
@@ -221,4 +247,102 @@ def test_history_panel_running_status_filter(qtbot):
     assert panel.table.model().rowCount() == 1
     assert panel.table.model().data(panel.table.model().index(0, 0), Qt.DisplayRole) == "discard.mkv"
 
+    panel.close()
+
+
+def test_history_panel_filters_by_library_strategy_and_status(qtbot):
+    from leanreel.gui.history_panel import HistoryPanel
+
+    panel = HistoryPanel()
+    qtbot.addWidget(panel)
+    panel.populate([
+        _history_row(file_name="a.mkv", library_name="电影", strategy_name="AV1", status="completed"),
+        _history_row(file_name="b.mkv", library_name="剧集", strategy_name="AV1", status="completed"),
+        _history_row(file_name="c.mkv", library_name="电影", strategy_name="x265", status="failed"),
+    ])
+
+    panel.library_filter.setCurrentText("电影")
+    assert panel.table.model().rowCount() == 2
+
+    panel.strategy_filter.setCurrentText("AV1")
+    assert panel.table.model().rowCount() == 1
+    assert panel.table.model().data(panel.table.model().index(0, 0), Qt.DisplayRole) == "a.mkv"
+
+    panel.status_filter.setCurrentText("失败")
+    assert panel.table.model().rowCount() == 0
+
+    panel.close()
+
+
+def test_history_panel_summary_tracks_filtered_rows(qtbot):
+    from leanreel.gui.history_panel import HistoryPanel
+
+    panel = HistoryPanel()
+    qtbot.addWidget(panel)
+    panel.populate([
+        _history_row(file_name="a.mkv", library_name="电影", original_size=1000, output_size_bytes=400),
+        _history_row(file_name="b.mkv", library_name="剧集", original_size=1000, output_size_bytes=800),
+    ])
+
+    panel.library_filter.setCurrentText("电影")
+
+    assert "共 1 条" in panel.summary_label.text()
+    assert "累计节省 600 B" in panel.summary_label.text()
+    panel.close()
+
+
+def test_history_panel_savings_only_for_completed_with_output(qtbot):
+    from leanreel.gui.history_panel import HistoryPanel
+
+    panel = HistoryPanel()
+    qtbot.addWidget(panel)
+    panel.populate([
+        _history_row(file_name="failed.mkv", status="failed", original_size=1000, output_size_bytes=0, savings_pct=0.0),
+        _history_row(file_name="done.mkv", status="completed", original_size=1000, output_size_bytes=1000, savings_pct=0.0),
+    ])
+    model = panel.table.model()
+    rows_by_name = {
+        model.data(model.index(row, 0), Qt.DisplayRole): row
+        for row in range(model.rowCount())
+    }
+    failed_row = rows_by_name["failed.mkv"]
+    done_row = rows_by_name["done.mkv"]
+
+    assert model.data(model.index(failed_row, 6), Qt.DisplayRole) == "—"
+    assert model.data(model.index(failed_row, 7), Qt.DisplayRole) == "—"
+    assert model.data(model.index(done_row, 6), Qt.DisplayRole) == "0 B"
+    assert model.data(model.index(done_row, 7), Qt.DisplayRole) == "0.0%"
+    panel.close()
+
+
+def test_history_panel_sorts_numeric_columns_by_value(qtbot):
+    from leanreel.gui.history_panel import HistoryPanel
+
+    panel = HistoryPanel()
+    qtbot.addWidget(panel)
+    panel.populate([
+        _history_row(file_name="small.mkv", original_size=900),
+        _history_row(file_name="large.mkv", original_size=10_000),
+    ])
+    model = panel.table.model()
+
+    model.sort(4, Qt.AscendingOrder)
+    assert model.data(model.index(0, 0), Qt.DisplayRole) == "small.mkv"
+
+    model.sort(4, Qt.DescendingOrder)
+    assert model.data(model.index(0, 0), Qt.DisplayRole) == "large.mkv"
+    panel.close()
+
+
+def test_history_panel_can_show_load_error_without_clearing_rows(qtbot):
+    from leanreel.gui.history_panel import HistoryPanel
+
+    panel = HistoryPanel()
+    qtbot.addWidget(panel)
+    panel.populate([_history_row(file_name="kept.mkv")])
+
+    panel.show_error("database locked")
+
+    assert panel.table.model().rowCount() == 1
+    assert "database locked" in panel.summary_label.text()
     panel.close()
