@@ -41,7 +41,7 @@ LeanReel 的目标不是替你盲目"一键压缩所有视频"，而是先把媒
 | 编码识别 | FFprobe 识别编码、分辨率、时长、码率、音轨、字幕、HDR 类型。 |
 | 并发探测 | 多线程 FFprobe 探测，大目录快速加载。 |
 | 双视图 | 平铺表格 + 目录树，排序/列宽/筛选自由。 |
-| 策略预设 | CPU x265 / GPU NVENC / AV1 NVENC / 流复制，技术名优先。 |
+| 策略预设 | x265 慢速保画质 / AV1 NVENC 快速，技术名优先。 |
 | 硬件解码 | NVENC 编码器自动启用 NVDEC 硬件解码，GPU 管线零拷贝。 |
 | 智能跳过 | HEVC/H.265、AV1、HDR10、HDR10+、Dolby Vision 默认保护不处理。 |
 | 自定义参数 | 编码器、CRF/CQ、音轨过滤、字幕语言逐文件可调。 |
@@ -67,7 +67,7 @@ flowchart LR
 
 - **媒体库面板**（左）：库/文件夹树，添加、删除、刷新缓存。
 - **文件列表**（中）：核心决策区。编码、HDR、策略、节省空间，支持排序/筛选/勾选。已压缩文件显示"已被压缩为 HEVC/AV1 片源"。
-- **策略面板**（右）：预设策略卡片 + 可折叠自定义参数。设置并行数 + "删除源文件"勾选框 + 开始按钮。
+- **策略面板**（右）：预设策略卡片 + 可折叠自定义参数。并行数 + 删除源文件勾选框 + 开始按钮。
 - **底部条**：全局进度（完成 4/12 · 失败 1 · 60%）+ 暂停/取消按钮。
 - **转换历史**（全屏）：菜单栏 → 查看 → 转换历史。15 列完整审计，进度列实时更新，双击跳转输出文件夹。
 
@@ -75,20 +75,13 @@ flowchart LR
 
 策略以 JSON 文件存放在 `leanreel/resources/strategies/`。
 
-| 策略 | 方向 | 速度 | 节省 | 场景 |
-| --- | --- | --- | --- | --- |
-| CPU - x265 CRF 18 高质量 | CPU HEVC | 慢 | 20-35% | 画质优先 |
-| CPU - x265 CRF 20 标准 | CPU HEVC | 慢 | 35-50% | 多数 SDR H.264 |
-| CPU - x265 CRF 20 快速 | CPU HEVC | 中 | 30-45% | medium 预设 + pmode |
-| CPU - x265 CRF 22 高压缩 | CPU HEVC | 慢 | 50-70% | 极致体积 |
-| CPU - x265 CRF 22 极速 | CPU HEVC | 快 | 45-65% | fast 预设 + pmode |
-| GPU - NVENC CQ 23 高质量 | GPU HEVC | 很快 | 25-45% | NVIDIA 硬编码画质优先 |
-| GPU - NVENC CQ 26 快速 | GPU HEVC | 很快 | 35-55% | 日常批量 |
-| GPU - AV1 CQ 32 保画质 | GPU AV1 | 很快 | 35-55% | RTX 40 系+，效率最高 |
-| GPU - AV1 CQ 34 均衡 | GPU AV1 | 很快 | 45-65% | RTX 40 系+，体积优先 |
-| Copy Streams | 流复制 | 极快 | 5-15% | 仅去冗余流 |
+| 策略 | 编码器 | 参数 | 节省 |
+| --- | --- | --- | --- |
+| CPU x265 CRF18 慢速保画质 | libx265 | CRF 18, slow | 30-50% |
+| AV1 NVENC CQ34 均衡快速 | av1_nvenc | CQ 34, p5 | 45-65% |
+| AV1 NVENC CQ32 保画质 | av1_nvenc | CQ 32, p6 | 35-55% |
 
-自动匹配跳过 HEVC/H.265、AV1、HDR10、HDR10+、Dolby Vision。
+自动跳过 HEVC/H.265、AV1、HDR10、HDR10+、Dolby Vision。策略 JSON 在 `leanreel/resources/strategies/`，可直接编辑或新增。
 
 ## 典型工作流
 
@@ -191,7 +184,7 @@ flowchart TB
 - 媒体库/文件夹管理 + SQLite 持久化。
 - FFprobe 元数据提取 + 并发探测。
 - 文件列表排序/筛选/双视图/策略覆盖。
-- CPU x265 (5 档)、GPU AV1 NVENC (2 档)、GPU HEVC NVENC (2 档)、Stream Copy。
+- CPU x265 (1 档)、GPU AV1 NVENC (2 档)。
 - NVDEC 硬件解码 + 直接 I/O（无中转拷贝）。
 - 批量并发编码 + 暂停/取消。
 - 审计侧挂（JSON）+ 统一转码历史（DB 单一数据源）。
