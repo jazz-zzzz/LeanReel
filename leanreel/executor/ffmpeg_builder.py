@@ -150,7 +150,9 @@ class FFmpegBuilder:
         cmd = [get_ffmpeg_path(), "-nostdin", "-y",
                "-fflags", "+genpts+discardcorrupt"]
         if spec.kind == "nvenc":
-            cmd.extend(["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"])
+            src_codec = (snapshot.video_codec or "").lower()
+            if src_codec in ("h264", "hevc", "h265", "av1", "av01", "vp9"):
+                cmd.extend(["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"])
         cmd.extend([
             "-thread_queue_size", "16384",
             "-i", input_path,
