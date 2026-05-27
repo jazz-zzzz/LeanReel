@@ -350,11 +350,20 @@ class FileListPanel(QWidget):
             start, end = (anchor, clicked) if anchor < clicked else (clicked, anchor)
             anchor_state = self.table.model().data(self.table.model().index(anchor, 0), Qt.CheckStateRole)
             next_state = Qt.Unchecked if anchor_state == Qt.Checked else Qt.Checked
+            next_checked = next_state == Qt.Checked
+            # 批量更新 store，阻断信号避免逐行触发 filter
+            m = self.table.model()
+            m.blockSignals(True)
             for row in range(start, end + 1):
-                ri = self.table.model().index(row, 0)
-                rflags = self.table.model().flags(ri)
+                ri = m.index(row, 0)
+                rflags = m.flags(ri)
                 if (rflags & Qt.ItemIsEnabled) and (rflags & Qt.ItemIsUserCheckable):
-                    self.table.model().setData(ri, next_state, Qt.CheckStateRole)
+                    store_idx = m._to_store_index(row)
+                    row_obj = self._store.row_at(store_idx)
+                    if row_obj:
+                        self._store.set_checked(row_obj.key, next_checked)
+                    m.setData(ri, next_state, Qt.CheckStateRole)
+            m.blockSignals(False)
         else:
             current = self.table.model().data(index, Qt.CheckStateRole)
             next_state = Qt.Unchecked if current == Qt.Checked else Qt.Checked
@@ -410,11 +419,13 @@ class FileListPanel(QWidget):
                 start, end = (anchor, clicked_idx) if anchor < clicked_idx else (clicked_idx, anchor)
                 anchor_item = leaves[anchor]
                 next_checked = anchor_item.checkState(0) != Qt.Checked
+                self.tree.blockSignals(True)
                 for idx in range(start, end + 1):
                     leaf = leaves[idx]
                     key = self._coerce_key(leaf.data(0, Qt.UserRole))
                     if key is not None:
                         self._store.set_checked(key, next_checked)
+                self.tree.blockSignals(False)
         else:
             key = self._coerce_key(item.data(0, Qt.UserRole))
             if key is None:
