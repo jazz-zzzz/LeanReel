@@ -735,7 +735,8 @@ def test_ffmpeg_executor_writes_failed_status_to_history(monkeypatch, tmp_path):
 
         def finish_compression(self, record_id, *, status, progress, duration_seconds,
                                          compressed_size=0, output_size_bytes=0, savings_pct=0.0,
-                                         error_message="", sidecar_path="", source_deleted=None):
+                                         error_message="", sidecar_path="", source_deleted=None,
+                                         ffmpeg_command=""):
             # Store terminal state as a record-like object for assertions
             self.records.append(SimpleNamespace(
                 status=status,

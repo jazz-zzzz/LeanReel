@@ -467,6 +467,7 @@ class Database(LibraryStore):
         error_message: str = "",
         sidecar_path: str = "",
         source_deleted: int | None = None,
+        ffmpeg_command: str = "",
     ) -> None:
         assignments = [
             "status = ?",
@@ -477,12 +478,14 @@ class Database(LibraryStore):
             "savings_pct = ?",
             "error_message = ?",
             "sidecar_path = ?",
+            "ffmpeg_command = ?",
             "completed_at = datetime('now','localtime')",
             "updated_at = datetime('now','localtime')",
         ]
         values: list = [
             status, float(progress), int(duration_seconds), int(compressed_size),
             int(output_size_bytes), float(savings_pct), error_message, sidecar_path,
+            ffmpeg_command,
         ]
         if source_deleted is not None:
             assignments.append("source_deleted = ?")

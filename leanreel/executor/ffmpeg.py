@@ -2,6 +2,7 @@
 import hashlib
 import os
 import shutil
+import subprocess
 import tempfile
 import threading
 import time as _time
@@ -72,6 +73,7 @@ def _finish_task(
     error_message: str = "",
     sidecar_path: str = "",
     source_deleted: int | None = None,
+    ffmpeg_command: str = "",
 ) -> None:
     db = getattr(task, "_db", None)
     history_id = getattr(task, "history_id", 0)
@@ -92,6 +94,7 @@ def _finish_task(
             error_message=error_message,
             sidecar_path=sidecar_path,
             source_deleted=source_deleted,
+            ffmpeg_command=ffmpeg_command,
         )
     except Exception:
         pass
@@ -348,6 +351,7 @@ class FFmpegExecutor:
                     from leanreel.services.audit import build_audit, write_sidecar
                     cmd = getattr(task, "_ffmpeg_command", [])
                     cq_info = getattr(task, "_adaptive_cq", {})
+                    cmd_str = subprocess.list2cmdline(cmd) if cmd else ""
                     audit = build_audit(
                         task=task,
                         ffmpeg_command=cmd,
@@ -364,11 +368,12 @@ class FFmpegExecutor:
                             status=TaskStatus.COMPLETED.value,
                             progress=100.0,
                             sidecar_path=sidecar_path,
+                            ffmpeg_command=cmd_str,
                         )
 
                     if getattr(task, "_delete_source", False) and 0 < task.compressed_size < task.original_size:
                         _delete_source_file(task.input_path)
-                        _finish_task(task, status=TaskStatus.COMPLETED.value, progress=100.0, source_deleted=1)
+                        _finish_task(task, status=TaskStatus.COMPLETED.value, progress=100.0, source_deleted=1, ffmpeg_command=cmd_str)
                 except Exception:
                     import traceback
                     traceback.print_exc()

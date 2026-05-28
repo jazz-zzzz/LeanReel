@@ -1,6 +1,6 @@
 {
-  "name": "AV1 NVENC CQ34 均衡快速",
-  "description": "RTX 40 系及以上首选。AV1 硬件编码，速度快，适合批量压缩 SDR H.264；CQ34 是均衡档，优先兼顾体积和画质。",
+  "name": "AV1 NVENC CQ28 保画质",
+  "description": "AV1 硬件编码的画质优先档。CQ28 比均衡档更保守，p6 使用更高质量的 NVENC 预设，适合在意画质的 SDR H.264。",
   "is_preset": true,
   "video": {
     "encoder": "av1_nvenc",
@@ -8,14 +8,14 @@
     "preset": "",
     "pix_fmt": "yuv420p10le",
     "gpu": true,
-    "nv_preset": "p5",
+    "nv_preset": "p6",
     "rc": "vbr",
-    "cq": 34
+    "cq": 28
   },
   "hdr": {"mode": "preserve_hdr10", "dv_handling": "reinject_rpu"},
   "audio": {"mode": "keep_original", "remove_commentary": false},
   "subtitle": {"mode": "keep_all"},
   "filters": {"skip_x265": true, "min_size_gb": null, "only_remux": false},
-  "estimated_savings": "45-65%",
-  "quality_impact": "均衡压缩；默认仍跳过 HEVC/HDR/DV 片源"
+  "estimated_savings": "35-55%",
+  "quality_impact": "GPU 保画质压缩；默认仍跳过 HEVC/HDR/DV 片源"
 }
