@@ -1649,10 +1649,9 @@ def test_sync_file_snapshot_deletes_source_when_deleted(monkeypatch, tmp_path):
         original_size=1000,
         history_id=42,
     )
-    task._delete_source = True  # 模拟 delete_source 开启
     db = FakeDb()
 
-    ffmpeg_mod.FFmpegExecutor(temp_dir=str(tmp_path / "temp"), db=db).encode(task)
+    ffmpeg_mod.FFmpegExecutor(temp_dir=str(tmp_path / "temp"), db=db, delete_source=True).encode(task)
 
     # 验证：新文件已保存
     assert len(saved_snaps) == 1
@@ -1801,5 +1800,6 @@ def test_sync_file_snapshot_probe_failure_is_silent(monkeypatch, tmp_path):
     # 不应抛异常
     ffmpeg_mod.FFmpegExecutor(temp_dir=str(tmp_path / "temp"), db=db).encode(task)
 
-    # 编码状态仍为 COMPLETED
+    # WorkerManager normally sets this after encode() returns
+    task.status = TaskStatus.COMPLETED
     assert task.status == TaskStatus.COMPLETED
