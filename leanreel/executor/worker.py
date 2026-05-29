@@ -44,7 +44,7 @@ class EncodeTask:
 class WorkerManager:
     """并行编码 Worker 管理器"""
 
-    def __init__(self, executor, max_workers: int = 4,
+    def __init__(self, executor, max_workers: int = 2,
                  progress_callback: Optional[Callable] = None):
         self.executor = executor
         self.max_workers = max_workers

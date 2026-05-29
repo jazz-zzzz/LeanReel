@@ -332,7 +332,7 @@ class StrategyPanel(QWidget):
 
         self.workers_spin = QSpinBox()
         self.workers_spin.setRange(1, 16)
-        self.workers_spin.setValue(4)
+        self.workers_spin.setValue(2)
         self.workers_spin.setSuffix(UI_TEXT.STRATEGY_WORKERS_SUFFIX)
         encode_layout.addRow(UI_TEXT.STRATEGY_WORKERS, self.workers_spin)
 
