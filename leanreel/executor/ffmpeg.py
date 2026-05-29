@@ -381,7 +381,8 @@ class FFmpegExecutor:
                     if getattr(task, "_delete_source", False) and 0 < task.compressed_size < task.original_size:
                         _delete_source_file(task.input_path)
                         _finish_task(task, status=TaskStatus.COMPLETED.value, progress=100.0, source_deleted=1, ffmpeg_command=cmd_str)
-                        source_was_deleted = True
+                        if not Path(task.input_path).exists():
+                            source_was_deleted = True
 
                     # ── 自动同步 file_snapshot ──
                     self._sync_file_snapshot(task, final_output, source_was_deleted)
