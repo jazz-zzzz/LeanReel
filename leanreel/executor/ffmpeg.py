@@ -205,37 +205,9 @@ class FFmpegExecutor:
                     # 使用本地副本进行编码（如果已复制到本地，否则直接用源文件）
                     encode_input = task.input_path
 
-                    # 自适应 CQ：低比特率源 → 提高 CQ 避免体积反超
-                    cq = strategy.video.cq if hasattr(strategy, "video") else 26
-                    cq_original = cq  # SAVE: original CQ before adjustment
-                    cq_reason = "no bpp data"
-                    if snap and snap.size_bytes > 0 and snap.duration_seconds > 0:
-                        src_mbps = (snap.size_bytes * 8) / (snap.duration_seconds * 1_000_000)
-                        pixels = max(1, (snap.video_width or 1920) * (snap.video_height or 1080))
-                        bpp = src_mbps * 1_000_000 / pixels
-                        if bpp < 2.5:
-                            cq = min(cq + 8, 35)   # 非常压缩 → 大幅提高 CQ
-                            cq_reason = f"bpp {bpp:.1f} < 2.5, cq {cq_original} -> {cq}"
-                        elif bpp < 5.0:
-                            cq = min(cq + 4, 32)   # 较压缩
-                            cq_reason = f"bpp {bpp:.1f} < 5.0, cq {cq_original} -> {cq}"
-                        elif bpp < 8.0:
-                            cq = min(cq + 2, 30)   # 轻微压缩
-                            cq_reason = f"bpp {bpp:.1f} < 8.0, cq {cq_original} -> {cq}"
-                        else:
-                            cq_reason = f"bpp {bpp:.1f} >= 8.0, no adjustment needed"
-
-                    import copy
-                    adjusted = copy.deepcopy(strategy)
-                    adjusted.video.cq = cq
-                    cmd = FFmpegBuilder.build(snap, adjusted, encode_input, str(staging_output))
+                    cmd = FFmpegBuilder.build(snap, strategy, encode_input, str(staging_output))
                     # Store for audit
                     task._ffmpeg_command = list(cmd)
-                    task._adaptive_cq = {
-                        "original": cq_original,
-                        "adjusted": cq,
-                        "reason": cq_reason,
-                    }
                     duration = snap.duration_seconds if snap else 0.0
                     input_size = snap.size_bytes if snap else 0
 
@@ -350,14 +322,10 @@ class FFmpegExecutor:
                 try:
                     from leanreel.services.audit import build_audit, write_sidecar
                     cmd = getattr(task, "_ffmpeg_command", [])
-                    cq_info = getattr(task, "_adaptive_cq", {})
                     cmd_str = subprocess.list2cmdline(cmd) if cmd else ""
                     audit = build_audit(
                         task=task,
                         ffmpeg_command=cmd,
-                        adaptive_cq_original=cq_info.get("original", 0),
-                        adaptive_cq_adjusted=cq_info.get("adjusted", 0),
-                        adaptive_cq_reason=cq_info.get("reason", ""),
                     )
                     db = getattr(task, "_db", None)
                     audit.db_record_id = getattr(task, "history_id", 0) or 0
