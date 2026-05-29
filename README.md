@@ -53,6 +53,7 @@ LeanReel 的目标不是替你盲目"一键压缩所有视频"，而是先把媒
 | 损坏容错 | `-fflags +discardcorrupt` 自动跳过源文件坏包，不中断编码。 |
 | 安全输出 | 输出 `_zcompressed` 后缀 + atomic staging rename，不覆盖原文件。 |
 | 可选删源 | 编码成功后可选删除源文件，DB + sidecar 双重记录。 |
+| 元数据自动同步 | 编码成功后自动探测输出文件并同步到扫描缓存，源文件删除后自动清理旧条目。 |
 | 打包发布 | PyInstaller 配置，内置 Windows 版 FFmpeg/FFprobe/dovi_tool。 |
 
 ## 界面导览
@@ -77,9 +78,9 @@ flowchart LR
 
 | 策略 | 编码器 | 参数 | 节省 |
 | --- | --- | --- | --- |
+| AV1 NVENC CQ28 高清重压 | av1_nvenc | CQ 28, p6 | 50-70% |
+| AV1 NVENC CQ32 均衡压缩 | av1_nvenc | CQ 32, p5 | 55-75% |
 | CPU x265 CRF18 慢速保画质 | libx265 | CRF 18, slow | 30-50% |
-| AV1 NVENC CQ34 均衡快速 | av1_nvenc | CQ 34, p5 | 45-65% |
-| AV1 NVENC CQ32 保画质 | av1_nvenc | CQ 32, p6 | 35-55% |
 
 自动跳过 HEVC/H.265、AV1、HDR10、HDR10+、Dolby Vision。策略 JSON 在 `leanreel/resources/strategies/`，可直接编辑或新增。
 
@@ -125,7 +126,7 @@ py -m leanreel.main
 ## 开发指南
 
 ```bash
-py -m pytest -q          # 499 tests
+py -m pytest -q          # 510 tests
 py -m compileall -q leanreel tests
 py -m PyInstaller build.spec --noconfirm
 ```
@@ -190,6 +191,7 @@ flowchart TB
 - 审计侧挂（JSON）+ 统一转码历史（DB 单一数据源）。
 - 全屏历史面板（15 列、进度列、状态筛选、双击定位）。
 - 编码后可选删除源文件（DB + sidecar 可追溯）。
+- 编码完成后自动同步输出文件元数据到扫描缓存，无需手动重新扫描。
 - 损坏 TS 包容错。
 - PyInstaller Windows 打包。
 
