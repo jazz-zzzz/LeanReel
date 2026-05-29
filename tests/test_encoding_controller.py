@@ -471,19 +471,18 @@ class TestEncodingControllerStart:
     @patch('leanreel.controllers.encoding_controller.threading.Thread')
     @patch('leanreel.controllers.encoding_controller.WorkerManager')
     @patch('leanreel.controllers.encoding_controller.FFmpegExecutor')
-    def test_start_prefers_preset_strategy_over_current(
+    def test_start_uses_current_strategy(
         self, mock_ffmpeg, mock_worker_mgr, mock_thread,
         controller, mock_strategy_panel, mock_queue_panel,
         sample_snapshots, sample_folder_paths, hq_strategy,
     ):
-        """正向用例 6：current_preset_strategy 优先级高于 current_strategy"""
-        # 同时设置 preset 和 current，preset 应被优先使用
-        mock_strategy_panel.current_preset_strategy = hq_strategy
-        # current_strategy 保持默认（均衡压缩）
+        """正向用例 6：start() 使用 current_strategy（由策略面板自行决定预设/自定义）"""
+        # current_strategy 内部已处理"自定义 > 预设"的逻辑
+        mock_strategy_panel.current_strategy = hq_strategy
 
         controller.start(sample_snapshots, sample_folder_paths, None)
 
-        # 验证任务使用的是 preset 策略
+        # 验证任务使用的是 current_strategy 返回的策略
         added_tasks = [
             call_args[0][0] for call_args in mock_queue_panel.add_task_row.call_args_list
         ]

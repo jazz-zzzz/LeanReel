@@ -114,7 +114,7 @@ class EncodingController:
             self.encoding_in_progress = True
 
         try:
-            default_strategy = self._strategy_panel.current_preset_strategy or self._strategy_panel.current_strategy
+            default_strategy = self._strategy_panel.current_strategy
             if default_strategy is None:
                 self._win.set_status(UI_TEXT.NO_STRATEGY)
                 with self._encode_lock:
