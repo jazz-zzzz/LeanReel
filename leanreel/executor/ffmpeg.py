@@ -135,6 +135,44 @@ class FFmpegExecutor:
         if self.progress_callback:
             self.progress_callback(task)
 
+    def _sync_file_snapshot(self, task, final_output, source_was_deleted):
+        """编码成功后：探测输出文件 → 写入 file_snapshot；源删除时清理旧条目。
+
+        尽力而为 — 任何异常静默吞掉，不影响编码主流程。
+        """
+        snap = task.snapshot
+        library_folder_id = int(getattr(snap, "library_folder_id", 0) or 0)
+        if not library_folder_id or self._db is None:
+            return
+        try:
+            from leanreel.executor.probe import FFprobeRunner
+            from leanreel.infrastructure.repository import SnapshotRepository
+
+            repo = SnapshotRepository(self._db)
+            probe = FFprobeRunner()
+
+            # 计算输出文件的 relative_path（与源文件同目录）
+            source_rel = str(getattr(snap, "relative_path", "") or "")
+            source_dir = os.path.dirname(source_rel)
+            output_rel = os.path.join(source_dir, final_output.name) if source_dir else final_output.name
+            output_rel = output_rel.replace("\\", "/")  # 统一使用正斜杠
+
+            # 探测新文件
+            new_snap = probe.probe(str(final_output), library_folder_id)
+            new_snap.relative_path = output_rel
+            new_snap.file_mtime = final_output.stat().st_mtime
+            new_snap.probe_ok = True
+            repo.save(new_snap)
+
+            # 删除源文件条目
+            if source_was_deleted:
+                self._db.execute(
+                    "DELETE FROM file_snapshot WHERE library_folder_id=? AND relative_path=?",
+                    [library_folder_id, source_rel],
+                )
+        except Exception:
+            pass
+
     def encode(self, task) -> None:
         if task.snapshot is None or task.strategy is None:
             raise ValueError("EncodeTask requires snapshot and strategy")
@@ -339,9 +377,14 @@ class FFmpegExecutor:
                             ffmpeg_command=cmd_str,
                         )
 
+                    source_was_deleted = False
                     if getattr(task, "_delete_source", False) and 0 < task.compressed_size < task.original_size:
                         _delete_source_file(task.input_path)
                         _finish_task(task, status=TaskStatus.COMPLETED.value, progress=100.0, source_deleted=1, ffmpeg_command=cmd_str)
+                        source_was_deleted = True
+
+                    # ── 自动同步 file_snapshot ──
+                    self._sync_file_snapshot(task, final_output, source_was_deleted)
                 except Exception:
                     import traceback
                     traceback.print_exc()
