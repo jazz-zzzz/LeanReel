@@ -1,0 +1,214 @@
+:root {
+  /* ── Acrylic base ──────────────────────────── */
+  --bg-window: rgba(20, 28, 36, 0.90);
+  --bg-surface: rgba(255, 255, 255, 0.04);
+  --bg-hover: rgba(255, 255, 255, 0.06);
+  --bg-active: rgba(255, 255, 255, 0.08);
+  --bg-selected: rgba(91, 155, 213, 0.12);
+  --bg-overlay: rgba(20, 28, 36, 0.94);
+
+  /* ── Borders ───────────────────────────────── */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.08);
+  --border-focus: rgba(91, 155, 213, 0.40);
+
+  /* ── Text ──────────────────────────────────── */
+  --text-primary: rgba(255, 255, 255, 0.96);
+  --text-secondary: rgba(255, 255, 255, 0.65);
+  --text-muted: rgba(255, 255, 255, 0.36);
+  --text-disabled: rgba(255, 255, 255, 0.22);
+  --text-inverse: rgba(20, 28, 36, 0.90);
+
+  /* ── Accent (ice blue) ─────────────────────── */
+  --accent: #5b9bd5;
+  --accent-hover: #73b0e0;
+  --accent-dimmed: rgba(91, 155, 213, 0.18);
+
+  /* ── Semantic ──────────────────────────────── */
+  --success: #4ec9b0;
+  --warning: #dcdcaa;
+  --danger: #f14c4c;
+  --info: #569cd6;
+
+  /* ── Data tags ─────────────────────────────── */
+  --tag-hevc-bg: rgba(78, 201, 176, 0.12);
+  --tag-hevc-text: #4ec9b0;
+  --tag-av1-bg: rgba(86, 156, 214, 0.12);
+  --tag-av1-text: #569cd6;
+  --tag-dv-bg: rgba(155, 110, 201, 0.12);
+  --tag-dv-text: #9b6ec9;
+  --tag-hdr-bg: rgba(184, 149, 74, 0.12);
+  --tag-hdr-text: #b8954a;
+  --tag-sdr-bg: rgba(255, 255, 255, 0.04);
+  --tag-sdr-text: var(--text-muted);
+
+  /* ── Typography ────────────────────────────── */
+  --font-body: "Segoe UI Variable", "Inter", "Segoe UI", "Microsoft YaHei", sans-serif;
+  --font-mono: "Cascadia Code", "Consolas", "Fira Code", "JetBrains Mono", monospace;
+  --font-size-body: 13px;
+  --font-size-label: 11px;
+  --font-size-mono: 12px;
+  --font-size-sm: 10px;
+
+  /* ── Spacing ───────────────────────────────── */
+  --space-xs: 4px;
+  --space-sm: 6px;
+  --space-md: 8px;
+  --space-lg: 12px;
+  --space-xl: 16px;
+  --space-2xl: 24px;
+
+  /* ── Motion ────────────────────────────────── */
+  --ease-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+  --duration-slow: 350ms;
+
+  /* ── Radii ─────────────────────────────────── */
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+}
+
+/* ── Reset ─────────────────────────────────────── */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  font-family: var(--font-body);
+  font-size: var(--font-size-body);
+  line-height: 1.5;
+  background: transparent;
+  color: var(--text-primary);
+  height: 100%;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  border-radius: 8px;
+}
+
+/* ── Custom Scrollbar ──────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.10);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.25); }
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-button { display: none; }
+
+/* Firefox scrollbar */
+* { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.10) transparent; }
+
+/* ── Button base ───────────────────────────────── */
+button {
+  font-family: var(--font-body);
+  font-size: var(--font-size-body);
+  padding: 5px 14px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-expo),
+    border-color var(--duration-fast) var(--ease-expo),
+    color var(--duration-fast) var(--ease-expo);
+  outline: none;
+  user-select: none;
+}
+button:hover { background: var(--bg-hover); border-color: var(--border-focus); }
+button:active { background: var(--bg-active); }
+button:focus-visible { box-shadow: 0 0 0 2px var(--accent-dimmed); }
+
+button.primary {
+  background: var(--accent);
+  color: var(--text-inverse);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+button.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+button.danger { color: var(--danger); }
+button.danger:hover { background: rgba(241, 76, 76, 0.10); border-color: rgba(241, 76, 76, 0.30); }
+
+button.ghost {
+  background: transparent;
+  border: none;
+  padding: 4px 8px;
+  color: var(--text-secondary);
+}
+button.ghost:hover { color: var(--text-primary); background: var(--bg-hover); }
+
+button:disabled { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
+
+/* ── Input base ────────────────────────────────── */
+input[type="text"],
+input[type="search"],
+input[type="number"] {
+  font-family: var(--font-body);
+  font-size: var(--font-size-body);
+  padding: 5px 8px;
+  background: var(--bg-surface);
+  border: none;
+  border-bottom: 1px solid var(--border-default);
+  border-radius: 0;
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color var(--duration-fast) var(--ease-expo);
+}
+input[type="text"]:focus,
+input[type="search"]:focus,
+input[type="number"]:focus {
+  border-bottom-color: var(--accent);
+}
+input::placeholder { color: var(--text-muted); font-style: italic; }
+
+/* ── Custom checkbox ───────────────────────────── */
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px; height: 14px;
+  border: 1px solid var(--border-default);
+  border-radius: 2px;
+  background: var(--bg-surface);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all var(--duration-fast) var(--ease-expo);
+  position: relative;
+}
+input[type="checkbox"]:hover { border-color: var(--border-focus); }
+input[type="checkbox"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  left: 4px; top: 1px;
+  width: 5px; height: 8px;
+  border: solid var(--text-inverse);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+input[type="checkbox"]:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* ── Select (custom trigger — panels override for full dropdown) ── */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: var(--font-body);
+  font-size: var(--font-size-label);
+  padding: 4px 24px 4px 8px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  outline: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='rgba(255,255,255,0.35)'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+select:hover { border-color: var(--border-focus); }
+select:focus { border-color: var(--accent); }

@@ -345,7 +345,7 @@
 
   .hdr-tag.tag-dv { background: var(--tag-dv-bg); color: var(--tag-dv-text); }
   .hdr-tag.tag-hdr { background: var(--tag-hdr-bg); color: var(--tag-hdr-text); }
-  .hdr-tag.tag-sdr { color: var(--text-muted); }
+  .hdr-tag.tag-sdr { background: var(--tag-sdr-bg); color: var(--tag-sdr-text); }
   .hdr-tag.tag-other { color: var(--text-secondary); }
 
   .match-tag {

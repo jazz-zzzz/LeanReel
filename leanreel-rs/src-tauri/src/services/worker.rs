@@ -396,12 +396,39 @@ impl WorkerManager {
                                             &task.snapshot.relative_path, &final_output,
                                         );
 
+                                        // ── H-021: Delete source file after successful encode ──
+                                        let source_deleted_flag: i32 = if task.delete_source {
+                                            match std::fs::remove_file(&task.input_path) {
+                                                Ok(()) => {
+                                                    eprintln!("源文件已删除: {}", task.input_path.display());
+                                                    // Mark as deleted in the DB store
+                                                    if let Ok(store_guard) = store.lock() {
+                                                        if let Some(ref s) = *store_guard {
+                                                            if let Err(e) = s.mark_deleted(
+                                                                task.snapshot.library_folder_id,
+                                                                &task.input_path,
+                                                            ) {
+                                                                eprintln!("DB 标记删除失败: {}", e);
+                                                            }
+                                                        }
+                                                    }
+                                                    1
+                                                }
+                                                Err(e) => {
+                                                    eprintln!("删除源文件失败 ({}): {}", task.input_path.display(), e);
+                                                    0
+                                                }
+                                            }
+                                        } else {
+                                            0
+                                        };
+
                                         // C2: Mark compression record as completed
                                         finish_record(
                                             &store, task.history_id, "completed", 100.0,
                                             (output.duration_ms / 1000) as i64,
                                             output.compressed_size as i64,
-                                            "", &sidecar_path, 0, &output.command,
+                                            "", &sidecar_path, source_deleted_flag, &output.command,
                                         );
                                         emit_progress(&app_handle, &task.id, "done", 100.0, "completed");
 

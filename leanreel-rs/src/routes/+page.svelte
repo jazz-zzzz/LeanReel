@@ -10,6 +10,7 @@
   import { listen } from '@tauri-apps/api/event';
   import LibraryPanel from '$lib/components/LibraryPanel.svelte';
   import FileTable from '$lib/components/FileTable.svelte';
+  import TreeView from '$lib/components/TreeView.svelte';
   import StrategyPanel from '$lib/components/StrategyPanel.svelte';
   import QueuePanel from '$lib/components/QueuePanel.svelte';
   import HistoryPanel from '$lib/components/HistoryPanel.svelte';
@@ -18,6 +19,7 @@
 
   let currentPath = '';
   let showQueue = false;
+  let viewMode: 'flat' | 'tree' = 'flat';
 
   $: showQueue = $queue.length > 0;
 
@@ -137,10 +139,18 @@
           开始编码
         </button>
         <button class="ghost" onclick={() => showHistory.set(true)}>历史</button>
+        <select bind:value={viewMode} class="view-toggle">
+          <option value="flat">平铺</option>
+          <option value="tree">树状</option>
+        </select>
         <span class="status-text">{$scanStatus}</span>
       </div>
       <div class="file-table-wrapper">
-        <FileTable />
+        {#if viewMode === 'flat'}
+          <FileTable />
+        {:else}
+          <TreeView />
+        {/if}
       </div>
     </main>
 
