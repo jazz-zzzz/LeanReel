@@ -7,10 +7,17 @@ from PySide6.QtWidgets import (
     QLineEdit, QFileDialog, QHBoxLayout, QToolButton,
     QButtonGroup, QSizePolicy, QCheckBox
 )
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, QPropertyAnimation, QEasingCurve
 
 from leanreel.domain.models import Strategy
 from leanreel.ui_text import UI_TEXT
+from leanreel.gui.theme import (
+    C_SURFACE, C_SURFACE_RAISED, C_SURFACE_LOWERED,
+    C_BORDER, C_BORDER_FOCUS, C_ACCENT, C_ACCENT_LIGHT,
+    C_SELECTION, C_TEXT, C_TEXT_SECONDARY, C_TEXT_TERTIARY, C_TEXT_DISABLED,
+    C_STRATEGY_TEXT, C_STRATEGY_CHECKED_TEXT,
+    C_STRATEGY_CHECKED_HOVER_BG, C_STRATEGY_HOVER_BORDER,
+)
 
 _CPU_ENCODERS = ["libx265"]
 _GPU_ENCODERS = ["av1_nvenc", "hevc_nvenc", "h264_nvenc"]
@@ -23,30 +30,30 @@ _GPU_CUSTOM_NAMES = {
     "h264_nvenc": "H.264 NVENC CQ {cq} 自定义转码",
 }
 
-_ROW_STYLE = """
-QPushButton {
-    background-color: #1c1a16;
-    border: 1px solid #2e2b25;
+_ROW_STYLE = f"""
+QPushButton {{
+    background-color: {C_SURFACE};
+    border: 1px solid {C_BORDER};
     border-radius: 4px;
     padding: 5px 8px;
     text-align: left;
     min-height: 42px;
-    font-size: 12px;
-    color: #c8c0b8;
-}
-QPushButton:hover {
-    border-color: #5c4a2e;
-    background-color: #24221d;
-}
-QPushButton:checked {
-    border: 1px solid #d4a853;
-    background-color: #3d2e14;
-    color: #f0e6d0;
-}
-QPushButton:checked:hover {
-    border-color: #e0b85c;
-    background-color: #45341a;
-}
+    font-size: 9pt;
+    color: {C_STRATEGY_TEXT};
+}}
+QPushButton:hover {{
+    border-color: {C_BORDER_FOCUS};
+    background-color: {C_SURFACE_RAISED};
+}}
+QPushButton:checked {{
+    border: 1px solid {C_ACCENT_LIGHT};
+    background-color: {C_SELECTION};
+    color: {C_STRATEGY_CHECKED_TEXT};
+}}
+QPushButton:checked:hover {{
+    border-color: {C_STRATEGY_HOVER_BORDER};
+    background-color: {C_STRATEGY_CHECKED_HOVER_BG};
+}}
 """
 
 
@@ -73,7 +80,7 @@ class PresetCardPanel(QWidget):
 
         presets_label = QLabel(UI_TEXT.STRATEGY_PRESETS)
         presets_label.setStyleSheet(
-            "font-weight: bold; color: #8a857c; font-size: 11px; padding: 2px 4px;"
+            f"font-weight: bold; color: {C_TEXT_SECONDARY}; font-size: 9pt; padding: 2px 4px;"
         )
         layout.addWidget(presets_label)
 
@@ -88,9 +95,9 @@ class PresetCardPanel(QWidget):
         self.description_label = QLabel("")
         self.description_label.setWordWrap(True)
         self.description_label.setStyleSheet(
-            "color: #a0988c; font-size: 11px; padding: 4px 8px;"
-            "background: #1a1915; border-radius: 4px;"
-            "border: 1px solid #2e2b25;"
+            f"color: {C_TEXT_TERTIARY}; font-size: 9pt; padding: 4px 8px;"
+            f"background: {C_SURFACE_LOWERED}; border-radius: 4px;"
+            f"border: 1px solid {C_BORDER};"
         )
         self.description_label.hide()
         layout.addWidget(self.description_label)
@@ -102,14 +109,14 @@ class PresetCardPanel(QWidget):
         tag = "GPU" if s.video.is_gpu else ("CPU" if s.video.encoder.startswith("lib")
                                              else "COPY")
         savings = getattr(s, "estimated_savings", "") or ""
-        prefix = "●" if index == 0 else "○"
-        text = f"{prefix}  {s.name}\n   [{tag}]  {savings}"
+        text = f"{s.name}\n   [{tag}]  {savings}"
 
         btn = QPushButton(text)
         btn.setCheckable(True)
         btn.setStyleSheet(_ROW_STYLE)
         btn.setMinimumHeight(44)
         btn.setToolTip(f"{s.name}\n{s.description}".strip())
+        btn.setAccessibleName(f"策略: {s.name}")
         btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         btn.clicked.connect(lambda checked=False, i=index: self._on_card_clicked(i))
         return btn
@@ -135,6 +142,7 @@ class PresetCardPanel(QWidget):
         if strategies:
             self.card_group.buttons()[0].setChecked(True)
             self._active_preset_index = 0
+            self._update_indicators()
             self._update_description()
         else:
             self.description_label.hide()
@@ -146,16 +154,13 @@ class PresetCardPanel(QWidget):
         self.strategy_changed.emit(index)
 
     def _update_indicators(self):
-        """更新所有按钮的前缀指示器 (●/○) 和 checked 状态"""
+        """更新所有按钮的 checked 状态（CSS 自动处理选中样式）"""
         for i, btn in enumerate(self.card_group.buttons()):
-            s = self._strategies[i]
-            tag = "GPU" if s.video.is_gpu else ("CPU" if s.video.encoder.startswith("lib")
-                                                 else "COPY")
-            savings = getattr(s, "estimated_savings", "") or ""
-            prefix = "●" if i == self._active_preset_index else "○"
-            text = f"{prefix}  {s.name}\n   [{tag}]  {savings}"
-            btn.setText(text)
             btn.setChecked(i == self._active_preset_index)
+            if i == self._active_preset_index:
+                btn.setAccessibleName(f"已选中: {self._strategies[i].name}")
+            else:
+                btn.setAccessibleName(f"策略: {self._strategies[i].name}")
 
     def _update_description(self):
         """根据当前选中的策略更新描述标签"""
@@ -188,34 +193,38 @@ class PresetCardPanel(QWidget):
 
 
 class CollapsibleGroup(QGroupBox):
-    """可折叠的 QGroupBox — 点击标题栏复选框切换内容可见性"""
+    """可折叠的 QGroupBox — 点击标题栏复选框以动画方式展开/收起内容"""
+
+    _ANIM_DURATION = 250  # ms，符合 product register 150-250ms 规范
 
     def __init__(self, title: str, parent=None):
         super().__init__(title, parent)
         self.setCheckable(True)
         self.setChecked(False)
-        self.setStyleSheet("""
-            QGroupBox {
+        self._content = None
+        self._anim = None
+        self.setStyleSheet(f"""
+            QGroupBox {{
                 padding-top: 16px;
                 margin-top: 4px;
                 font-weight: bold;
-                color: #8a857c;
-                border: 1px solid #2e2b25;
+                color: {C_TEXT_SECONDARY};
+                border: 1px solid {C_BORDER};
                 border-radius: 4px;
-            }
-            QGroupBox::title {
+            }}
+            QGroupBox::title {{
                 subcontrol-origin: margin;
                 left: 10px;
                 padding: 0 4px;
-            }
-            QGroupBox::indicator {
+            }}
+            QGroupBox::indicator {{
                 width: 12px;
                 height: 12px;
-            }
+            }}
         """)
 
     def set_content_widget(self, widget: QWidget):
-        """设置内容 widget，折叠时自动隐藏"""
+        """设置内容 widget，折叠时以动画方式隐藏"""
         self._content = widget
         # 将 content widget 添加到 group box 的布局中
         if self.layout() is None:
@@ -225,7 +234,54 @@ class CollapsibleGroup(QGroupBox):
         else:
             self.layout().addWidget(widget)
         widget.setVisible(False)
-        self.toggled.connect(widget.setVisible)
+        self.toggled.connect(self._animate_toggle)
+
+    def _measure_content_height(self) -> int:
+        """测量内容 widget 的目标高度。"""
+        self._content.setVisible(True)
+        self._content.adjustSize()
+        h = self._content.sizeHint().height()
+        self._content.setVisible(False)
+        return max(h, 60)  # 最小 60px，避免零高度
+
+    def _animate_toggle(self, checked: bool):
+        """动画展开/收起内容区域。"""
+        if self._content is None:
+            return
+
+        # 停止正在进行的动画
+        if self._anim is not None and self._anim.state() == QPropertyAnimation.Running:
+            self._anim.stop()
+
+        target = self._measure_content_height()
+
+        self._anim = QPropertyAnimation(self._content, b"maximumHeight")
+        self._anim.setDuration(self._ANIM_DURATION)
+        self._anim.setEasingCurve(QEasingCurve.OutQuart)
+
+        if checked:
+            self._content.setVisible(True)
+            self._content.setMaximumHeight(0)
+            self._anim.setStartValue(0)
+            self._anim.setEndValue(target)
+            self._anim.finished.connect(lambda: self._on_expand_done())
+        else:
+            self._content.setMaximumHeight(target)
+            self._anim.setStartValue(target)
+            self._anim.setEndValue(0)
+            self._anim.finished.connect(lambda: self._on_collapse_done())
+
+        self._anim.start()
+
+    def _on_expand_done(self):
+        """展开完成：移除高度限制，让内容随布局自适应。"""
+        if self._content:
+            self._content.setMaximumHeight(16777215)  # QWIDGETSIZE_MAX
+
+    def _on_collapse_done(self):
+        """收起完成：隐藏内容 widget。"""
+        if self._content:
+            self._content.setVisible(False)
 
 
 class StrategyPanel(QWidget):
@@ -311,20 +367,20 @@ class StrategyPanel(QWidget):
 
         # ── 编码设置 ──
         encode_group = QGroupBox(UI_TEXT.STRATEGY_ENCODING_SETTINGS)
-        encode_group.setStyleSheet("""
-            QGroupBox {
+        encode_group.setStyleSheet(f"""
+            QGroupBox {{
                 padding-top: 16px;
                 margin-top: 4px;
                 font-weight: bold;
-                color: #8a857c;
-                border: 1px solid #2e2b25;
+                color: {C_TEXT_SECONDARY};
+                border: 1px solid {C_BORDER};
                 border-radius: 4px;
-            }
-            QGroupBox::title {
+            }}
+            QGroupBox::title {{
                 subcontrol-origin: margin;
                 left: 10px;
                 padding: 0 4px;
-            }
+            }}
         """)
         encode_layout = QFormLayout(encode_group)
         encode_layout.setContentsMargins(8, 4, 8, 4)

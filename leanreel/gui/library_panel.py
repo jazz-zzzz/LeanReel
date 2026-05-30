@@ -5,9 +5,10 @@ from PySide6.QtWidgets import (
     QLineEdit, QHBoxLayout
 )
 from PySide6.QtCore import Signal, Qt
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QColor
 
 from leanreel.ui_text import UI_TEXT
+from leanreel.gui.theme import C_TEXT_SECONDARY
 
 
 class LibraryPanel(QWidget):
@@ -91,7 +92,7 @@ class LibraryPanel(QWidget):
                 folder_item = QTreeWidgetItem([f"  {display}"])
                 folder_item.setData(0, Qt.UserRole, ("folder", folder.id))
                 folder_item.setToolTip(0, folder.path)
-                folder_item.setForeground(0, Qt.gray)
+                folder_item.setForeground(0, QColor(C_TEXT_SECONDARY))
                 lib_item.addChild(folder_item)
 
             lib_item.setExpanded(True)
@@ -99,7 +100,7 @@ class LibraryPanel(QWidget):
         if self.tree.topLevelItemCount() == 0:
             self.empty_item = QTreeWidgetItem([UI_TEXT.LIBRARY_NO_MATCH])
             self.empty_item.setFlags(Qt.NoItemFlags)
-            self.empty_item.setForeground(0, Qt.gray)
+            self.empty_item.setForeground(0, QColor(C_TEXT_SECONDARY))
             self.tree.addTopLevelItem(self.empty_item)
 
     def _filter_tree(self, text: str):

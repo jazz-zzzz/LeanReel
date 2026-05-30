@@ -8,6 +8,7 @@ from PySide6.QtGui import QColor
 
 from leanreel.domain.models import TaskStatus
 from leanreel.ui_text import UI_TEXT
+from leanreel.gui.theme import C_TEXT, C_TEXT_SECONDARY, C_TEXT_MUTED
 
 _STATUS_COLORS = {
     TaskStatus.RUNNING: QColor("#c8963e"),
@@ -25,6 +26,15 @@ _STATUS_ICONS = {
     TaskStatus.SKIPPED: "→",
     TaskStatus.PENDING: "○",
     TaskStatus.CANCELLED: "⊘",
+}
+
+_STATUS_ACCESSIBLE = {
+    TaskStatus.RUNNING: "运行中",
+    TaskStatus.COMPLETED: "已完成",
+    TaskStatus.FAILED: "失败",
+    TaskStatus.SKIPPED: "已跳过",
+    TaskStatus.PENDING: "等待中",
+    TaskStatus.CANCELLED: "已取消",
 }
 
 _TERMINAL_STATUSES = {
@@ -102,21 +112,22 @@ class QueuePanel(QWidget):
 
         icon_label = QLabel(_STATUS_ICONS.get(task.status, "?"))
         icon_label.setObjectName("queue_icon")
-        icon_color = _STATUS_COLORS.get(task.status, QColor("#5c5851"))
-        icon_label.setStyleSheet(f"color: {icon_color.name()}; font-weight: bold; font-size: 14px;")
+        icon_color = _STATUS_COLORS.get(task.status, QColor(C_TEXT_MUTED))
+        icon_label.setStyleSheet(f"color: {icon_color.name()}; font-weight: bold; font-size: 10.5pt;")
         icon_label.setFixedWidth(20)
+        icon_label.setAccessibleName(_STATUS_ACCESSIBLE.get(task.status, "未知状态"))
         row_layout.addWidget(icon_label)
 
         name_label = QLabel(task.file_name)
         name_label.setObjectName("queue_name")
         name_label.setToolTip(task.input_path)  # 悬停显示完整路径
-        name_label.setStyleSheet("color: #e8e3db;")
+        name_label.setStyleSheet(f"color: {C_TEXT};")
         row_layout.addWidget(name_label, 1)
 
         info = self._task_info_text(task)
         info_label = QLabel(info)
         info_label.setObjectName("queue_info")
-        info_label.setStyleSheet("color: #8a857c; font-size: 11px;")
+        info_label.setStyleSheet(f"color: {C_TEXT_SECONDARY}; font-size: 9pt;")
         info_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         if task.status == TaskStatus.FAILED:
             info_label.setToolTip(getattr(task, "error_message", "") or UI_TEXT.UNKNOWN_ERROR)
@@ -188,9 +199,10 @@ class QueuePanel(QWidget):
 
                 icon_label = row.findChild(QLabel, "queue_icon")
                 if icon_label is not None:
-                    icon_color = _STATUS_COLORS.get(task.status, QColor("#5c5851"))
+                    icon_color = _STATUS_COLORS.get(task.status, QColor(C_TEXT_MUTED))
                     icon_label.setText(_STATUS_ICONS.get(task.status, "?"))
-                    icon_label.setStyleSheet(f"color: {icon_color.name()}; font-weight: bold; font-size: 14px;")
+                    icon_label.setStyleSheet(f"color: {icon_color.name()}; font-weight: bold; font-size: 10.5pt;")
+                    icon_label.setAccessibleName(_STATUS_ACCESSIBLE.get(task.status, "未知状态"))
 
                 info_label = row.findChild(QLabel, "queue_info")
                 if info_label is not None:

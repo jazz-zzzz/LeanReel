@@ -24,6 +24,7 @@ class FileTableModel(QAbstractTableModel):
         self._sort_col = -1
         self._sort_order = Qt.AscendingOrder
         self._visible_rows: list[int] = []  # store index → visual row
+        self._store_to_vis: dict[int, int] = {}  # store index → visual row (O(1) 反向映射)
         self._filter_key = "all"
         self._edit_values: dict[tuple[int, int], str] = {}  # pending edit values
 
@@ -118,7 +119,7 @@ class FileTableModel(QAbstractTableModel):
         self._edit_values.clear()
         # D 探测期间不自动重排：仅 filter 变更时重建 visible，排序变更不触发重排
         if self._filter_key != "all":
-            was_visible = idx in self._visible_rows
+            was_visible = idx in self._store_to_vis
             should_be_visible = self._is_visible(idx)
             if was_visible == should_be_visible:
                 if was_visible:
@@ -198,10 +199,7 @@ class FileTableModel(QAbstractTableModel):
         return self._visible_rows[visual_row]
 
     def _to_visual(self, store_idx):
-        try:
-            return self._visible_rows.index(store_idx)
-        except ValueError:
-            return -1
+        return self._store_to_vis.get(store_idx, -1)
 
     def _display_text(self, col, snap, d):
         from leanreel.gui.utils import _format_bytes
@@ -278,9 +276,11 @@ class FileTableModel(QAbstractTableModel):
             i for i in range(self._store.count())
             if self._is_visible(i)
         ]
+        self._store_to_vis = {sid: vid for vid, sid in enumerate(self._visible_rows)}
         if self._sort_col >= 0:
             reverse = (self._sort_order == Qt.DescendingOrder)
             self._visible_rows.sort(key=self._sort_key(self._sort_col), reverse=reverse)
+            self._store_to_vis = {sid: vid for vid, sid in enumerate(self._visible_rows)}
 
     def set_filter(self, filter_key: str):
         if self._filter_key == filter_key:

@@ -25,6 +25,8 @@ from leanreel.gui.theme import (
     _COLOR_HDR_DV,
     _COLOR_HDR_HDR10,
     _COLOR_HDR_SDR,
+    C_TEXT_DISABLED,
+    C_TEXT_SECONDARY,
 )
 
 from leanreel.domain.models import MatchResult, FileDecisionDisplay, FileRow
@@ -292,7 +294,7 @@ class FileListPanel(QWidget):
         # 空状态提示
         self.empty_label = QLabel(UI_TEXT.FILE_EMPTY_HINT)
         self.empty_label.setAlignment(Qt.AlignCenter)
-        self.empty_label.setStyleSheet("color: #6b6560; font-size: 14px; padding: 40px;")
+        self.empty_label.setStyleSheet(f"color: {C_TEXT_DISABLED}; font-size: 10.5pt; padding: 40px;")
 
         self.stack = QStackedWidget()
         self.stack.addWidget(self.table)
@@ -310,7 +312,8 @@ class FileListPanel(QWidget):
         self.deselect_all_btn = QPushButton(UI_TEXT.FILE_DESELECT_ALL)
         self.deselect_all_btn.clicked.connect(self.deselect_all)
         self.selection_label = QLabel(UI_TEXT.file_selection_count(0, 0))
-        self.selection_label.setStyleSheet("color: #8a857c; font-size: 11px;")
+        self.selection_label.setStyleSheet(f"color: {C_TEXT_SECONDARY}; font-size: 9pt;")
+        self.selection_label.setToolTip(UI_TEXT.FILE_BATCH_SELECT_HINT)
         select_layout.addWidget(self.select_all_btn)
         select_layout.addWidget(self.deselect_all_btn)
         select_layout.addWidget(self.selection_label)
@@ -548,7 +551,6 @@ class FileListPanel(QWidget):
         combo.wheelEvent = lambda event: event.ignore()  # 滚轮不改变策略，留给表格滚动
         combo.setMinimumWidth(140)
         combo.setMaximumHeight(28)
-        combo.setStyleSheet("QComboBox { padding: 1px 4px; }")
         names = list(self._strategy_lookup)
         if selected_name and selected_name != UI_TEXT.FILE_UNMATCHED and selected_name not in names:
             names.insert(0, selected_name)

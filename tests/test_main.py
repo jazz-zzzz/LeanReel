@@ -100,9 +100,9 @@ def test_get_strategies_dir_refreshes_builtin_strategy_files(monkeypatch, tmp_pa
 
     strategies_dir = paths_mod.get_strategies_dir()
 
-    av1_quality = json.loads((strategies_dir / "01_av1_cq32_quality.json").read_text(encoding="utf-8"))
+    av1_quality = json.loads((strategies_dir / "01_av1_cq28_quality.json").read_text(encoding="utf-8"))
     custom = json.loads((strategies_dir / "my_custom.json").read_text(encoding="utf-8"))
-    assert av1_quality["name"] == "AV1 NVENC CQ32 保画质"
+    assert av1_quality["name"] == "AV1 NVENC CQ28 保画质"
     assert not (strategies_dir / "balanced.json").exists()
     assert not (strategies_dir / "av1_quality.json").exists()
     assert not (strategies_dir / "av1_balanced.json").exists()

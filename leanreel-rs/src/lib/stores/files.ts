@@ -7,11 +7,11 @@ export interface FileEntry {
   codec: string;
   hdr: string;
   size_display: string;
-  width?: number;
-  height?: number;
-  bitrate_bps?: number;
-  decision_status?: string;
-  decision_text?: string;
+  width: number;
+  height: number;
+  bitrate_bps: number;
+  decision_status: string;
+  decision_text: string;
 }
 
 export const files = writable<FileEntry[]>([]);

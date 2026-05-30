@@ -15,6 +15,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QColor
 
 from leanreel.gui.utils import _format_bytes
+from leanreel.ui_text import UI_TEXT
 
 STATUS_ROLE = Qt.UserRole + 1
 SORT_ROLE = Qt.UserRole + 2
@@ -250,33 +251,41 @@ class HistoryPanel(QWidget):
 
         top = QHBoxLayout()
 
-        self.back_btn = QPushButton("← 返回文件列表")
-        self.back_btn.setFixedWidth(140)
+        self.back_btn = QPushButton(UI_TEXT.HISTORY_BACK)
+        self.back_btn.setMinimumWidth(140)
         self.back_btn.clicked.connect(self.back_requested.emit)
         top.addWidget(self.back_btn)
 
-        self.refresh_btn = QPushButton("刷新")
-        self.refresh_btn.setFixedWidth(60)
+        self.refresh_btn = QPushButton(UI_TEXT.HISTORY_REFRESH)
+        self.refresh_btn.setMinimumWidth(60)
         self.refresh_btn.clicked.connect(self.refresh_requested.emit)
         top.addWidget(self.refresh_btn)
 
         top.addSpacing(16)
 
-        top.addWidget(QLabel("库:"))
+        top.addWidget(QLabel(UI_TEXT.HISTORY_FILTER_LIBRARY))
         self.library_filter = QComboBox()
-        self.library_filter.addItem("全部")
+        self.library_filter.addItem(UI_TEXT.HISTORY_FILTER_ALL)
         self.library_filter.setMinimumWidth(120)
         top.addWidget(self.library_filter)
 
-        top.addWidget(QLabel("策略:"))
+        top.addWidget(QLabel(UI_TEXT.HISTORY_FILTER_STRATEGY))
         self.strategy_filter = QComboBox()
-        self.strategy_filter.addItem("全部")
+        self.strategy_filter.addItem(UI_TEXT.HISTORY_FILTER_ALL)
         self.strategy_filter.setMinimumWidth(160)
         top.addWidget(self.strategy_filter)
 
-        top.addWidget(QLabel("状态:"))
+        top.addWidget(QLabel(UI_TEXT.HISTORY_FILTER_STATUS))
         self.status_filter = QComboBox()
-        self.status_filter.addItems(["全部", "进行中", "成功", "失败", "已取消", "已丢弃", "已跳过"])
+        self.status_filter.addItems([
+            UI_TEXT.HISTORY_FILTER_ALL,
+            UI_TEXT.HISTORY_STATUS_RUNNING,
+            UI_TEXT.HISTORY_STATUS_COMPLETED,
+            UI_TEXT.HISTORY_STATUS_FAILED,
+            UI_TEXT.HISTORY_STATUS_CANCELLED,
+            UI_TEXT.HISTORY_STATUS_DISCARDED,
+            UI_TEXT.HISTORY_STATUS_SKIPPED,
+        ])
         self.status_filter.setMinimumWidth(100)
         self.status_filter.currentTextChanged.connect(self._on_status_changed)
         top.addWidget(self.status_filter)
@@ -320,17 +329,17 @@ class HistoryPanel(QWidget):
 
         self.library_filter.blockSignals(True)
         self.library_filter.clear()
-        self.library_filter.addItem("全部")
+        self.library_filter.addItem(UI_TEXT.HISTORY_FILTER_ALL)
         self.library_filter.addItems(libs)
-        self.library_filter.setCurrentText(current_lib if current_lib in libs else "全部")
+        self.library_filter.setCurrentText(current_lib if current_lib in libs else UI_TEXT.HISTORY_FILTER_ALL)
         self.library_filter.blockSignals(False)
         self._on_library_changed(self.library_filter.currentText())
 
         self.strategy_filter.blockSignals(True)
         self.strategy_filter.clear()
-        self.strategy_filter.addItem("全部")
+        self.strategy_filter.addItem(UI_TEXT.HISTORY_FILTER_ALL)
         self.strategy_filter.addItems(strategies)
-        self.strategy_filter.setCurrentText(current_strat if current_strat in strategies else "全部")
+        self.strategy_filter.setCurrentText(current_strat if current_strat in strategies else UI_TEXT.HISTORY_FILTER_ALL)
         self.strategy_filter.blockSignals(False)
         self._on_strategy_changed(self.strategy_filter.currentText())
 
@@ -343,10 +352,14 @@ class HistoryPanel(QWidget):
             _savings_bytes(r)
             for r in rows if _has_completed_output(r)
         )
-        parts = [f"共 {total} 条", f"成功 {completed}", f"失败 {failed}"]
+        parts = [
+            UI_TEXT.HISTORY_SUMMARY_TEMPLATE.format(total=total),
+            UI_TEXT.HISTORY_SUMMARY_COMPLETED.format(completed=completed),
+            UI_TEXT.HISTORY_SUMMARY_FAILED.format(failed=failed),
+        ]
         if running:
-            parts.append(f"进行中 {running}")
-        parts.append(f"累计节省 {_format_bytes(total_savings)}")
+            parts.append(UI_TEXT.HISTORY_SUMMARY_RUNNING.format(running=running))
+        parts.append(UI_TEXT.HISTORY_SUMMARY_SAVINGS.format(savings=_format_bytes(total_savings)))
         self.summary_label.setText(" · ".join(parts))
 
     def _update_summary_from_proxy(self):
@@ -359,26 +372,26 @@ class HistoryPanel(QWidget):
 
     def _on_status_changed(self, text: str):
         status_map = {
-            "进行中": "running",
-            "成功": "completed",
-            "失败": "failed",
-            "已取消": "cancelled",
-            "已丢弃": "discarded",
-            "已跳过": "skipped",
+            UI_TEXT.HISTORY_STATUS_RUNNING: "running",
+            UI_TEXT.HISTORY_STATUS_COMPLETED: "completed",
+            UI_TEXT.HISTORY_STATUS_FAILED: "failed",
+            UI_TEXT.HISTORY_STATUS_CANCELLED: "cancelled",
+            UI_TEXT.HISTORY_STATUS_DISCARDED: "discarded",
+            UI_TEXT.HISTORY_STATUS_SKIPPED: "skipped",
         }
         self._proxy.set_status_filter(status_map.get(text, ""))
         self._update_summary_from_proxy()
 
     def _on_library_changed(self, text: str):
-        self._proxy.set_library_filter("" if text == "全部" else text)
+        self._proxy.set_library_filter("" if text == UI_TEXT.HISTORY_FILTER_ALL else text)
         self._update_summary_from_proxy()
 
     def _on_strategy_changed(self, text: str):
-        self._proxy.set_strategy_filter("" if text == "全部" else text)
+        self._proxy.set_strategy_filter("" if text == UI_TEXT.HISTORY_FILTER_ALL else text)
         self._update_summary_from_proxy()
 
     def show_error(self, message: str):
-        self.summary_label.setText(f"历史加载失败：{message}")
+        self.summary_label.setText(f"历史加载失败：{message}")  # 错误消息动态组合，保持原样
 
     def _on_double_click(self, index: QModelIndex):
         source_idx = self._proxy.mapToSource(index)
@@ -388,25 +401,26 @@ class HistoryPanel(QWidget):
 
         if status in ("running", "pending"):
             stage = row.get("stage", "") or _STATUS_LABELS.get(status, "")
-            QMessageBox.information(self, "任务状态", f"任务正在{stage}，尚未完成")
+            QMessageBox.information(self, UI_TEXT.HISTORY_TASK_RUNNING_TITLE,
+                                    UI_TEXT.HISTORY_TASK_RUNNING_MSG.format(stage=stage))
             return
 
         if status == "failed":
-            error = row.get("error_message", "未知错误")
-            tip = "错误信息：\n" + (error[:500] if error else "未知错误")
-            QMessageBox.critical(self, "转换失败", tip)
+            error = row.get("error_message", UI_TEXT.UNKNOWN_ERROR)
+            QMessageBox.critical(self, UI_TEXT.HISTORY_ENCODE_FAILED_TITLE,
+                                 f"错误信息：\n{error[:500] if error else UI_TEXT.UNKNOWN_ERROR}")
             return
 
         if status == "discarded":
             reason = row.get("error_message", "输出体积不小于源文件")
-            QMessageBox.information(self, "已丢弃", reason)
+            QMessageBox.information(self, UI_TEXT.HISTORY_DISCARDED_TITLE, reason)
             return
 
         if output_path and Path(output_path).exists():
             os.startfile(str(Path(output_path).parent))
         else:
             QMessageBox.information(
-                self, "文件不存在",
-                f"输出文件已不存在：\n{output_path}\n\n"
-                "可能原因：体积反超被丢弃 / 文件被手动删除"
+                self, UI_TEXT.HISTORY_FILE_NOT_FOUND_TITLE,
+                f"{UI_TEXT.HISTORY_FILE_NOT_FOUND_MSG}\n{output_path}\n\n"
+                f"{UI_TEXT.HISTORY_FILE_NOT_FOUND_HINT}"
             )

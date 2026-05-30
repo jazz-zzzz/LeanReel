@@ -18,6 +18,7 @@ class FileTableStore(QObject):
         super().__init__()
         self._rows: list[FileRow] = []
         self._by_key: dict[tuple[int, str], int] = {}
+        self._by_relative_path: dict[str, int] = {}
         self._checked: set[tuple[int, str]] = set()
         self._strategies: list | None = None
         self._lock = threading.Lock()  # 保护 rebuild/update_row 并发
@@ -35,6 +36,8 @@ class FileTableStore(QObject):
                 self._checked = {k for k in self._checked if k in valid}
             self._rows = list(rows)
             self._by_key = {r.key: i for i, r in enumerate(self._rows)}
+            self._by_relative_path = {r.snap.relative_path: i for i, r in enumerate(self._rows)
+                                      if getattr(r.snap, "relative_path", "")}
             self._strategies = strategies
         self.rows_rebuilt.emit()
 
@@ -99,10 +102,8 @@ class FileTableStore(QObject):
         return tuple(self._rows)
 
     def row_by_relative_path(self, relative_path: str) -> FileRow | None:
-        for row in self._rows:
-            if row.snap.relative_path == relative_path:
-                return row
-        return None
+        idx = self._by_relative_path.get(relative_path)
+        return self._rows[idx] if idx is not None else None
 
     def folder_stats(self) -> dict[tuple[int, str], tuple[int, int]]:
         """返回 目录身份 -> (总大小, 文件数) 的映射。"""

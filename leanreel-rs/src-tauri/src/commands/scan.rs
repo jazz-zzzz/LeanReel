@@ -16,7 +16,7 @@ pub struct FileEntry {
     pub height: i32,
     pub bitrate_bps: i64,
     /// Status key for frontend filtering: "processable" | "protected" |
-    /// "probe_failed" | "pending" | "compressed" | "unmatched"
+    /// "probe_failed" | "pending" | "unmatched"
     pub decision_status: String,
     /// Human-readable decision: "可处理: 平衡 HEVC 节省 1.2-2.4 GB (45-55%)"
     pub decision_text: String,
@@ -147,7 +147,7 @@ fn format_codec(s: &crate::domain::models::FileSnapshot) -> String {
         return "探测中...".into();
     }
     // Probe failed
-    if !s.probe_ok && !s.video_codec.is_empty_or_unknown() && !s.probe_error.is_empty() {
+    if !s.probe_ok && s.video_codec.is_empty_or_unknown() && !s.probe_error.is_empty() {
         return "探测失败".into();
     }
     // Unrecognized
@@ -196,7 +196,7 @@ fn compute_decision(
         return ("pending".into(), "探测中...".into());
     }
     // Probe failed
-    if !s.probe_ok && !s.video_codec.is_empty_or_unknown() && !s.probe_error.is_empty() {
+    if !s.probe_ok && s.video_codec.is_empty_or_unknown() && !s.probe_error.is_empty() {
         return ("probe_failed".into(), format!("探测失败: {}", s.probe_error));
     }
 

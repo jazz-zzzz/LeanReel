@@ -23,9 +23,22 @@ C_SELECTION = "#3d2e14"   # 选中行色 暖琥珀底
 C_PROGRESS_BG = "#24221d"
 C_PROGRESS_CHUNK = "#c8963e"
 
+# ── 扩展 token（组件级与交互态）──
+C_ACCENT_LIGHT = "#d4a853"     # 浅琥珀，选中边框
+C_ACCENT_PRESSED = "#b88730"   # 按压琥珀
+C_TEXT_DISABLED = "#6b6560"    # 禁用/占位文字
+C_TEXT_TERTIARY = "#a0988c"    # 三级文字，策略描述
+C_SURFACE_HOVER = "#2c2923"    # 悬停面
+C_SURFACE_PRESSED = "#1e1c18"  # 按压面
+C_SURFACE_LOWERED = "#1a1915"  # 下凹面，策略描述背景
+C_STRATEGY_TEXT = "#c8c0b8"    # 策略行文字
+C_STRATEGY_CHECKED_TEXT = "#f0e6d0"  # 选中策略行文字
+C_STRATEGY_CHECKED_HOVER_BG = "#45341a"  # 选中悬停背景
+C_STRATEGY_HOVER_BORDER = "#e0b85c"  # 选中悬停边框
+
 # ── 字体 ──
 FONT_FAMILY = '"Segoe UI", "Microsoft YaHei", sans-serif'
-FONT_SIZE = "13px"
+FONT_SIZE = "10pt"
 FONT_MONO = '"Cascadia Code", "Consolas", "Fira Code", monospace'
 
 QSS = f"""
@@ -152,11 +165,11 @@ QPushButton {{
     min-height: 28px;
 }}
 QPushButton:hover {{
-    background-color: #2c2923;
+    background-color: {C_SURFACE_HOVER};
     border-color: {C_BORDER_FOCUS};
 }}
 QPushButton:pressed {{
-    background-color: #1e1c18;
+    background-color: {C_SURFACE_PRESSED};
 }}
 QPushButton:disabled {{
     color: {C_TEXT_MUTED};
@@ -169,14 +182,14 @@ QPushButton#primary_action {{
     border: none;
     border-radius: 6px;
     font-weight: bold;
-    font-size: 15px;
+    font-size: 11pt;
     padding: 12px 24px;
 }}
 QPushButton#primary_action:hover {{
     background-color: {C_ACCENT_HOVER};
 }}
 QPushButton#primary_action:pressed {{
-    background-color: #b88730;
+    background-color: {C_ACCENT_PRESSED};
 }}
 QPushButton#primary_action:disabled {{
     background-color: {C_BORDER};
@@ -260,7 +273,7 @@ QStatusBar::item {{
 QStatusBar QLabel {{
     padding: 2px 12px;
     color: {C_TEXT};
-    font-size: 12px;
+    font-size: 9pt;
 }}
 
 /* ── 菜单 ── */

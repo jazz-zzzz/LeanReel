@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 from leanreel.ui_text import UI_TEXT
+from leanreel.gui.theme import C_TEXT
 
 
 class MainWindow(QMainWindow):
@@ -81,7 +82,7 @@ class MainWindow(QMainWindow):
         self.status.setFixedHeight(28)
         self.setStatusBar(self.status)
         self.status_label = QLabel(UI_TEXT.READY)
-        self.status_label.setStyleSheet("color: #e8e3db; font-size: 12px; padding: 2px 16px;")
+        self.status_label.setStyleSheet(f"color: {C_TEXT}; font-size: 9pt; padding: 2px 16px;")
         self.status.addWidget(self.status_label, 1)
 
     def set_status(self, text: str):

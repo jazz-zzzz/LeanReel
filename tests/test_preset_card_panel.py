@@ -432,25 +432,26 @@ class TestStrategyChangedSignal:
 class TestUpdateCardIndicators:
     """_update_card_indicators() 的间接测试（通过点击卡片触发）"""
 
-    def test_active_card_shows_filled_circle_prefix(self, qtbot):
-        """选中的卡片应显示 ● 前缀"""
+    def test_active_card_shows_checked_state(self, qtbot):
+        """选中的卡片 isChecked() 为 True，未选中为 False；accessibleName 区分状态"""
         panel = PresetCardPanel()
         qtbot.addWidget(panel)
         strategies = _make_strategies()
         panel.set_strategies(strategies)
 
         # 默认第一个选中
-        text0 = panel.card_group.buttons()[0].text()
-        assert "●" in text0, f"第一个选中的卡片文本中应含 ●: {text0}"
-
-        # 没有选中的卡片应有 ○
-        text1 = panel.card_group.buttons()[1].text()
-        text2 = panel.card_group.buttons()[2].text()
-        assert "○" in text1, f"未选中的卡片文本中应含 ○: {text1}"
-        assert "○" in text2, f"未选中的卡片文本中应含 ○: {text2}"
+        btn0 = panel.card_group.buttons()[0]
+        btn1 = panel.card_group.buttons()[1]
+        btn2 = panel.card_group.buttons()[2]
+        assert btn0.isChecked(), "第一个卡片应为选中状态"
+        assert not btn1.isChecked(), "第二个卡片应为未选中"
+        assert not btn2.isChecked(), "第三个卡片应为未选中"
+        # 无障碍名称验证
+        assert "已选中" in btn0.accessibleName(), f"选中卡片的 accessibleName 应含'已选中': {btn0.accessibleName()}"
+        assert "策略:" in btn1.accessibleName(), f"未选中卡片的 accessibleName 应含'策略:': {btn1.accessibleName()}"
 
     def test_prefix_swaps_after_clicking_another_card(self, qtbot):
-        """点击另一个卡片后，新旧选中的前缀应互换"""
+        """点击另一个卡片后，新旧选中的 isChecked 和 accessibleName 应互换"""
         panel = PresetCardPanel()
         qtbot.addWidget(panel)
         strategies = _make_strategies()
@@ -459,17 +460,19 @@ class TestUpdateCardIndicators:
         # 点击第二个卡片
         panel.card_group.buttons()[1].click()
 
-        # 新选中的应有 ●
-        text1 = panel.card_group.buttons()[1].text()
-        assert "●" in text1, f"点击后选中的卡片文本应含 ●: {text1}"
+        # 新选中的 isChecked=True, accessibleName 含 '已选中'
+        btn1 = panel.card_group.buttons()[1]
+        assert btn1.isChecked(), "点击后的卡片应为选中状态"
+        assert "已选中" in btn1.accessibleName(), f"accessibleName 应含'已选中': {btn1.accessibleName()}"
 
-        # 旧选中的应有 ○
-        text0 = panel.card_group.buttons()[0].text()
-        assert "○" in text0, f"取消选中的卡片文本应含 ○: {text0}"
+        # 旧选中的 isChecked=False, accessibleName 含 '策略:'
+        btn0 = panel.card_group.buttons()[0]
+        assert not btn0.isChecked(), "取消选中的卡片应未选中"
+        assert "策略:" in btn0.accessibleName(), f"accessibleName 应含'策略:': {btn0.accessibleName()}"
 
-        # 第三个仍为 ○
-        text2 = panel.card_group.buttons()[2].text()
-        assert "○" in text2, f"未点击的卡片文本应含 ○: {text2}"
+        # 第三个仍为未选中
+        btn2 = panel.card_group.buttons()[2]
+        assert not btn2.isChecked(), "未点击的卡片应为未选中"
 
     def test_only_one_card_checked_at_a_time(self, qtbot):
         """QButtonGroup exclusive 模式确保同一时间只有一张卡片被选中"""

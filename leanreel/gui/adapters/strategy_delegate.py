@@ -2,6 +2,8 @@
 from PySide6.QtWidgets import QStyledItemDelegate, QComboBox
 from PySide6.QtCore import Qt
 
+from leanreel.ui_text import UI_TEXT
+
 
 class StrategyDelegate(QStyledItemDelegate):
     """列 5（处理策略）的 QComboBox 编辑器委托。"""
@@ -15,10 +17,9 @@ class StrategyDelegate(QStyledItemDelegate):
         combo = QComboBox(parent)
         combo.setMinimumWidth(140)
         combo.setMaximumHeight(28)
-        combo.setStyleSheet("QComboBox { padding: 1px 4px; }")
         names = list(self._lookup)
-        if "自定义" not in names:
-            names.append("自定义")
+        if UI_TEXT.FILE_CUSTOM_STRATEGY not in names:
+            names.append(UI_TEXT.FILE_CUSTOM_STRATEGY)
         combo.addItems(names)
         combo.wheelEvent = lambda event: event.ignore()
         if parent is not None:

@@ -119,8 +119,8 @@ def test_builtin_presets_are_three_av1_cpu_tiers():
     strategies = load_strategies(str(strategy_dir))
 
     assert [s.name for s in strategies] == [
-        "AV1 NVENC CQ32 保画质",
-        "AV1 NVENC CQ34 均衡快速",
+        "AV1 NVENC CQ28 保画质",
+        "AV1 NVENC CQ32 均衡快速",
         "CPU x265 CRF18 慢速保画质",
     ]
     assert all(s.is_preset for s in strategies)
@@ -129,13 +129,13 @@ def test_builtin_presets_are_three_av1_cpu_tiers():
     assert av1_quality.video.encoder == "av1_nvenc"
     assert av1_quality.video.gpu is True
     assert av1_quality.video.rc == "vbr"
-    assert av1_quality.video.cq == 32
+    assert av1_quality.video.cq == 28
     assert av1_quality.video.nv_preset == "p6"
 
     assert av1_balanced.video.encoder == "av1_nvenc"
     assert av1_balanced.video.gpu is True
     assert av1_balanced.video.rc == "vbr"
-    assert av1_balanced.video.cq == 34
+    assert av1_balanced.video.cq == 32
     assert av1_balanced.video.nv_preset == "p5"
 
     assert cpu_quality.video.encoder == "libx265"
