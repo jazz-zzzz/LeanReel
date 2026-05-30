@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+use tauri::Emitter;
 
 use crate::domain::models::{FileSnapshot, Strategy, TaskStatus};
 use crate::domain::traits::{Encoder, EncodingJob, MediaProber, ProgressEvent, SnapshotStore};
@@ -68,6 +69,8 @@ pub struct WorkerManager {
     pub last_progress: Arc<Mutex<f32>>,
     /// Optional external progress callback during encoding
     pub on_encode_progress: Arc<Mutex<Option<ProgressCallback>>>,
+    /// Tauri AppHandle for emitting events to the frontend
+    pub app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
 }
 
 impl WorkerManager {
@@ -84,6 +87,8 @@ impl WorkerManager {
             Arc::new(Mutex::new(None));
         let on_encode_progress: Arc<Mutex<Option<ProgressCallback>>> =
             Arc::new(Mutex::new(None));
+        let app_handle: Arc<Mutex<Option<tauri::AppHandle>>> =
+            Arc::new(Mutex::new(None));
         let (tx, rx) = mpsc::channel::<WorkerCommand>();
         let rx = Arc::new(Mutex::new(rx));
         let mut handles = Vec::new();
@@ -97,6 +102,7 @@ impl WorkerManager {
             let prober = prober.clone();
             let store = store.clone();
             let on_encode_progress = on_encode_progress.clone();
+            let app_handle = app_handle.clone();
             let handle = thread::spawn(move || loop {
                 if cancelled.load(Ordering::Relaxed) { break; }
                 let cmd = {
@@ -135,12 +141,14 @@ impl WorkerManager {
                                 plan.lock().unwrap().start_stage(prepare_idx);
                                 // C2: Update DB — preparing stage
                                 update_runtime(&store, task.history_id, "running", 0.0, "preparing", 0);
+                                emit_progress(&app_handle, &task.id, "Prepare", 0.0, "running");
                                 // Prepare step: ensure parent directory exists
                                 if let Some(parent) = job.output_path.parent() {
                                     if let Err(e) = std::fs::create_dir_all(parent) {
                                         plan.lock().unwrap().fail_stage(prepare_idx, format!("创建输出目录失败: {}", e));
                                         plan.lock().unwrap().skip_remaining(prepare_idx + 1);
                                         finish_record(&store, task.history_id, "failed", 0.0, 0, 0, &format!("创建输出目录失败: {}", e), "", 0, "");
+                                        emit_progress(&app_handle, &task.id, "done", 100.0, "failed");
                                         eprintln!("编码失败: {}", e);
                                         cleanup_temp(&final_output);
                                         continue;
@@ -160,6 +168,7 @@ impl WorkerManager {
                                     plan.lock().unwrap().start_stage(extract_idx);
                                     // C2: Update DB — extracting_rpu stage
                                     update_runtime(&store, task.history_id, "running", 0.0, "extracting_rpu", 0);
+                                    emit_progress(&app_handle, &task.id, "ExtractRpu", 0.0, "running");
                                     let rpu_path = job.output_path.with_extension("rpu");
                                     let mut extract_ok = false;
                                     for attempt in 0..=extract_max_retries {
@@ -184,6 +193,7 @@ impl WorkerManager {
                                                     plan.lock().unwrap().fail_stage(extract_idx, e);
                                                     plan.lock().unwrap().skip_remaining(extract_idx + 1);
                                                     finish_record(&store, task.history_id, "failed", 0.0, 0, 0, "RPU 提取失败", "", 0, "");
+                                                    emit_progress(&app_handle, &task.id, "done", 100.0, "failed");
                                                     eprintln!("RPU 提取失败");
                                                     cleanup_temp(&final_output);
                                                 }
@@ -200,9 +210,12 @@ impl WorkerManager {
                                 plan.lock().unwrap().start_stage(transcode_idx);
                                 // C2: Update DB — transcoding stage start
                                 update_runtime(&store, task.history_id, "running", 0.0, "transcoding", 0);
+                                emit_progress(&app_handle, &task.id, "Transcode", 0.0, "running");
                                 let plan_for_callback = plan.clone();
                                 let store_for_progress = store.clone();
                                 let history_id = task.history_id;
+                                let app_handle_for_cb = app_handle.clone();
+                                let job_id_for_cb = task.id.clone();
                                 let result = enc.run(&job, &|event| {
                                     match &event {
                                         ProgressEvent::StageStart { .. } => {}
@@ -219,6 +232,8 @@ impl WorkerManager {
                                                     cb(ProgressEvent::StageProgress { percent: *percent, fps: 0.0, bitrate_kbps: 0 });
                                                 }
                                             }
+                                            // Task 4: Emit encode-progress event to frontend
+                                            emit_progress(&app_handle_for_cb, &job_id_for_cb, "Transcode", *percent as f64 * 100.0, "running");
                                         }
                                         ProgressEvent::StageComplete { .. } => {}
                                         ProgressEvent::Done { .. } => {}
@@ -245,6 +260,7 @@ impl WorkerManager {
                                             plan.lock().unwrap().skip_remaining(transcode_idx + 1);
                                             // C2: Mark as discarded in DB
                                             finish_record(&store, task.history_id, "discarded", 100.0, (output.duration_ms / 1000) as i64, output.compressed_size as i64, "", "", 0, &output.command);
+                                            emit_progress(&app_handle, &task.id, "done", 100.0, "discarded");
                                             cleanup_temp(&final_output);
                                             continue;
                                         }
@@ -261,6 +277,7 @@ impl WorkerManager {
                                             plan.lock().unwrap().start_stage(inject_idx);
                                             // C2: Update DB — injecting_rpu stage
                                             update_runtime(&store, task.history_id, "running", 0.0, "injecting_rpu", 0);
+                                            emit_progress(&app_handle, &task.id, "InjectRpu", 0.0, "running");
                                             let injected_path = job.output_path.with_extension("injected.mkv");
                                             let mut inject_ok = false;
                                             for attempt in 0..=inject_max_retries {
@@ -286,6 +303,7 @@ impl WorkerManager {
                                                             plan.lock().unwrap().fail_stage(inject_idx, format!("重命名注入文件失败: {}", e));
                                                             plan.lock().unwrap().skip_remaining(inject_idx + 1);
                                                             finish_record(&store, task.history_id, "failed", 0.0, 0, 0, &format!("重命名注入文件失败: {}", e), "", 0, "");
+                                                            emit_progress(&app_handle, &task.id, "done", 100.0, "failed");
                                                             cleanup_temp(&final_output);
                                                             continue;
                                                         }
@@ -300,6 +318,7 @@ impl WorkerManager {
                                                             plan.lock().unwrap().fail_stage(inject_idx, e);
                                                             plan.lock().unwrap().skip_remaining(inject_idx + 1);
                                                             finish_record(&store, task.history_id, "failed", 0.0, 0, 0, "RPU 注入失败", "", 0, "");
+                                                            emit_progress(&app_handle, &task.id, "done", 100.0, "failed");
                                                             cleanup_temp(&final_output);
                                                         }
                                                     }
@@ -321,6 +340,7 @@ impl WorkerManager {
                                         plan.lock().unwrap().start_stage(move_out_idx);
                                         // C2: Update DB — moving_out stage
                                         update_runtime(&store, task.history_id, "running", 0.0, "moving_out", 0);
+                                        emit_progress(&app_handle, &task.id, "MoveOut", 0.0, "running");
                                         let mut move_out_ok = false;
                                         for attempt in 0..=move_out_max_retries {
                                             if cancelled.load(Ordering::Relaxed) { break; }
@@ -341,6 +361,7 @@ impl WorkerManager {
                                                         plan.lock().unwrap().fail_stage(move_out_idx, format!("原子提交失败 (已重试{}次): {}", move_out_max_retries, e));
                                                         plan.lock().unwrap().skip_remaining(move_out_idx + 1);
                                                         finish_record(&store, task.history_id, "failed", 0.0, 0, 0, &format!("原子提交失败 (已重试{}次): {}", move_out_max_retries, e), "", 0, "");
+                                                        emit_progress(&app_handle, &task.id, "done", 100.0, "failed");
                                                         cleanup_temp(&final_output);
                                                         eprintln!("原子提交失败: {}", e);
                                                     }
@@ -382,6 +403,7 @@ impl WorkerManager {
                                             output.compressed_size as i64,
                                             "", &sidecar_path, 0, &output.command,
                                         );
+                                        emit_progress(&app_handle, &task.id, "done", 100.0, "completed");
 
                                         eprintln!(
                                             "编码完成: {} -> {} ({} -> {} bytes) [progress: {:.1}%]",
@@ -397,6 +419,7 @@ impl WorkerManager {
                                         plan.lock().unwrap().skip_remaining(transcode_idx + 1);
                                         // C2: Mark compression record as failed
                                         finish_record(&store, task.history_id, "failed", 0.0, 0, 0, &e, "", 0, "");
+                                        emit_progress(&app_handle, &task.id, "done", 100.0, "failed");
                                         cleanup_temp(&final_output);
                                         eprintln!("编码失败: {}", e);
                                     }
@@ -409,7 +432,7 @@ impl WorkerManager {
             });
             handles.push(handle);
         }
-        Self { max_workers: AtomicUsize::new(max), sender: tx, paused, cancelled, executor, prober, store, join_handles: Mutex::new(handles), last_progress, on_encode_progress }
+        Self { max_workers: AtomicUsize::new(max), sender: tx, paused, cancelled, executor, prober, store, join_handles: Mutex::new(handles), last_progress, on_encode_progress, app_handle }
     }
 
     pub fn max_workers(&self) -> usize { self.max_workers.load(Ordering::Relaxed) }
@@ -433,6 +456,10 @@ impl WorkerManager {
     /// Set the progress callback for encoding progress (H-004 pipeline).
     pub fn set_on_encode_progress(&self, cb: ProgressCallback) {
         if let Ok(mut guard) = self.on_encode_progress.lock() { *guard = Some(cb); }
+    }
+    /// Set the Tauri AppHandle for emitting progress events to the frontend.
+    pub fn set_app_handle(&self, handle: tauri::AppHandle) {
+        if let Ok(mut guard) = self.app_handle.lock() { *guard = Some(handle); }
     }
     pub fn submit(&self, task: WorkerTask) -> Result<(), String> {
         self.sender.send(WorkerCommand::Submit(task)).map_err(|e| format!("submit failed: {}", e))
@@ -520,6 +547,27 @@ fn finish_record(
             if let Err(e) = s.finish_compression(history_id, status, progress, duration_seconds, compressed_size, error_message, sidecar_path, source_deleted, ffmpeg_command) {
                 eprintln!("DB 完成记录失败 (id={}): {}", history_id, e);
             }
+        }
+    }
+}
+
+/// Emit an encode-progress event to the Tauri frontend.
+/// No-op when app_handle is not set.
+fn emit_progress(
+    app_handle: &Arc<Mutex<Option<tauri::AppHandle>>>,
+    job_id: &str,
+    stage: &str,
+    progress: f64,
+    status: &str,
+) {
+    if let Ok(guard) = app_handle.lock() {
+        if let Some(ref handle) = *guard {
+            let _ = handle.emit("encode-progress", serde_json::json!({
+                "job_id": job_id,
+                "stage": stage,
+                "progress": progress,
+                "status": status,
+            }));
         }
     }
 }

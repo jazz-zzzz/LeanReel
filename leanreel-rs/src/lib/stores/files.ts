@@ -17,3 +17,4 @@ export interface FileEntry {
 export const files = writable<FileEntry[]>([]);
 export const scanStatus = writable<string>('');
 export const selectedFilePaths = writable<string[]>([]);
+export const scanProgress = writable<{ done: number; total: number } | null>(null);

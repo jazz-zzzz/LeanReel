@@ -4,6 +4,7 @@
 
   let selectedPaths: Set<string> = new Set();
   let allSelected = false;
+  let lastClickedIndex: number | null = null;
 
   let filterKey = 'all';
 
@@ -81,11 +82,23 @@
     else { selectedPaths = new Set(filteredFiles.map(f => f.path)); allSelected = true; }
   }
 
-  function toggleFile(path: string) {
-    const next = new Set(selectedPaths);
-    if (next.has(path)) { next.delete(path); } else { next.add(path); }
-    selectedPaths = next;
-    allSelected = next.size === $files.length && $files.length > 0;
+  function toggleFile(path: string, index?: number, event?: MouseEvent) {
+    if (event?.shiftKey && lastClickedIndex !== null && index !== undefined) {
+      const start = Math.min(lastClickedIndex, index);
+      const end = Math.max(lastClickedIndex, index);
+      const next = new Set(selectedPaths);
+      for (let i = start; i <= end; i++) {
+        const f = filteredFiles[i];
+        if (f) next.add(f.path);
+      }
+      selectedPaths = next;
+    } else {
+      const next = new Set(selectedPaths);
+      if (next.has(path)) { next.delete(path); } else { next.add(path); }
+      selectedPaths = next;
+    }
+    if (index !== undefined) lastClickedIndex = index;
+    allSelected = selectedPaths.size === filteredFiles.length && filteredFiles.length > 0;
   }
 
   $: {
@@ -163,7 +176,7 @@
             <tr
               class:selected={selectedPaths.has(file.path)}
               class:alt={realIdx % 2 === 1}
-              onclick={() => toggleFile(file.path)}
+              onclick={(e) => toggleFile(file.path, startIdx + i, e)}
             >
               <td class="col-check" onclick={(e) => e.stopPropagation()}>
                 <input type="checkbox" checked={selectedPaths.has(file.path)} onchange={() => toggleFile(file.path)} />
