@@ -4,6 +4,99 @@
 
 ---
 
+## 数据契约：数据库 Schema
+
+Python 版 SQLite 数据库是两版本间的"数据接口规范"。Rust 版的表结构必须完全兼容以下 Schema，能直接读取 Python 版生成的数据库文件并产生相同查询结果。
+
+### library 表
+
+```sql
+CREATE TABLE library (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+```
+
+### library_folder 表
+
+```sql
+CREATE TABLE library_folder (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    library_id INTEGER NOT NULL REFERENCES library(id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    UNIQUE(library_id, path)
+);
+```
+
+### file_snapshot 表
+
+```sql
+CREATE TABLE file_snapshot (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    library_folder_id INTEGER NOT NULL REFERENCES library_folder(id) ON DELETE CASCADE,
+    relative_path TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    size_bytes INTEGER DEFAULT 0,
+    video_codec TEXT DEFAULT '',
+    video_width INTEGER DEFAULT 0,
+    video_height INTEGER DEFAULT 0,
+    hdr_type TEXT DEFAULT 'SDR',
+    audio_tracks TEXT DEFAULT '[]',
+    subtitle_tracks TEXT DEFAULT '[]',
+    duration_seconds REAL DEFAULT 0,
+    bitrate_bps INTEGER DEFAULT 0,
+    file_mtime REAL DEFAULT 0,
+    probe_ok INTEGER DEFAULT 0,
+    probe_error TEXT DEFAULT '',
+    scanned_at TEXT DEFAULT (datetime('now','localtime')),
+    UNIQUE(library_folder_id, relative_path)
+);
+```
+
+### compression_history 表
+
+```sql
+CREATE TABLE compression_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_snapshot_id INTEGER REFERENCES file_snapshot(id) ON DELETE SET NULL,
+    strategy_name TEXT NOT NULL,
+    original_size INTEGER DEFAULT 0,
+    compressed_size INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'pending',
+    duration_seconds INTEGER DEFAULT 0,
+    error_message TEXT DEFAULT '',
+    output_path TEXT DEFAULT '',
+    output_size_bytes INTEGER DEFAULT 0,
+    savings_pct REAL DEFAULT 0,
+    encoder TEXT DEFAULT '',
+    cq_value INTEGER DEFAULT 0,
+    preset TEXT DEFAULT '',
+    pix_fmt TEXT DEFAULT '',
+    audio_mode TEXT DEFAULT '',
+    sub_mode TEXT DEFAULT '',
+    ffmpeg_command TEXT DEFAULT '',
+    sidecar_path TEXT DEFAULT '',
+    leanreel_version TEXT DEFAULT '',
+    source_deleted INTEGER DEFAULT 0,
+    progress REAL DEFAULT 0,
+    stage TEXT DEFAULT '',
+    started_at TEXT DEFAULT '',
+    completed_at TEXT DEFAULT ''
+);
+```
+
+### 兼容规则
+
+- 表名、列名、列类型、DEFAULT 值、NOT NULL 约束必须与 Python 版一致
+- Rust 版读取 Python 数据库时以只读模式打开，不执行任何写入
+- 新增列（Rust 版扩展）必须有 DEFAULT 值，保证旧库可读
+- Rust 版自带独立的写入数据库，不与 Python 版共享
+
+**参照**：`leanreel/infrastructure/database.py`
+
+---
+
 ## 1. 受保护片源规则（最高优先级）
 
 ### 1.1 HEVC/H.265 片源

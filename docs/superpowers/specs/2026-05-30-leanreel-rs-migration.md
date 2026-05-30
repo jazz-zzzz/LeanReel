@@ -154,7 +154,77 @@
 
 ---
 
-## 8. Golden Test 策略
+## 8. 数据层兼容性机制
+
+### 8.1 目标
+
+Rust 版本能够直接读取 Python 版生成的 SQLite 数据库，用真实生产数据验证两边的查询、扫描、策略匹配行为完全一致。Rust 版本只读，不写回 Python 库。
+
+### 8.2 共享 Schema 契约
+
+Python 版数据库 schema 作为"数据接口规范"，Rust 版的表结构必须完全兼容。Schema 定义从 Python 版 `leanreel/infrastructure/database.py` 提取，作为独立文档维护：
+
+```
+tests/golden/schema.sql    ← 从 Python database.py 提取的完整 DDL
+```
+
+**兼容规则**：
+- 表名、列名、列类型必须一致
+- NULL 约束必须一致
+- Rust 读 Python 库时关闭外键约束（避免跨版本差异）
+- 新增列必须有 DEFAULT 值（保证旧库可读）
+
+### 8.3 数据拉取协议
+
+Rust 测试/调试模式下，指定 Python 版数据库路径，以只读模式打开：
+
+```rust
+// 测试模式：打开 Python 版数据库作为只读参照
+let py_db = SnapshotStore::open_readonly(&path_to_python_db)?;
+let rs_db = SnapshotStore::open(&path_to_rust_db)?;
+
+// 从 Python 库拉随机一条记录
+let sample = py_db.random_snapshot()?;
+
+// 分别在两个数据库上执行相同查询
+let py_result = py_db.query(&filter)?;
+let rs_result = rs_db.query(&filter)?;
+
+// 断言结果一致
+assert_eq!(normalize(py_result), normalize(rs_result));
+```
+
+### 8.4 行为一致性检查清单
+
+对每个查询/只读操作，Rust 版必须与 Python 版产出相同结果：
+
+| 操作 | 验证方式 | 容差 |
+|---|---|---|
+| 文件列表查询（全量） | 行数、每行字段值一致 | 排序顺序允许差异（需要相同的 ORDER BY 后比较） |
+| 文件列表查询（按库筛选） | 行数、字段一致 | 同上 |
+| 文件列表查询（按文件夹筛选） | 行数、字段一致 | 同上 |
+| 策略匹配结果 | 同文件→同策略/同跳过原因 | 严格一致 |
+| 扫描去重（路径已存在） | 同路径→更新而非新增 | 严格一致 |
+| 历史记录查询 | 行数、字段一致 | 时间戳精度允许秒级差异 |
+| FFprobe 元数据解析 | 同文件→同 codec/hdr/resolution | 严格一致 |
+| 受保护片源判定 | 同文件→同跳过原因 | 严格一致 |
+
+### 8.5 数据源隔离
+
+```
+生产环境：
+  Python 版 ──写──→ leanreel.db (Python schema)
+  Rust 版   ──写──→ leanreel-rs.db (Rust schema, 独立文件)
+
+测试/验证环境：
+  Python 版 ──写──→ leanreel.db
+  Rust 版   ──只读─→ leanreel.db  (验证读行为)
+  Rust 版   ──写──→ :memory: 或独立测试库
+```
+
+---
+
+## 9. Golden Test 策略
 
 ### 8.1 选取 Golden 用例
 
