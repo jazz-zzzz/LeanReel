@@ -75,7 +75,7 @@ pub fn start_encode(
     let mut jobs = Vec::new();
     for file_key in &files {
         let (folder_id, relative_path) = parse_file_key(file_key)?;
-        let input = std::path::Path::new(relative_path);
+        let input = std::path::Path::new(&relative_path);
 
         let snapshot = match store.get_by_folder_path(folder_id, input)? {
             Some(s) => s,
@@ -170,19 +170,14 @@ pub fn start_encode(
     })
 }
 
-fn parse_file_key(file_key: &str) -> Result<(i64, &str), String> {
-    // Format: "folder_id:relative_path" or just "relative_path" (folder_id = 0 = search all)
-    if let Some((prefix, path)) = file_key.split_once(':') {
-        let folder_id = prefix
-            .parse::<i64>()
-            .map_err(|_| format!("无效文件夹标识: {}", file_key))?;
-        if path.is_empty() {
-            return Err(format!("无效文件路径: {}", file_key));
-        }
-        return Ok((folder_id, path));
+fn parse_file_key(file_key: &str) -> Result<(i64, String), String> {
+    let normalized = file_key.replace('\\', "/");
+    if let Some((prefix, path)) = normalized.split_once(':') {
+        let folder_id = prefix.parse::<i64>().map_err(|_| format!("无效文件夹标识: {}", file_key))?;
+        if path.is_empty() { return Err(format!("无效文件路径: {}", file_key)); }
+        return Ok((folder_id, path.to_string()));
     }
-    // No prefix — use 0 to search all folders
-    Ok((0, file_key))
+    Ok((0, normalized))
 }
 
 #[tauri::command]
