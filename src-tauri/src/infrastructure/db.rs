@@ -555,7 +555,7 @@ impl SqliteSnapshotStore {
         let result = self.conn
             .query_row(&sql, params, row_to_snapshot)
             .optional();
-        if result.as_ref().ok().flatten().is_none() {
+        if !matches!(result, Ok(Some(_))) {
             // Debug: list similar paths in DB
             let mut stmt = self.conn.prepare("SELECT relative_path FROM file_snapshot WHERE relative_path LIKE '%' || ?1 || '%' LIMIT 5").ok();
             if let Some(mut s) = stmt {
