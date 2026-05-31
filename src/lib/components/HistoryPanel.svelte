@@ -14,6 +14,11 @@
   let sortKey = $state<SortKey>('completed_at');
   let sortAsc = $state(false);
   let cmdDetail = $state<string | null>(null);
+  let showAllActive = $state(false);
+
+  $: activeTasks = $queue.filter(q => q.status === 'pending' || q.status === 'running');
+  $: visibleActive = showAllActive ? activeTasks : activeTasks.slice(0, 5);
+  $: hasMore = activeTasks.length > 5;
 
   onMount(async () => {
     try { history = await getHistory(); }
@@ -112,14 +117,14 @@
         <button class="chip" class:active={statusFilter === 'success'} onclick={() => statusFilter = 'success'}>成功</button>
         <button class="chip" class:active={statusFilter === 'failed'} onclick={() => statusFilter = 'failed'}>失败</button>
       </div>
-      {#if $queue.some(q => q.status === 'pending' || q.status === 'running')}
+      {#if activeTasks.length > 0}
         <button class="ghost danger" onclick={() => cancelEncode()}>全部取消</button>
       {/if}
     </div>
 
-    {#if $queue.some(q => q.status === 'pending' || q.status === 'running')}
+    {#if activeTasks.length > 0}
       <div class="active-tasks">
-        {#each $queue.filter(q => q.status === 'pending' || q.status === 'running') as item (item.id)}
+        {#each visibleActive as item (item.id)}
           <div class="active-row" class:running={item.status === 'running'} class:done={item.status === 'done'} class:failed={item.status === 'failed'}>
             {#if item.status === 'running'}<span class="spinner"></span>{:else}<span class="pending-dot"></span>{/if}
             <span class="active-name">{item.fileName}</span>
@@ -131,6 +136,9 @@
             {/if}
           </div>
         {/each}
+        {#if hasMore}
+          <button class="ghost" onclick={() => showAllActive = !showAllActive} style="font-size:11px">{showAllActive ? '收起' : `展开更多 (${activeTasks.length - 5})`}</button>
+        {/if}
       </div>
     {/if}
 
@@ -241,6 +249,7 @@
     background: var(--bg-window);
     display: flex;
     flex-direction: column;
+    overflow-y: auto;
     padding: var(--space-xl) var(--space-2xl);
   }
 

@@ -39,7 +39,7 @@ pub fn run() {
     )));
 
     let matcher = Arc::new(Mutex::new(StrategyMatcher::new(vec![])));
-    let wm = WorkerManager::new(2);
+    let wm = WorkerManager::new(16);
     wm.set_executor(ffmpeg.clone() as Arc<dyn Encoder + Send + Sync>);
     wm.set_prober(Box::new((*prober).clone()));
     let worker_store = SqliteSnapshotStore::open(&db_path).expect("Failed to open worker DB");
