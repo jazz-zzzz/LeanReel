@@ -79,7 +79,11 @@ pub fn start_encode(
 
         let snapshot = match store.get_by_folder_path(folder_id, input)? {
             Some(s) => s,
-            None => return Err(format!("未找到文件快照: {}", file_key)),
+            // Fallback: search all folders if specific folder_id doesn't match
+            None => match store.get_by_folder_path(0, input)? {
+                Some(s) => s,
+                None => return Err(format!("未找到文件快照: {}", file_key)),
+            },
         };
 
         let decision = state
