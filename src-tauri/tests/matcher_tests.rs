@@ -29,6 +29,7 @@ fn make_strategy(name: &str, encoder: &str, cq: i32) -> Strategy {
         name: name.into(),
         description: String::new(),
         is_preset: true,
+        sort_order: 0,
         video: VideoConfig {
             encoder: encoder.into(),
             crf: 0,

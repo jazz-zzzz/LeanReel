@@ -5,9 +5,9 @@
 //!
 //! 使用 SpyEncoder 替代真实 FFmpeg，通过网络模拟 mock 验证整个调用链。
 
+use leanreel_rs_lib::services::pipeline::temp_output_path;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use leanreel_rs_lib::services::pipeline::temp_output_path;
 
 use leanreel_rs_lib::domain::models::*;
 use leanreel_rs_lib::domain::traits::*;

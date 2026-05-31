@@ -102,7 +102,6 @@ fn make_test_strategy(name: &str) -> Strategy {
         },
         audio: AudioConfig {
             mode: "copy".into(),
-            remove_commentary: false,
             preferred_languages: vec![],
         },
         subtitle: SubtitleConfig {
@@ -189,7 +188,10 @@ fn test_encode_task_executes() {
     let job = job_guard.as_ref().unwrap();
     assert_eq!(job.id, "test-encode-1");
     assert_eq!(job.input_path, PathBuf::from("input.mkv"));
-    assert!(job.output_path.to_string_lossy().contains("test.mkv"));
+    assert_eq!(
+        job.output_path,
+        PathBuf::from("output").join("test.tmp.mkv")
+    );
     assert!(!job.has_dolby_vision);
     assert_eq!(job.snapshot.file_name, "test.mkv");
     assert_eq!(job.snapshot.video_codec, VideoCodec::H264);

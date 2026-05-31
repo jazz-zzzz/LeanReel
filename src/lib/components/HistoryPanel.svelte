@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { showHistory } from '$lib/stores/history';
-  import { getHistory } from '$lib/api';
+  import { queue } from '$lib/stores/queue';
+  import { getHistory, cancelEncode } from '$lib/api';
   import type { HistoryEntry } from '$lib/stores/history';
 
   let history = $state<HistoryEntry[]>([]);
@@ -106,7 +107,27 @@
         <button class="chip" class:active={statusFilter === 'success'} onclick={() => statusFilter = 'success'}>成功</button>
         <button class="chip" class:active={statusFilter === 'failed'} onclick={() => statusFilter = 'failed'}>失败</button>
       </div>
+      {#if $queue.length > 0}
+        <button class="ghost danger" onclick={() => cancelEncode()}>全部取消</button>
+      {/if}
     </div>
+
+    {#if $queue.length > 0}
+      <div class="active-tasks">
+        {#each $queue as item (item.id)}
+          <div class="active-row" class:running={item.status === 'running'} class:done={item.status === 'done'} class:failed={item.status === 'failed'}>
+            <span class="active-status">{item.status === 'running' ? '⟳' : item.status === 'done' ? '✓' : '✗'}</span>
+            <span class="active-name">{item.fileName}</span>
+            <span class="active-strategy">{item.strategyName}</span>
+            <div class="active-progress"><div class="active-progress-bar"><div class="active-progress-fill" style="width:{item.progress}%"></div></div></div>
+            <span class="active-pct">{item.progress}%</span>
+            {#if item.status === 'pending' || item.status === 'running'}
+              <button class="ghost danger" onclick={() => cancelEncode()}>取消</button>
+            {/if}
+          </div>
+        {/each}
+      </div>
+    {/if}
 
     {#if loading}
       <div class="loading">加载中...</div>
@@ -320,4 +341,20 @@
   }
 
   .col-path { max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+  .active-tasks { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--space-md); flex-shrink: 0; }
+  .active-row { display: flex; align-items: center; gap: var(--space-sm); padding: 5px 8px; border-radius: var(--radius-sm); background: var(--bg-surface); font-size: var(--font-size-body); }
+  .active-row.running { border: 1px solid var(--accent-dimmed); }
+  .active-row.done { opacity: 0.6; }
+  .active-row.failed { border: 1px solid rgba(241,76,76,0.2); }
+  .active-status { font-size: 14px; width: 20px; text-align: center; flex-shrink: 0; }
+  .active-row.running .active-status { color: var(--accent); }
+  .active-row.done .active-status { color: var(--success); }
+  .active-row.failed .active-status { color: var(--danger); }
+  .active-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .active-strategy { color: var(--text-secondary); font-size: var(--font-size-label); }
+  .active-progress { width: 80px; }
+  .active-progress-bar { height: 3px; background: var(--border-subtle); border-radius: 2px; overflow: hidden; }
+  .active-progress-fill { height: 100%; background: var(--accent); transition: width 0.5s var(--ease-expo); }
+  .active-pct { font-family: var(--font-mono); font-size: var(--font-size-mono); color: var(--text-secondary); width: 36px; text-align: right; }
+  .active-text { font-size: var(--font-size-label); color: var(--text-secondary); width: 60px; }
 </style>

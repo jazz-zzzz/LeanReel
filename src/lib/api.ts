@@ -27,9 +27,13 @@ export interface StrategyItem {
     name: string;
     encoder: string;
     cq: number;
+    crf: number;
     description: string;
     savings: string;
     gpu: boolean;
+    preset: string;
+    sort_order: number;
+    is_preset: boolean;
 }
 
 export interface StrategyListResult {
@@ -181,6 +185,7 @@ export interface HistoryEntry {
     stage: string;
     started_at: string;
     source_deleted: boolean;
+    error_message: string;
 }
 
 export async function getHistory(): Promise<HistoryEntry[]> {

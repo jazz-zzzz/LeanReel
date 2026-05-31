@@ -5,6 +5,7 @@
   import { showHistory } from '$lib/stores/history';
   import { selectedLibraryId, selectedFolderId, libraries } from '$lib/stores/library';
   import { queue } from '$lib/stores/queue';
+  import { applyEncodeProgress } from '$lib/queueProgress.js';
   import { getLibraryFiles, getFolderFiles, scanDirectory, loadStrategies, startEncode, listLibraries, getSettings, saveSettings, type AppSettings, type FileEntry } from '$lib/api';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { listen } from '@tauri-apps/api/event';
@@ -13,7 +14,6 @@
   import FileTable from '$lib/components/FileTable.svelte';
   import TreeView from '$lib/components/TreeView.svelte';
   import StrategyPanel from '$lib/components/StrategyPanel.svelte';
-  import QueuePanel from '$lib/components/QueuePanel.svelte';
   import HistoryPanel from '$lib/components/HistoryPanel.svelte';
 
   const appWindow = getCurrentWindow();
@@ -21,7 +21,7 @@
   let viewModes = $state<Record<number, 'flat' | 'tree'>>({});
   let viewMode = $derived($selectedLibraryId ? (viewModes[$selectedLibraryId] || 'flat') : 'flat');
   let showSettings = $state(false);
-  let appSettings = $state<AppSettings>({ ffprobe_custom: '', ffmpeg_custom: '', ffprobe_path: '', ffmpeg_path: '', ffprobe_ok: false, ffmpeg_ok: false });
+  let appSettings = $state<AppSettings>({ ffprobe_custom: '', ffmpeg_custom: '', ffprobe_path: '', ffmpeg_path: '', ffprobe_ok: false, ffmpeg_ok: false, gpu_ok: false, gpu_info: '' });
   let toolWarning = $state('');
   let strategyPanel: any;
 
@@ -34,7 +34,6 @@
     }
   });
 
-  let showQueue = $derived($queue.length > 0);
   let totalTasks = $derived($queue.length);
   let doneTasks = $derived($queue.filter(t => t.status === 'done').length);
   let failedTasks = $derived($queue.filter(t => t.status === 'failed' || t.status === 'cancelled').length);
@@ -77,6 +76,10 @@
       appSettings = await getSettings();
     } catch (_) {}
     listen<string>('tool-status', (e) => { toolWarning = e.payload; });
+    const unlisten = listen<{job_id: string, stage: string, progress: number, status: string}>('encode-progress', (event) => {
+      scanStatus.set(`${event.payload.stage}: ${Math.round(event.payload.progress)}%`);
+      queue.update(items => applyEncodeProgress(items, event.payload));
+    });
   });
 
   async function browseFile(tool: 'ffprobe' | 'ffmpeg') {
@@ -177,12 +180,22 @@
     if (selected.length === 0) { scanStatus.set('请先选择要编码的文件'); return; }
     if (!strategy) { scanStatus.set('请先选择一个压缩策略'); return; }
 
+    // Dedup: skip files that already have a pending/running task
+    const activeFileNames = new Set($queue.filter(q => q.status === 'pending' || q.status === 'running').map(q => q.fileName));
+    const files = selected.filter(f => {
+      const name = f.split(/[/\\]/).pop() || f;
+      return !activeFileNames.has(name);
+    });
+    if (files.length === 0) { scanStatus.set('所选文件已有活跃任务'); return; }
+
     scanStatus.set('正在提交编码任务...');
     try {
-      const settings = strategyPanel?.getEncodeSettings?.() ?? { deleteSource: false };
-      const result = await startEncode(selected, strategy.name, settings.deleteSource, settings.customStrategy);
+      const settings = strategyPanel?.getEncodeSettings?.() ?? { deleteSource: false, workerCount: 2 };
+      const result = await startEncode(files, strategy.name, settings.deleteSource, settings.workerCount, settings.customStrategy);
       queue.update(current => {
-        const now = [...current];
+        // Remove old entries for the same files
+        const newNames = new Set(result.jobs.map(j => j.file_name));
+        const now = current.filter(i => !newNames.has(i.fileName));
         for (const job of result.jobs) {
           now.push({
             id: job.id,
@@ -200,7 +213,7 @@
   }
 </script>
 
-<div class="app-shell" class:has-queue={showQueue} oncontextmenu={(e) => e.preventDefault()}>
+<div class="app-shell" oncontextmenu={(e) => e.preventDefault()}>
   <!-- Titlebar: full-width drag region -->
   <div class="titlebar" data-tauri-drag-region>
     <span class="titlebar-title">LeanReel</span>
@@ -230,6 +243,7 @@
             <div class="scan-progress-fill" style="width: {$scanProgress.total > 0 ? $scanProgress.done / $scanProgress.total * 100 : 0}%"></div>
           </div>
         {/if}
+        <button class="primary tasks-btn" class:pulse={totalTasks > 0 && doneTasks + failedTasks < totalTasks} onclick={() => showHistory.set(true)}>查看任务</button>
         {#if totalTasks > 0 && doneTasks + failedTasks < totalTasks}
           <div class="encode-progress">
             <div class="encode-progress-bar">
@@ -241,7 +255,6 @@
             </span>
           </div>
         {/if}
-        <button class="primary tasks-btn" class:pulse={totalTasks > 0 && doneTasks + failedTasks < totalTasks} onclick={() => showHistory.set(true)}>查看任务</button>
         <span class="status-text">{$scanStatus}</span>
       </div>
 
@@ -259,9 +272,6 @@
     </aside>
   </div>
 
-  <div class="queue-dock" class:visible={showQueue}>
-    <QueuePanel />
-  </div>
 </div>
 
 {#if $showHistory}

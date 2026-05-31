@@ -20,8 +20,18 @@ pub fn get_settings(state: State<AppState>) -> Result<AppSettings, String> {
     let ffprobe_custom = store.get_config("ffprobe_path").unwrap_or_default();
     let ffmpeg_custom = store.get_config("ffmpeg_path").unwrap_or_default();
 
-    let ffprobe_path = state.prober.has_ffprobe().ok().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-    let ffmpeg_path = state.ffmpeg.has_ffmpeg().ok().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+    let ffprobe_path = state
+        .prober
+        .has_ffprobe()
+        .ok()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let ffmpeg_path = state
+        .ffmpeg
+        .has_ffmpeg()
+        .ok()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
     let ffprobe_ok = !ffprobe_path.is_empty();
     let ffmpeg_ok = !ffmpeg_path.is_empty();
 
@@ -33,14 +43,28 @@ pub fn get_settings(state: State<AppState>) -> Result<AppSettings, String> {
             .ok()
             .and_then(|out| {
                 let s = String::from_utf8_lossy(&out.stdout);
-                if s.contains("hevc_nvenc") { Some("NVIDIA NVENC".to_string()) }
-                else { None }
+                if s.contains("hevc_nvenc") {
+                    Some("NVIDIA NVENC".to_string())
+                } else {
+                    None
+                }
             })
             .unwrap_or_default()
-    } else { String::new() };
+    } else {
+        String::new()
+    };
     let gpu_ok = !gpu_info.is_empty();
 
-    Ok(AppSettings { ffprobe_custom, ffmpeg_custom, ffprobe_path, ffmpeg_path, ffprobe_ok, ffmpeg_ok, gpu_ok, gpu_info })
+    Ok(AppSettings {
+        ffprobe_custom,
+        ffmpeg_custom,
+        ffprobe_path,
+        ffmpeg_path,
+        ffprobe_ok,
+        ffmpeg_ok,
+        gpu_ok,
+        gpu_info,
+    })
 }
 
 #[tauri::command]

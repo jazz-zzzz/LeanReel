@@ -169,9 +169,8 @@ fn test_overall_progress_after_prepare_is_005() {
 fn test_overall_progress_after_prepare_and_transcode() {
     let mut plan = PipelinePlan::build(&make_sdr_job());
     plan.complete_stage(0); // 0.05
-    plan.complete_stage(1); // 0.65
-                            // (0.05 + 0.65) / 0.80 = 0.875
-    assert!((plan.overall_progress() - 0.875).abs() < 0.001);
+    plan.complete_stage(1); // 0.85
+    assert!((plan.overall_progress() - 0.90).abs() < 0.001);
 }
 
 #[test]
@@ -180,8 +179,7 @@ fn test_overall_progress_running_at_half_contributes_partial_weight() {
     plan.complete_stage(0); // Prepare: 0.05
     plan.start_stage(1); // Transcode running
     plan.set_stage_progress(1, 0.5);
-    // (0.05 + 0.65 * 0.5) / 0.80 = 0.46875
-    let expected = (0.05 + 0.65 * 0.5) / 0.80;
+    let expected = 0.05 + 0.85 * 0.5;
     assert!((plan.overall_progress() - expected).abs() < 0.01);
 }
 
@@ -190,11 +188,9 @@ fn test_overall_progress_running_at_quarter_contributes_partial_weight() {
     let dv_plan = PipelinePlan::build(&make_dv_p7_job());
     let mut plan = dv_plan;
     plan.complete_stage(0); // Prepare: 0.05
-    plan.complete_stage(1); // ExtractRpu: 0.10
-    plan.start_stage(2); // Transcode running
-    plan.set_stage_progress(2, 0.25);
-    // Expected: 0.05 + 0.10 + 0.65 * 0.25 = 0.3125
-    let expected = 0.05 + 0.10 + 0.65 * 0.25;
+    plan.start_stage(1); // Transcode running
+    plan.set_stage_progress(1, 0.25);
+    let expected = 0.05 + 0.85 * 0.25;
     assert!((plan.overall_progress() - expected).abs() < 0.01);
 }
 
@@ -204,17 +200,15 @@ fn test_overall_progress_failed_stage_contributes_full_weight() {
     plan.complete_stage(0); // Prepare: 0.05
     plan.start_stage(1);
     plan.fail_stage(1, "crash");
-    // (0.05 + 0.65) / 0.80 = 0.875
-    assert!((plan.overall_progress() - 0.875).abs() < 0.01);
+    assert!((plan.overall_progress() - 0.90).abs() < 0.01);
 }
 
 #[test]
 fn test_overall_progress_skipped_contributes_full_weight() {
     let mut plan = PipelinePlan::build(&make_sdr_job());
     plan.complete_stage(0); // 0.05
-    plan.fail_stage(1, "error"); // 0.65
+    plan.fail_stage(1, "error"); // 0.85
     plan.skip_remaining(2); // 0.10 skipped
-                            // (0.05 + 0.65 + 0.10) / 0.80 = 1.0
     assert!((plan.overall_progress() - 1.0).abs() < 0.01);
 }
 
@@ -224,16 +218,12 @@ fn test_overall_progress_dv_full_cycle() {
     assert_eq!(plan.overall_progress(), 0.0);
 
     plan.complete_stage(0); // 0.05
-    plan.complete_stage(1); // 0.10
-    let progress_after_two = plan.overall_progress();
-    assert!((progress_after_two - 0.15).abs() < 0.01);
+    assert!((plan.overall_progress() - 0.05).abs() < 0.01);
 
-    plan.complete_stage(2); // 0.65
-    let progress_after_three = plan.overall_progress();
-    assert!((progress_after_three - 0.80).abs() < 0.01);
+    plan.complete_stage(1); // 0.85
+    assert!((plan.overall_progress() - 0.90).abs() < 0.01);
 
-    plan.complete_stage(3); // 0.10
-    plan.complete_stage(4); // 0.10
+    plan.complete_stage(2); // 0.10
     assert!((plan.overall_progress() - 1.0).abs() < 0.001);
 }
 
@@ -242,12 +232,10 @@ fn test_overall_progress_dv_full_cycle() {
 #[test]
 fn test_start_stage_marks_prior_completed() {
     let mut plan = PipelinePlan::build(&make_dv_p7_job());
-    plan.start_stage(2); // Jump to transcode
+    plan.start_stage(1); // Jump to transcode
     assert_eq!(plan.stages[0].status, StageStatus::Completed);
-    assert_eq!(plan.stages[1].status, StageStatus::Completed);
-    assert_eq!(plan.stages[2].status, StageStatus::Running);
-    assert_eq!(plan.stages[3].status, StageStatus::Pending);
-    assert_eq!(plan.stages[4].status, StageStatus::Pending);
+    assert_eq!(plan.stages[1].status, StageStatus::Running);
+    assert_eq!(plan.stages[2].status, StageStatus::Pending);
 }
 
 #[test]

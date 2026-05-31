@@ -39,7 +39,9 @@ pub fn start_encode(
     custom_strategy: Option<CustomStrategyRequest>,
     state: State<AppState>,
 ) -> Result<StartEncodeResult, String> {
-    state.worker.set_worker_count(worker_count.unwrap_or(2).min(16).max(1) as usize);
+    state
+        .worker
+        .set_worker_count(worker_count.unwrap_or(2).min(16).max(1) as usize);
     // 1. Get the full Strategy from the matcher (not Default::default())
     let matcher = state.matcher.lock().map_err(|e| e.to_string())?;
     let mut strategy = matcher
@@ -169,16 +171,18 @@ pub fn start_encode(
 }
 
 fn parse_file_key(file_key: &str) -> Result<(i64, &str), String> {
-    let (folder_id, relative_path) = file_key
-        .split_once(':')
-        .ok_or_else(|| format!("无效文件标识: {}", file_key))?;
-    let folder_id = folder_id
-        .parse::<i64>()
-        .map_err(|_| format!("无效文件夹标识: {}", file_key))?;
-    if relative_path.is_empty() {
-        return Err(format!("无效文件路径: {}", file_key));
+    // Format: "folder_id:relative_path" or just "relative_path" (folder_id = 0 = search all)
+    if let Some((prefix, path)) = file_key.split_once(':') {
+        let folder_id = prefix
+            .parse::<i64>()
+            .map_err(|_| format!("无效文件夹标识: {}", file_key))?;
+        if path.is_empty() {
+            return Err(format!("无效文件路径: {}", file_key));
+        }
+        return Ok((folder_id, path));
     }
-    Ok((folder_id, relative_path))
+    // No prefix — use 0 to search all folders
+    Ok((0, file_key))
 }
 
 #[tauri::command]

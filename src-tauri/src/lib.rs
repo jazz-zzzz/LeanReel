@@ -34,7 +34,7 @@ pub fn run() {
 
     let scanner_store = SqliteSnapshotStore::open(&db_path).expect("Failed to open scanner DB");
     let scanner = Arc::new(Mutex::new(Scanner::new(
-        Box::new(FfprobeRunner::new(None)),
+        Box::new((*prober).clone()),
         Box::new(scanner_store),
     )));
 
@@ -90,8 +90,18 @@ pub fn run() {
                 }
             }
 
-            // Task 4: Set app handle on worker for encode-progress events
-            state.worker.set_app_handle(app.handle().clone());
+            // Task 4: Forward worker progress to Tauri events without coupling the worker to Tauri.
+            let encode_handle = app.handle().clone();
+            state
+                .worker
+                .set_progress_emitter(Box::new(move |job_id, stage, progress, status| {
+                    let _ = encode_handle.emit(
+                    "encode-progress",
+                    serde_json::json!({
+                        "job_id": job_id, "stage": stage, "progress": progress, "status": status,
+                    }),
+                );
+                }));
 
             // Task 6: Wire scanner progress callback to Tauri events
             let app_handle = app.handle().clone();

@@ -540,12 +540,19 @@ impl SqliteSnapshotStore {
         path: &Path,
     ) -> Result<Option<FileSnapshot>, String> {
         let relative = path.to_string_lossy().replace('\\', "/");
+        let fields = "SELECT id, library_folder_id, relative_path, file_name, size_bytes, video_codec, video_width, video_height, hdr_type, audio_tracks, subtitle_tracks, duration_seconds, bitrate_bps, file_mtime, probe_ok, probe_error, scanned_at, pix_fmt, frame_rate, color_primaries, color_transfer, color_space FROM file_snapshot";
+        let sql = if folder_id > 0 {
+            format!("{fields} WHERE library_folder_id = ?1 AND relative_path = ?2")
+        } else {
+            format!("{fields} WHERE relative_path = ?1 LIMIT 1")
+        };
+        let params: &[&dyn rusqlite::types::ToSql] = if folder_id > 0 {
+            &[&folder_id, &relative]
+        } else {
+            &[&relative]
+        };
         self.conn
-            .query_row(
-                "SELECT id, library_folder_id, relative_path, file_name, size_bytes, video_codec, video_width, video_height, hdr_type, audio_tracks, subtitle_tracks, duration_seconds, bitrate_bps, file_mtime, probe_ok, probe_error, scanned_at, pix_fmt, frame_rate, color_primaries, color_transfer, color_space FROM file_snapshot WHERE library_folder_id = ?1 AND relative_path = ?2",
-                params![folder_id, relative],
-                row_to_snapshot,
-            )
+            .query_row(&sql, params, row_to_snapshot)
             .optional()
             .map_err(|e| e.to_string())
     }

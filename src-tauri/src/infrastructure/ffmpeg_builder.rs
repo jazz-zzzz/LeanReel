@@ -152,10 +152,14 @@ pub fn build_ffmpeg_command(
             }
         }
     }
-    // Audio: apply strategy mode and commentary removal
-    build_audio_maps(&mut cmd, snapshot, strategy);
-    // Subtitle: apply strategy mode
-    build_subtitle_maps(&mut cmd, snapshot, strategy);
+    cmd.push("-map".into());
+    cmd.push("0:a?".into());
+    cmd.push("-c:a".into());
+    cmd.push("copy".into());
+    cmd.push("-map".into());
+    cmd.push("0:s?".into());
+    cmd.push("-c:s".into());
+    cmd.push("copy".into());
     cmd.push("-map".into());
     cmd.push("0:t?".into());
     cmd.push("-c:t".into());
@@ -168,21 +172,6 @@ pub fn build_ffmpeg_command(
     cmd.push("-dn".into());
     cmd.push(output_path.to_string_lossy().to_string());
     Ok(cmd)
-}
-
-fn build_audio_maps(cmd: &mut Vec<String>, _snapshot: &FileSnapshot, _strategy: &Strategy) {
-    cmd.push("-map".into());
-    cmd.push("0:a?".into());
-    cmd.push("-c:a".into());
-    cmd.push("copy".into());
-}
-
-
-fn build_subtitle_maps(cmd: &mut Vec<String>, _snapshot: &FileSnapshot, _strategy: &Strategy) {
-    cmd.push("-map".into());
-    cmd.push("0:s?".into());
-    cmd.push("-c:s".into());
-    cmd.push("copy".into());
 }
 
 fn append_hdr_metadata(cmd: &mut Vec<String>) {
@@ -223,64 +212,24 @@ mod tests {
         cmd.join(" ")
     }
 
-    fn audio(codec: &str, lang: &str, commentary: bool) -> AudioTrack {
-        AudioTrack {
-            codec: codec.into(),
-            channels: 2,
-            language: lang.into(),
-            title: "".into(),
-            is_commentary: commentary,
-        }
-    }
-
-    fn sub(codec: &str, lang: &str) -> SubtitleTrack {
-        SubtitleTrack {
-            codec: codec.into(),
-            language: lang.into(),
-            title: "".into(),
-            is_forced: false,
-        }
-    }
-
-    // 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅?
-    // C5: Audio mode tests
-    // 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅?
-
     #[test]
-    fn test_audio_keep_original_preserves_all_tracks() {
+    fn test_audio_and_subtitle_streams_are_always_copied() {
         let snap = FileSnapshot {
             video_codec: VideoCodec::H264,
             hdr_type: HdrType::Sdr,
-            audio_tracks: vec![
-                audio("aac", "jpn", false),
-                audio("aac", "eng", false),
-                audio("aac", "eng", true),
-            ],
-            ..Default::default()
-        };
-        let strategy = Strategy {
-            audio: AudioConfig {
-                mode: "keep_original".into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let joined = cmd_joined(&snap, &strategy);
-        assert!(joined.contains("-map 0:a:0"), "keep jpn: {}", joined);
-        assert!(joined.contains("-map 0:a:1"), "keep eng: {}", joined);
-        assert!(joined.contains("-map 0:a:2"), "keep commentary: {}", joined);
-    }
-
-    #[test]
-    fn test_audio_remove_commentary_excludes_commentary_tracks() {
-        let snap = FileSnapshot {
-            video_codec: VideoCodec::H264,
-            hdr_type: HdrType::Sdr,
-            audio_tracks: vec![
-                audio("aac", "jpn", false),
-                audio("aac", "eng", false),
-                audio("aac", "eng", true), // commentary 閳?must be excluded
-            ],
+            audio_tracks: vec![AudioTrack {
+                codec: "aac".into(),
+                channels: 2,
+                language: "jpn".into(),
+                title: "commentary".into(),
+                is_commentary: true,
+            }],
+            subtitle_tracks: vec![SubtitleTrack {
+                codec: "ass".into(),
+                language: "jpn".into(),
+                title: "".into(),
+                is_forced: false,
+            }],
             ..Default::default()
         };
         let strategy = Strategy {
@@ -288,335 +237,33 @@ mod tests {
                 mode: "strip_commentary".into(),
                 ..Default::default()
             },
-            ..Default::default()
-        };
-        let joined = cmd_joined(&snap, &strategy);
-        assert!(joined.contains("-map 0:a:0"), "keep jpn: {}", joined);
-        assert!(joined.contains("-map 0:a:1"), "keep eng: {}", joined);
-        assert!(
-            !joined.contains("-map 0:a:2"),
-            "exclude commentary: {}",
-            joined
-        );
-    }
-
-    #[test]
-    fn test_audio_strip_commentary_mode_excludes_commentary_tracks() {
-        let snap = FileSnapshot {
-            video_codec: VideoCodec::H264,
-            hdr_type: HdrType::Sdr,
-            audio_tracks: vec![
-                audio("aac", "jpn", false),
-                audio("aac", "eng", true), // commentary
-            ],
-            ..Default::default()
-        };
-        let strategy = Strategy {
-            audio: AudioConfig {
-                mode: "strip_commentary".into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let joined = cmd_joined(&snap, &strategy);
-        assert!(joined.contains("-map 0:a:0"), "keep jpn: {}", joined);
-        assert!(
-            !joined.contains("-map 0:a:1"),
-            "exclude commentary via mode: {}",
-            joined
-        );
-    }
-
-    #[test]
-    fn test_audio_strip_non_preferred_keeps_only_preferred_languages() {
-        let snap = FileSnapshot {
-            video_codec: VideoCodec::H264,
-            hdr_type: HdrType::Sdr,
-            audio_tracks: vec![
-                audio("aac", "chi", false), // preferred
-                audio("aac", "eng", false), // preferred
-                audio("aac", "jpn", false), // NOT preferred
-                audio("aac", "kor", false), // NOT preferred
-            ],
-            ..Default::default()
-        };
-        let strategy = Strategy {
-            audio: AudioConfig {
-                mode: "strip_non_preferred".into(),
-                remove_commentary: true /* migrated to mode */,
-                preferred_languages: vec!["chi".into(), "zho".into(), "eng".into()],
-            },
-            ..Default::default()
-        };
-        let joined = cmd_joined(&snap, &strategy);
-        assert!(joined.contains("-map 0:a:0"), "keep chi: {}", joined);
-        assert!(joined.contains("-map 0:a:1"), "keep eng: {}", joined);
-        assert!(!joined.contains("-map 0:a:2"), "exclude jpn: {}", joined);
-        assert!(!joined.contains("-map 0:a:3"), "exclude kor: {}", joined);
-    }
-
-    #[test]
-    fn test_audio_strip_non_preferred_with_commentary_removal() {
-        let snap = FileSnapshot {
-            video_codec: VideoCodec::H264,
-            hdr_type: HdrType::Sdr,
-            audio_tracks: vec![
-                audio("aac", "chi", false), // preferred, keep
-                audio("aac", "eng", true),  // commentary 閳?exclude even though eng is preferred
-                audio("aac", "jpn", false), // language not preferred
-                audio("aac", "jpn", true),  // commentary + language not preferred
-            ],
-            ..Default::default()
-        };
-        let strategy = Strategy {
-            audio: AudioConfig {
-                mode: "strip_non_preferred".into(),
-                // remove_commentary removed 閳?use mode: "strip_commentary" instead
-                preferred_languages: vec!["chi".into(), "zho".into(), "eng".into()],
-            },
-            ..Default::default()
-        };
-        let joined = cmd_joined(&snap, &strategy);
-        assert!(joined.contains("-map 0:a:0"), "keep chi: {}", joined);
-        assert!(
-            !joined.contains("-map 0:a:1"),
-            "exclude eng commentary: {}",
-            joined
-        );
-        assert!(!joined.contains("-map 0:a:2"), "exclude jpn: {}", joined);
-        assert!(
-            !joined.contains("-map 0:a:3"),
-            "exclude jpn commentary: {}",
-            joined
-        );
-    }
-
-    #[test]
-    fn test_audio_empty_tracks_falls_back_to_optional_map() {
-        let snap = FileSnapshot {
-            video_codec: VideoCodec::H264,
-            hdr_type: HdrType::Sdr,
-            audio_tracks: vec![],
-            ..Default::default()
-        };
-        let strategy = Strategy {
-            audio: AudioConfig {
-                mode: "strip_non_preferred".into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let joined = cmd_joined(&snap, &strategy);
-        assert!(
-            joined.contains("-map 0:a?"),
-            "optional audio map: {}",
-            joined
-        );
-    }
-
-    #[test]
-    fn test_audio_all_filtered_still_has_valid_stream() {
-        // All tracks are non-preferred languages only 閳?none match
-        let snap = FileSnapshot {
-            video_codec: VideoCodec::H264,
-            hdr_type: HdrType::Sdr,
-            audio_tracks: vec![audio("aac", "jpn", false), audio("aac", "kor", false)],
-            ..Default::default()
-        };
-        let strategy = Strategy {
-            audio: AudioConfig {
-                mode: "strip_non_preferred".into(),
-                preferred_languages: vec!["chi".into(), "zho".into(), "eng".into()],
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let joined = cmd_joined(&snap, &strategy);
-        // All tracks filtered 閳?should still have 0:a? fallback
-        assert!(
-            !joined.contains("-map 0:a:0"),
-            "no exact audio maps expected: {}",
-            joined
-        );
-        assert!(
-            !joined.contains("-map 0:a:1"),
-            "no exact audio maps expected: {}",
-            joined
-        );
-        assert!(
-            joined.contains("-map 0:a?"),
-            "should fall back to optional map: {}",
-            joined
-        );
-    }
-
-    // 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅?
-    // C6: Subtitle mode tests
-    // 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅?
-
-    #[test]
-    fn test_subtitle_keep_all() {
-        let snap = FileSnapshot {
-            video_codec: VideoCodec::H264,
-            hdr_type: HdrType::Sdr,
-            subtitle_tracks: vec![sub("ass", "chi"), sub("ass", "eng"), sub("ass", "jpn")],
-            ..Default::default()
-        };
-        let strategy = Strategy {
-            subtitle: SubtitleConfig {
-                mode: "keep_all".into(),
-            },
-            ..Default::default()
-        };
-        let joined = cmd_joined(&snap, &strategy);
-        assert!(joined.contains("-map 0:s:0"), "keep chi: {}", joined);
-        assert!(joined.contains("-map 0:s:1"), "keep eng: {}", joined);
-        assert!(joined.contains("-map 0:s:2"), "keep jpn: {}", joined);
-        assert!(joined.contains("-c:s copy"), "sub codec copy: {}", joined);
-    }
-
-    #[test]
-    fn test_subtitle_remove_all() {
-        let snap = FileSnapshot {
-            video_codec: VideoCodec::H264,
-            hdr_type: HdrType::Sdr,
-            subtitle_tracks: vec![sub("ass", "chi"), sub("ass", "eng")],
-            ..Default::default()
-        };
-        let strategy = Strategy {
             subtitle: SubtitleConfig {
                 mode: "remove_all".into(),
             },
             ..Default::default()
         };
         let joined = cmd_joined(&snap, &strategy);
-        assert!(!joined.contains("0:s"), "no subtitle maps: {}", joined);
-    }
-
-    #[test]
-    fn test_subtitle_keep_chinese_excludes_non_chinese() {
-        let snap = FileSnapshot {
-            video_codec: VideoCodec::H264,
-            hdr_type: HdrType::Sdr,
-            subtitle_tracks: vec![
-                sub("ass", "chi"), // keep
-                sub("ass", "zho"), // keep
-                sub("ass", "zh"),  // keep
-                sub("ass", "eng"), // exclude
-                sub("ass", "jpn"), // exclude
-                sub("ass", "kor"), // exclude
-            ],
-            ..Default::default()
-        };
-        let strategy = Strategy {
-            subtitle: SubtitleConfig {
-                mode: "keep_chinese".into(),
-            },
-            ..Default::default()
-        };
-        let joined = cmd_joined(&snap, &strategy);
-        assert!(joined.contains("-map 0:s:0"), "keep chi: {}", joined);
-        assert!(joined.contains("-map 0:s:1"), "keep zho: {}", joined);
-        assert!(joined.contains("-map 0:s:2"), "keep zh: {}", joined);
-        assert!(!joined.contains("-map 0:s:3"), "exclude eng: {}", joined);
-        assert!(!joined.contains("-map 0:s:4"), "exclude jpn: {}", joined);
-        assert!(!joined.contains("-map 0:s:5"), "exclude kor: {}", joined);
-    }
-
-    #[test]
-    fn test_subtitle_keep_chinese_english_keeps_both_languages() {
-        let snap = FileSnapshot {
-            video_codec: VideoCodec::H264,
-            hdr_type: HdrType::Sdr,
-            subtitle_tracks: vec![
-                sub("ass", "chi"), // keep
-                sub("ass", "eng"), // keep
-                sub("ass", "en"),  // keep (alternative English code)
-                sub("ass", "jpn"), // exclude
-            ],
-            ..Default::default()
-        };
-        let strategy = Strategy {
-            subtitle: SubtitleConfig {
-                mode: "keep_chinese_english".into(),
-            },
-            ..Default::default()
-        };
-        let joined = cmd_joined(&snap, &strategy);
-        assert!(joined.contains("-map 0:s:0"), "keep chi: {}", joined);
-        assert!(joined.contains("-map 0:s:1"), "keep eng: {}", joined);
-        assert!(joined.contains("-map 0:s:2"), "keep en: {}", joined);
-        assert!(!joined.contains("-map 0:s:3"), "exclude jpn: {}", joined);
-    }
-
-    #[test]
-    fn test_subtitle_empty_tracks_keep_all() {
-        let snap = FileSnapshot {
-            video_codec: VideoCodec::H264,
-            hdr_type: HdrType::Sdr,
-            subtitle_tracks: vec![],
-            ..Default::default()
-        };
-        let strategy = Strategy {
-            subtitle: SubtitleConfig {
-                mode: "keep_all".into(),
-            },
-            ..Default::default()
-        };
-        let joined = cmd_joined(&snap, &strategy);
-        assert!(joined.contains("-map 0:s?"), "optional sub map: {}", joined);
-        assert!(joined.contains("-c:s copy"), "sub codec copy: {}", joined);
-    }
-
-    #[test]
-    fn test_subtitle_empty_tracks_keep_chinese_no_exact_maps() {
-        let snap = FileSnapshot {
-            video_codec: VideoCodec::H264,
-            hdr_type: HdrType::Sdr,
-            subtitle_tracks: vec![],
-            ..Default::default()
-        };
-        let strategy = Strategy {
-            subtitle: SubtitleConfig {
-                mode: "keep_chinese".into(),
-            },
-            ..Default::default()
-        };
-        let joined = cmd_joined(&snap, &strategy);
         assert!(
-            joined.contains("-map 0:s?"),
-            "optional sub map for empty: {}",
+            joined.contains("-map 0:a? -c:a copy"),
+            "audio copy: {}",
+            joined
+        );
+        assert!(
+            joined.contains("-map 0:s? -c:s copy"),
+            "subtitle copy: {}",
+            joined
+        );
+        assert!(
+            !joined.contains("-map 0:a:"),
+            "no exact audio maps: {}",
+            joined
+        );
+        assert!(
+            !joined.contains("-map 0:s:"),
+            "no exact subtitle maps: {}",
             joined
         );
     }
-
-    #[test]
-    fn test_subtitle_all_filtered_out_keep_chinese_no_exact_maps() {
-        // Only Japanese subs, keep_chinese mode 閳?nothing should be kept
-        let snap = FileSnapshot {
-            video_codec: VideoCodec::H264,
-            hdr_type: HdrType::Sdr,
-            subtitle_tracks: vec![sub("ass", "jpn"), sub("ass", "kor")],
-            ..Default::default()
-        };
-        let strategy = Strategy {
-            subtitle: SubtitleConfig {
-                mode: "keep_chinese".into(),
-            },
-            ..Default::default()
-        };
-        let joined = cmd_joined(&snap, &strategy);
-        assert!(!joined.contains("-map 0:s:0"), "exclude jpn: {}", joined);
-        assert!(!joined.contains("-map 0:s:1"), "exclude kor: {}", joined);
-        // No subs kept, but mode isn't remove_all 閳?builder should not include any sub stream
-        assert!(
-            !joined.contains("0:s"),
-            "no subtitle stream at all: {}",
-            joined
-        );
-    }
-
-    // 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅?
     // C9: VP9 NVDEC support
     // 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅?
 

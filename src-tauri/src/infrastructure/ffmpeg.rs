@@ -13,6 +13,38 @@ pub struct FfmpegRunner {
     running_children: Mutex<HashMap<JobId, Arc<Mutex<Child>>>>,
 }
 
+fn read_stderr_records<R, F>(mut reader: R, mut on_record: F) -> Result<(), String>
+where
+    R: BufRead,
+    F: FnMut(&str),
+{
+    let mut record = Vec::new();
+    loop {
+        let available = reader
+            .fill_buf()
+            .map_err(|e| format!("读取 ffmpeg 输出失败: {}", e))?;
+        if available.is_empty() {
+            if !record.is_empty() {
+                on_record(&String::from_utf8_lossy(&record));
+            }
+            return Ok(());
+        }
+
+        let consumed = available.len();
+        for &byte in available {
+            if byte == b'\r' || byte == b'\n' {
+                if !record.is_empty() {
+                    on_record(&String::from_utf8_lossy(&record));
+                    record.clear();
+                }
+            } else {
+                record.push(byte);
+            }
+        }
+        reader.consume(consumed);
+    }
+}
+
 impl FfmpegRunner {
     pub fn new(path: Option<PathBuf>) -> Self {
         let ffmpeg_path = path.unwrap_or_else(|| {
@@ -92,9 +124,10 @@ impl FfmpegRunner {
         duration_seconds: f64,
         on_progress: &(dyn Fn(ProgressEvent) + Send + Sync),
     ) {
-        if !line.contains("time=") || duration_seconds <= 0.0 {
+        if !line.contains("time=") {
             return;
         }
+        eprintln!("PROGRESS_LINE dur={}: {}", duration_seconds, line);
         let percent = line
             .split("time=")
             .nth(1)
@@ -107,10 +140,13 @@ impl FfmpegRunner {
                 let hours = parts[0].parse::<f64>().ok()?;
                 let minutes = parts[1].parse::<f64>().ok()?;
                 let seconds = parts[2].parse::<f64>().ok()?;
-                Some(
+                let pct = if duration_seconds > 0.0 {
                     ((hours * 3600.0 + minutes * 60.0 + seconds) / duration_seconds).min(0.98)
-                        as f32,
-                )
+                        as f32
+                } else {
+                    0.5 // unknown duration — show indeterminate
+                };
+                Some(pct)
             })
             .unwrap_or(0.0);
         let fps = line
@@ -175,14 +211,18 @@ impl FfmpegRunner {
             .ok_or_else(|| "无法读取 ffmpeg stderr".to_string())?;
         let child = self.track_child(job.id.clone(), child)?;
         let mut err_tail = VecDeque::with_capacity(5);
-        for line in BufReader::new(stderr).lines() {
-            let line = line.map_err(|e| format!("读取 ffmpeg 输出失败: {}", e))?;
-            Self::emit_progress_line(&line, job.snapshot.duration_seconds, on_progress);
+        let mut line_count = 0u64;
+        read_stderr_records(BufReader::new(stderr), |line| {
+            line_count += 1;
+            if line_count <= 5 {
+                eprintln!("STDERR[{}]: {}", line_count, &line[..line.len().min(120)]);
+            }
+            Self::emit_progress_line(line, job.snapshot.duration_seconds, on_progress);
             if err_tail.len() == 5 {
                 err_tail.pop_front();
             }
-            err_tail.push_back(line);
-        }
+            err_tail.push_back(line.to_string());
+        })?;
         let status = child
             .lock()
             .map_err(|_| "互斥锁中毒".to_string())?
@@ -300,6 +340,32 @@ mod tests {
         let runner = FfmpegRunner::new(None);
         let result = runner.cancel();
         assert!(result.is_ok(), "Cancel with no running job should be ok");
+    }
+
+    #[test]
+    fn test_read_stderr_records_splits_carriage_return_progress_updates() {
+        let input = b"frame=1 time=00:00:01.00\rframe=2 time=00:00:02.50\r";
+        let mut records = Vec::new();
+
+        read_stderr_records(&input[..], |record| records.push(record.to_string())).unwrap();
+
+        assert_eq!(
+            records,
+            vec!["frame=1 time=00:00:01.00", "frame=2 time=00:00:02.50",]
+        );
+    }
+
+    #[test]
+    fn test_read_stderr_records_preserves_newline_logs_and_carriage_return_progress() {
+        let input = b"Input #0\nframe=3 time=00:00:03.75\rvideo:120kB\n";
+        let mut records = Vec::new();
+
+        read_stderr_records(&input[..], |record| records.push(record.to_string())).unwrap();
+
+        assert_eq!(
+            records,
+            vec!["Input #0", "frame=3 time=00:00:03.75", "video:120kB",]
+        );
     }
 
     #[test]

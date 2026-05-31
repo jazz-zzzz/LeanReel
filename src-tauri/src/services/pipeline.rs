@@ -543,9 +543,7 @@ mod tests {
     fn test_temp_output_path_appends_suffix() {
         let final_path = PathBuf::from("output.mkv");
         let temp = temp_output_path(&final_path);
-        let temp_str = temp.to_string_lossy();
-        assert!(temp_str.contains(".tmp"));
-        assert!(temp_str.contains("output.mkv"));
+        assert_eq!(temp, PathBuf::from("output.tmp.mkv"));
     }
 
     #[test]

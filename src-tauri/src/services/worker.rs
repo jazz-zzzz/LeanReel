@@ -1,14 +1,12 @@
+use crate::domain::models::{FileSnapshot, Strategy, TaskStatus};
+use crate::domain::traits::{Encoder, EncodingJob, MediaProber, ProgressEvent, SnapshotStore};
+use crate::services::pipeline::{atomic_commit, cleanup_temp, temp_output_path, PipelinePlan};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use tauri::Emitter;
-
-use crate::domain::models::{FileSnapshot, Strategy, TaskStatus};
-use crate::domain::traits::{Encoder, EncodingJob, MediaProber, ProgressEvent, SnapshotStore};
-use crate::services::pipeline::{atomic_commit, cleanup_temp, temp_output_path, PipelinePlan};
 
 #[derive(Debug, Clone)]
 pub struct WorkerTask {
@@ -46,6 +44,9 @@ pub struct EncodeTask {
 /// Callback for progress events during encoding.
 pub type ProgressCallback = Box<dyn Fn(ProgressEvent) + Send + 'static>;
 
+/// Callback for forwarding worker progress to an external UI layer.
+pub type ProgressEmitter = Box<dyn Fn(&str, &str, f64, &str) + Send + Sync + 'static>;
+
 /// A generic job that can be submitted for execution on the worker pool.
 pub type Job = Box<dyn FnOnce() + Send + 'static>;
 
@@ -70,8 +71,8 @@ pub struct WorkerManager {
     pub last_progress: Arc<Mutex<f32>>,
     /// Optional external progress callback during encoding
     pub on_encode_progress: Arc<Mutex<Option<ProgressCallback>>>,
-    /// Tauri AppHandle for emitting events to the frontend
-    pub app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
+    /// Optional UI adapter for forwarding progress events.
+    pub progress_emitter: Arc<Mutex<Option<ProgressEmitter>>>,
 }
 
 impl WorkerManager {
@@ -86,7 +87,7 @@ impl WorkerManager {
         let prober: Arc<Mutex<Option<Box<dyn MediaProber + Send>>>> = Arc::new(Mutex::new(None));
         let store: Arc<Mutex<Option<Box<dyn SnapshotStore + Send>>>> = Arc::new(Mutex::new(None));
         let on_encode_progress: Arc<Mutex<Option<ProgressCallback>>> = Arc::new(Mutex::new(None));
-        let app_handle: Arc<Mutex<Option<tauri::AppHandle>>> = Arc::new(Mutex::new(None));
+        let progress_emitter: Arc<Mutex<Option<ProgressEmitter>>> = Arc::new(Mutex::new(None));
         let (tx, rx) = mpsc::channel::<WorkerCommand>();
         let rx = Arc::new(Mutex::new(rx));
         let mut handles = Vec::new();
@@ -100,7 +101,7 @@ impl WorkerManager {
             let prober = prober.clone();
             let store = store.clone();
             let on_encode_progress = on_encode_progress.clone();
-            let app_handle = app_handle.clone();
+            let progress_emitter = progress_emitter.clone();
             let handle = thread::spawn(move || loop {
                 let cmd = {
                     let lock = rx.lock().ok();
@@ -124,7 +125,7 @@ impl WorkerManager {
                                 0,
                                 "",
                             );
-                            emit_progress(&app_handle, &task.id, "done", 100.0, "cancelled");
+                            emit_progress(&progress_emitter, &task.id, "done", 100.0, "cancelled");
                             continue;
                         }
                         while paused.load(Ordering::Relaxed)
@@ -145,7 +146,7 @@ impl WorkerManager {
                                 0,
                                 "",
                             );
-                            emit_progress(&app_handle, &task.id, "done", 100.0, "cancelled");
+                            emit_progress(&progress_emitter, &task.id, "done", 100.0, "cancelled");
                             continue;
                         }
                         if let Ok(guard) = executor.lock() {
@@ -178,7 +179,13 @@ impl WorkerManager {
                                     "preparing",
                                     0,
                                 );
-                                emit_progress(&app_handle, &task.id, "Prepare", 0.0, "running");
+                                emit_progress(
+                                    &progress_emitter,
+                                    &task.id,
+                                    "Prepare",
+                                    0.0,
+                                    "running",
+                                );
                                 // Prepare step: ensure parent directory exists
                                 if let Some(parent) = job.output_path.parent() {
                                     if let Err(e) = std::fs::create_dir_all(parent) {
@@ -200,7 +207,7 @@ impl WorkerManager {
                                             "",
                                         );
                                         emit_progress(
-                                            &app_handle,
+                                            &progress_emitter,
                                             &task.id,
                                             "done",
                                             100.0,
@@ -226,11 +233,17 @@ impl WorkerManager {
                                     "transcoding",
                                     0,
                                 );
-                                emit_progress(&app_handle, &task.id, "Transcode", 0.0, "running");
+                                emit_progress(
+                                    &progress_emitter,
+                                    &task.id,
+                                    "Transcode",
+                                    0.0,
+                                    "running",
+                                );
                                 let plan_for_callback = plan.clone();
                                 let store_for_progress = store.clone();
                                 let history_id = task.history_id;
-                                let app_handle_for_cb = app_handle.clone();
+                                let progress_emitter_for_cb = progress_emitter.clone();
                                 let job_id_for_cb = task.id.clone();
                                 let result = enc.run(&job, &|event| {
                                     match &event {
@@ -264,7 +277,7 @@ impl WorkerManager {
                                             }
                                             // Task 4: Emit encode-progress event to frontend
                                             emit_progress(
-                                                &app_handle_for_cb,
+                                                &progress_emitter_for_cb,
                                                 &job_id_for_cb,
                                                 "Transcode",
                                                 *percent as f64 * 100.0,
@@ -313,7 +326,7 @@ impl WorkerManager {
                                                 &output.command,
                                             );
                                             emit_progress(
-                                                &app_handle,
+                                                &progress_emitter,
                                                 &task.id,
                                                 "done",
                                                 100.0,
@@ -346,7 +359,7 @@ impl WorkerManager {
                                             0,
                                         );
                                         emit_progress(
-                                            &app_handle,
+                                            &progress_emitter,
                                             &task.id,
                                             "MoveOut",
                                             0.0,
@@ -401,7 +414,7 @@ impl WorkerManager {
                                                             "",
                                                         );
                                                         emit_progress(
-                                                            &app_handle,
+                                                            &progress_emitter,
                                                             &task.id,
                                                             "done",
                                                             100.0,
@@ -430,7 +443,7 @@ impl WorkerManager {
                                                     "",
                                                 );
                                                 emit_progress(
-                                                    &app_handle,
+                                                    &progress_emitter,
                                                     &task.id,
                                                     "done",
                                                     100.0,
@@ -524,7 +537,7 @@ impl WorkerManager {
                                             &output.command,
                                         );
                                         emit_progress(
-                                            &app_handle,
+                                            &progress_emitter,
                                             &task.id,
                                             "done",
                                             100.0,
@@ -562,7 +575,13 @@ impl WorkerManager {
                                             0,
                                             "",
                                         );
-                                        emit_progress(&app_handle, &task.id, "done", 100.0, status);
+                                        emit_progress(
+                                            &progress_emitter,
+                                            &task.id,
+                                            "done",
+                                            100.0,
+                                            status,
+                                        );
                                         cleanup_temp(&final_output);
                                         eprintln!("编码失败: {}", e);
                                     }
@@ -587,7 +606,7 @@ impl WorkerManager {
             join_handles: Mutex::new(handles),
             last_progress,
             on_encode_progress,
-            app_handle,
+            progress_emitter,
         }
     }
 
@@ -624,10 +643,11 @@ impl WorkerManager {
             *guard = Some(cb);
         }
     }
-    /// Set the Tauri AppHandle for emitting progress events to the frontend.
-    pub fn set_app_handle(&self, handle: tauri::AppHandle) {
-        if let Ok(mut guard) = self.app_handle.lock() {
-            *guard = Some(handle);
+
+    /// Set the UI adapter for forwarding progress events.
+    pub fn set_progress_emitter(&self, emitter: ProgressEmitter) {
+        if let Ok(mut guard) = self.progress_emitter.lock() {
+            *guard = Some(emitter);
         }
     }
     pub fn submit(&self, task: WorkerTask) -> Result<(), String> {
@@ -749,27 +769,25 @@ fn finish_record(
     }
 }
 
-/// Emit an encode-progress event to the Tauri frontend.
-/// No-op when app_handle is not set.
+/// Forward an encode-progress event to the UI adapter.
+/// No-op when progress_emitter is not set.
 fn emit_progress(
-    app_handle: &Arc<Mutex<Option<tauri::AppHandle>>>,
+    progress_emitter: &Arc<Mutex<Option<ProgressEmitter>>>,
     job_id: &str,
     stage: &str,
     progress: f64,
     status: &str,
 ) {
-    if let Ok(guard) = app_handle.lock() {
-        if let Some(ref handle) = *guard {
-            let _ = handle.emit(
-                "encode-progress",
-                serde_json::json!({
-                    "job_id": job_id,
-                    "stage": stage,
-                    "progress": progress,
-                    "status": status,
-                }),
-            );
+    eprintln!("EMIT: {} {} {} {}", job_id, stage, progress, status);
+    if let Ok(guard) = progress_emitter.lock() {
+        if let Some(ref emit) = *guard {
+            eprintln!("EMITTING to window");
+            emit(job_id, stage, progress, status);
+        } else {
+            eprintln!("EMIT skipped: progress_emitter is None");
         }
+    } else {
+        eprintln!("EMIT skipped: lock failed");
     }
 }
 

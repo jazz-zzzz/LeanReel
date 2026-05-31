@@ -8,7 +8,7 @@
   import { open } from '@tauri-apps/plugin-dialog';
   import Select from './Select.svelte';
 
-  let { onEncode = () => {} } = $props();
+  let { onEncode = () => {} }: { onEncode?: (event: MouseEvent) => void } = $props();
 
   let deleteSource = $state(false);
   let workerCount = $state(2);
