@@ -13,3 +13,5 @@ vite.config.ts.timestamp-*
 .claude/
 .codex/
 *.md
+!README.md
+!转码前置知识.md
