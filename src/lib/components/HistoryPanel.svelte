@@ -107,14 +107,14 @@
         <button class="chip" class:active={statusFilter === 'success'} onclick={() => statusFilter = 'success'}>成功</button>
         <button class="chip" class:active={statusFilter === 'failed'} onclick={() => statusFilter = 'failed'}>失败</button>
       </div>
-      {#if $queue.length > 0}
+      {#if $queue.some(q => q.status === 'pending' || q.status === 'running')}
         <button class="ghost danger" onclick={() => cancelEncode()}>全部取消</button>
       {/if}
     </div>
 
-    {#if $queue.length > 0}
+    {#if $queue.some(q => q.status === 'pending' || q.status === 'running')}
       <div class="active-tasks">
-        {#each $queue as item (item.id)}
+        {#each $queue.filter(q => q.status === 'pending' || q.status === 'running') as item (item.id)}
           <div class="active-row" class:running={item.status === 'running'} class:done={item.status === 'done'} class:failed={item.status === 'failed'}>
             <span class="active-status">{item.status === 'running' ? '⟳' : item.status === 'done' ? '✓' : '✗'}</span>
             <span class="active-name">{item.fileName}</span>

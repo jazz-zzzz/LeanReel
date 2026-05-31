@@ -7,6 +7,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+use tauri::Emitter;
 
 #[derive(Debug, Clone)]
 pub struct WorkerTask {
@@ -650,6 +651,14 @@ impl WorkerManager {
             *guard = Some(emitter);
         }
     }
+
+    pub fn set_app_handle(&self, handle: tauri::AppHandle) {
+        self.set_progress_emitter(Box::new(move |job_id, stage, progress, status| {
+            let _ = handle.emit("encode-progress", serde_json::json!({
+                "job_id": job_id, "stage": stage, "progress": progress, "status": status,
+            }));
+        }));
+    }
     pub fn submit(&self, task: WorkerTask) -> Result<(), String> {
         self.cancelled.store(false, Ordering::Relaxed);
         let generation = self.cancel_generation.load(Ordering::Relaxed);
@@ -695,7 +704,7 @@ impl WorkerManager {
         self.cancel_generation.fetch_add(1, Ordering::Relaxed);
         self.paused.store(false, Ordering::Relaxed);
         // Try to cancel any running encode
-        if let Ok(guard) = self.executor.lock() {
+        if let Ok(guard) = self.executor.try_lock() {
             if let Some(ref enc) = *guard {
                 let _ = enc.cancel(&"".to_string());
             }

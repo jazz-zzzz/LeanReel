@@ -10,7 +10,7 @@
 
   let { onEncode = () => {} }: { onEncode?: (event: MouseEvent) => void } = $props();
 
-  let deleteSource = $state(false);
+  let deleteSource = $state(true);
   let workerCount = $state(2);
   let showManager = $state(false);
   let editingStrategy = $state<StrategyItem | null>(null);

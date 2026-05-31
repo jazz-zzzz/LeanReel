@@ -90,18 +90,7 @@ pub fn run() {
                 }
             }
 
-            // Task 4: Forward worker progress to Tauri events without coupling the worker to Tauri.
-            let encode_handle = app.handle().clone();
-            state
-                .worker
-                .set_progress_emitter(Box::new(move |job_id, stage, progress, status| {
-                    let _ = encode_handle.emit(
-                    "encode-progress",
-                    serde_json::json!({
-                        "job_id": job_id, "stage": stage, "progress": progress, "status": status,
-                    }),
-                );
-                }));
+            state.worker.set_app_handle(app.handle().clone());
 
             // Task 6: Wire scanner progress callback to Tauri events
             let app_handle = app.handle().clone();
