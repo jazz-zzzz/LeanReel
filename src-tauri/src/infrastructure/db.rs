@@ -540,6 +540,7 @@ impl SqliteSnapshotStore {
         path: &Path,
     ) -> Result<Option<FileSnapshot>, String> {
         let relative = path.to_string_lossy().replace('\\', "/");
+        eprintln!("DB_LOOKUP: searching for path='{}' folder_id={}", relative, folder_id);
         let fields = "SELECT id, library_folder_id, relative_path, file_name, size_bytes, video_codec, video_width, video_height, hdr_type, audio_tracks, subtitle_tracks, duration_seconds, bitrate_bps, file_mtime, probe_ok, probe_error, scanned_at, pix_fmt, frame_rate, color_primaries, color_transfer, color_space FROM file_snapshot";
         let sql = if folder_id > 0 {
             format!("{fields} WHERE library_folder_id = ?1 AND relative_path = ?2")
@@ -551,9 +552,21 @@ impl SqliteSnapshotStore {
         } else {
             &[&relative]
         };
-        self.conn
+        let result = self.conn
             .query_row(&sql, params, row_to_snapshot)
-            .optional()
+            .optional();
+        if result.as_ref().ok().flatten().is_none() {
+            // Debug: list similar paths in DB
+            let mut stmt = self.conn.prepare("SELECT relative_path FROM file_snapshot WHERE relative_path LIKE '%' || ?1 || '%' LIMIT 5").ok();
+            if let Some(mut s) = stmt {
+                let needle = relative.rsplit('/').next().unwrap_or(&relative);
+                if let Ok(rows) = s.query_map(params![needle], |row| row.get::<_, String>(0)) {
+                    eprintln!("DB_LOOKUP: similar paths in DB:");
+                    for r in rows.flatten() { eprintln!("  '{}'", r); }
+                }
+            }
+        }
+        result
             .map_err(|e| e.to_string())
     }
 
