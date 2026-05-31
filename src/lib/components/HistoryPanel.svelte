@@ -19,6 +19,11 @@
     try { history = await getHistory(); }
     catch (e) { error = `加载失败: ${e}`; }
     finally { loading = false; }
+    // Auto-refresh every 5s while active tasks are running
+    const timer = setInterval(async () => {
+      try { history = await getHistory(); } catch (_) {}
+    }, 5000);
+    return () => clearInterval(timer);
   });
 
   let filtered = $derived(history.filter(e => {
@@ -116,7 +121,7 @@
       <div class="active-tasks">
         {#each $queue.filter(q => q.status === 'pending' || q.status === 'running') as item (item.id)}
           <div class="active-row" class:running={item.status === 'running'} class:done={item.status === 'done'} class:failed={item.status === 'failed'}>
-            <span class="active-status">{item.status === 'running' ? '⟳' : item.status === 'done' ? '✓' : '✗'}</span>
+            {#if item.status === 'running'}<span class="spinner"></span>{:else}<span class="pending-dot"></span>{/if}
             <span class="active-name">{item.fileName}</span>
             <span class="active-strategy">{item.strategyName}</span>
             <div class="active-progress"><div class="active-progress-bar"><div class="active-progress-fill" style="width:{item.progress}%"></div></div></div>
@@ -357,4 +362,7 @@
   .active-progress-fill { height: 100%; background: var(--accent); transition: width 0.5s var(--ease-expo); }
   .active-pct { font-family: var(--font-mono); font-size: var(--font-size-mono); color: var(--text-secondary); width: 36px; text-align: right; }
   .active-text { font-size: var(--font-size-label); color: var(--text-secondary); width: 60px; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border-subtle); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .pending-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); display: inline-block; flex-shrink: 0; }
 </style>

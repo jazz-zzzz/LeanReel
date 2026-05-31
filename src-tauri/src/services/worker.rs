@@ -150,8 +150,8 @@ impl WorkerManager {
                             emit_progress(&progress_emitter, &task.id, "done", 100.0, "cancelled");
                             continue;
                         }
-                        if let Ok(guard) = executor.lock() {
-                            if let Some(ref enc) = *guard {
+                        let enc = { executor.lock().ok().and_then(|g| g.as_ref().map(|e| Arc::clone(e))) };
+                            if let Some(enc) = enc {
                                 let final_output = task.output_path.clone();
                                 let temp_output = temp_output_path(&final_output);
 
@@ -589,7 +589,6 @@ impl WorkerManager {
                                 }
                             }
                         }
-                    }
                     Ok(WorkerCommand::Shutdown) | Err(_) => break,
                 }
             });
