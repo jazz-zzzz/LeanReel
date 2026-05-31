@@ -74,16 +74,12 @@ pub fn start_encode(
 
     let mut jobs = Vec::new();
     for file_key in &files {
-        let (folder_id, relative_path) = parse_file_key(file_key)?;
+        let relative_path = parse_file_key(file_key)?;
         let input = std::path::Path::new(&relative_path);
 
-        let snapshot = match store.get_by_folder_path(folder_id, input)? {
+        let snapshot = match store.get_by_folder_path(0, input)? {
             Some(s) => s,
-            // Fallback: search all folders if specific folder_id doesn't match
-            None => match store.get_by_folder_path(0, input)? {
-                Some(s) => s,
-                None => return Err(format!("未找到文件快照: {}", file_key)),
-            },
+            None => return Err(format!("未找到文件快照: {}", file_key)),
         };
 
         let decision = state
@@ -174,14 +170,8 @@ pub fn start_encode(
     })
 }
 
-fn parse_file_key(file_key: &str) -> Result<(i64, String), String> {
-    let normalized = file_key.replace('\\', "/");
-    if let Some((prefix, path)) = normalized.split_once(':') {
-        let folder_id = prefix.parse::<i64>().map_err(|_| format!("无效文件夹标识: {}", file_key))?;
-        if path.is_empty() { return Err(format!("无效文件路径: {}", file_key)); }
-        return Ok((folder_id, path.to_string()));
-    }
-    Ok((0, normalized))
+fn parse_file_key(file_key: &str) -> Result<String, String> {
+    Ok(file_key.replace('\\', "/"))
 }
 
 #[tauri::command]
