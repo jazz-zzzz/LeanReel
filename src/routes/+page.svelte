@@ -40,6 +40,15 @@
   let runningTasks = $derived($queue.filter(t => t.status === 'running'));
   let overallPct = $derived(totalTasks > 0 ? Math.round($queue.reduce((s, t) => s + (t.progress || 0), 0) / totalTasks) : 0);
 
+  // Rotate through running tasks display
+  let rotateIdx = $state(0);
+  $effect(() => {
+    if (runningTasks.length <= 1) return;
+    const timer = setInterval(() => rotateIdx = (rotateIdx + 1) % runningTasks.length, 1500);
+    return () => clearInterval(timer);
+  });
+  let displayTask = $derived(runningTasks.length > 0 ? runningTasks[rotateIdx % runningTasks.length] : null);
+
   onMount(async () => {
     listen<{done: number, total: number}>('scan-progress', (event) => {
       scanProgress.set({ done: event.payload.done, total: event.payload.total });
@@ -251,7 +260,7 @@
             </div>
             <span class="encode-progress-text">
               {overallPct}% {doneTasks}/{totalTasks}
-              {#each runningTasks as rt}· {rt.fileName} {rt.progress}%{/each}
+              {#if displayTask}· {displayTask.fileName} {displayTask.progress}%{/if}{#if runningTasks.length > 1} +{runningTasks.length - 1}更多{/if}
             </span>
           </div>
         {/if}
@@ -424,7 +433,8 @@
   .encode-progress { display: flex; align-items: center; gap: var(--space-sm); flex: 1; }
   .encode-progress-bar { flex: 1; height: 3px; background: var(--border-subtle); border-radius: 2px; overflow: hidden; max-width: 200px; }
   .encode-progress-fill { height: 100%; background: var(--success); transition: width 0.5s var(--ease-expo); }
-  .encode-progress-text { font-size: var(--font-size-label); color: var(--text-secondary); white-space: nowrap; }
+  .encode-progress-text { font-size: var(--font-size-label); color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
+  .tasks-btn { flex-shrink: 0; }
 
   /* ── Queue dock ───────────────────────────── */
   .queue-dock {
