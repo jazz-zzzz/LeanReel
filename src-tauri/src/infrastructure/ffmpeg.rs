@@ -198,6 +198,8 @@ impl FfmpegRunner {
 
         let encode_start = Instant::now();
 
+        eprintln!("FFmpeg 命令: {}", ffmpeg_command);
+
         let mut child = Command::new(&ffmpeg_path)
             .args(&cmd_args)
             .stdout(std::process::Stdio::null())
@@ -231,9 +233,10 @@ impl FfmpegRunner {
         self.untrack_child(&job.id);
         if !status.success() {
             return Err(format!(
-                "ffmpeg 异常退出 ({:?}): {}",
+                "ffmpeg 异常退出 ({:?}): {}\n命令: {}",
                 status.code(),
-                err_tail.into_iter().collect::<Vec<_>>().join("\n")
+                err_tail.into_iter().collect::<Vec<_>>().join("\n"),
+                ffmpeg_command,
             ));
         }
         let duration_ms = encode_start.elapsed().as_millis() as u64;

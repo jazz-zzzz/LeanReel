@@ -35,13 +35,10 @@ pub fn start_encode(
     files: Vec<String>,
     strategy_name: String,
     delete_source: Option<bool>,
-    worker_count: Option<i32>,
+    #[allow(unused)] worker_count: Option<i32>,
     custom_strategy: Option<CustomStrategyRequest>,
     state: State<AppState>,
 ) -> Result<StartEncodeResult, String> {
-    state
-        .worker
-        .set_worker_count(worker_count.unwrap_or(2).min(16).max(1) as usize);
     // 1. Get the full Strategy from the matcher (not Default::default())
     let matcher = state.matcher.lock().map_err(|e| e.to_string())?;
     let mut strategy = matcher

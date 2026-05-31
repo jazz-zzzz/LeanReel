@@ -16,9 +16,9 @@
   let cmdDetail = $state<string | null>(null);
   let showAllActive = $state(false);
 
-  $: activeTasks = $queue.filter(q => q.status === 'pending' || q.status === 'running');
-  $: visibleActive = showAllActive ? activeTasks : activeTasks.slice(0, 5);
-  $: hasMore = activeTasks.length > 5;
+  let activeTasks = $derived($queue.filter(q => q.status === 'pending' || q.status === 'running'));
+  let visibleActive = $derived(showAllActive ? activeTasks : activeTasks.slice(0, 5));
+  let hasMore = $derived(activeTasks.length > 5);
 
   onMount(async () => {
     try { history = await getHistory(); }

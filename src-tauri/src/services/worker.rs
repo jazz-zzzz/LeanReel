@@ -56,6 +56,20 @@ enum WorkerCommand {
     Shutdown,
 }
 
+/// RAII guard that returns a GPU encode slot to the pool on drop.
+struct GpuToken {
+    sender: mpsc::Sender<()>,
+}
+
+impl Drop for GpuToken {
+    fn drop(&mut self) {
+        let _ = self.sender.send(());
+    }
+}
+
+/// Maximum concurrent NVENC encode sessions for consumer GPUs (driver-limited to 3).
+const MAX_GPU_ENCODES: usize = 3;
+
 pub struct WorkerManager {
     max_workers: AtomicUsize,
     sender: mpsc::Sender<WorkerCommand>,
@@ -74,6 +88,14 @@ pub struct WorkerManager {
     pub on_encode_progress: Arc<Mutex<Option<ProgressCallback>>>,
     /// Optional UI adapter for forwarding progress events.
     pub progress_emitter: Arc<Mutex<Option<ProgressEmitter>>>,
+    /// Token-based semaphore limiting concurrent GPU (NVENC) encodes.
+    /// Consumer GPUs are driver-capped at 3 concurrent NVENC sessions.
+    /// Fields are held only to keep the channel alive; tokens are exchanged
+    /// via Arc clones held by worker threads.
+    #[allow(dead_code)]
+    gpu_token_tx: Arc<mpsc::Sender<()>>,
+    #[allow(dead_code)]
+    gpu_token_rx: Arc<Mutex<mpsc::Receiver<()>>>,
 }
 
 impl WorkerManager {
@@ -91,6 +113,17 @@ impl WorkerManager {
         let progress_emitter: Arc<Mutex<Option<ProgressEmitter>>> = Arc::new(Mutex::new(None));
         let (tx, rx) = mpsc::channel::<WorkerCommand>();
         let rx = Arc::new(Mutex::new(rx));
+
+        // GPU semaphore: channel with MAX_GPU_ENCODES pre-filled tokens.
+        // Each GPU encode acquires one token (blocks if none available),
+        // and the GpuToken guard returns it on drop.
+        let (gpu_token_tx, gpu_token_rx) = mpsc::channel::<()>();
+        for _ in 0..MAX_GPU_ENCODES {
+            gpu_token_tx.send(()).unwrap();
+        }
+        let gpu_token_tx = Arc::new(gpu_token_tx);
+        let gpu_token_rx = Arc::new(Mutex::new(gpu_token_rx));
+
         let mut handles = Vec::new();
 
         for _ in 0..max {
@@ -103,6 +136,8 @@ impl WorkerManager {
             let store = store.clone();
             let on_encode_progress = on_encode_progress.clone();
             let progress_emitter = progress_emitter.clone();
+            let gpu_token_tx = gpu_token_tx.clone();
+            let gpu_token_rx = gpu_token_rx.clone();
             let handle = thread::spawn(move || loop {
                 let cmd = {
                     let lock = rx.lock().ok();
@@ -246,6 +281,17 @@ impl WorkerManager {
                                 let history_id = task.history_id;
                                 let progress_emitter_for_cb = progress_emitter.clone();
                                 let job_id_for_cb = task.id.clone();
+                                // Acquire a GPU encode slot before spawning FFmpeg.
+                                // Consumer NVENC drivers cap concurrent sessions at 3;
+                                // CPU encodes skip the semaphore.
+                                let _gpu_token: Option<GpuToken> = if task.strategy.video.is_gpu() {
+                                    match gpu_token_rx.lock().unwrap().recv() {
+                                        Ok(()) => Some(GpuToken { sender: (*gpu_token_tx).clone() }),
+                                        Err(_) => None,
+                                    }
+                                } else {
+                                    None
+                                };
                                 let result = enc.run(&job, &|event| {
                                     match &event {
                                         ProgressEvent::StageStart { .. } => {}
@@ -564,6 +610,8 @@ impl WorkerManager {
                                         } else {
                                             "failed"
                                         };
+                                        // The error string now contains the full FFmpeg command
+                                        // (see ffmpeg.rs format: "ffmpeg 异常退出 (…): …\n命令: …")
                                         finish_record(
                                             &store,
                                             task.history_id,
@@ -574,7 +622,7 @@ impl WorkerManager {
                                             &e,
                                             "",
                                             0,
-                                            "",
+                                            &e,
                                         );
                                         emit_progress(
                                             &progress_emitter,
@@ -607,6 +655,8 @@ impl WorkerManager {
             last_progress,
             on_encode_progress,
             progress_emitter,
+            gpu_token_tx,
+            gpu_token_rx,
         }
     }
 

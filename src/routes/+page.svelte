@@ -199,8 +199,8 @@
 
     scanStatus.set('正在提交编码任务...');
     try {
-      const settings = strategyPanel?.getEncodeSettings?.() ?? { deleteSource: false, workerCount: 2 };
-      const result = await startEncode(files, strategy.name, settings.deleteSource, settings.workerCount, settings.customStrategy);
+      const settings = strategyPanel?.getEncodeSettings?.() ?? { deleteSource: false };
+      const result = await startEncode(files, strategy.name, settings.deleteSource, undefined, settings.customStrategy);
       queue.update(current => {
         // Remove old entries for the same files
         const newNames = new Set(result.jobs.map(j => j.file_name));

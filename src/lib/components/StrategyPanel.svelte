@@ -11,7 +11,6 @@
   let { onEncode = () => {} }: { onEncode?: (event: MouseEvent) => void } = $props();
 
   let deleteSource = $state(true);
-  let workerCount = $state(2);
   let showManager = $state(false);
   let editingStrategy = $state<StrategyItem | null>(null);
   let sys = $state<AppSettings>({ ffprobe_custom: '', ffmpeg_custom: '', ffprobe_path: '', ffmpeg_path: '', ffprobe_ok: false, ffmpeg_ok: false, gpu_ok: false, gpu_info: '' });
@@ -51,7 +50,7 @@
   }
 
   export function getEncodeSettings() {
-    return { deleteSource, workerCount };
+    return { deleteSource };
   }
 
   function sortable(node: HTMLElement) {
@@ -215,10 +214,6 @@
   </div>
 
   <div class="encode-settings">
-    <div class="setting-row">
-      <label>并发数</label>
-      <input type="number" min="1" max="16" bind:value={workerCount} />
-    </div>
     <div class="setting-row checkbox-row">
       <input type="checkbox" id="deleteSource" bind:checked={deleteSource} />
       <label for="deleteSource">编码后删除源文件</label>
@@ -351,7 +346,7 @@
   .tool-indicator { font-size: var(--font-size-label); font-weight: 600; }
   .tool-indicator.ok { color: var(--success); }
   .tool-indicator.fail { color: var(--danger); }
-  .checkbox-row { padding-left: 48px; }
+  .checkbox-row { display: flex; align-items: center; justify-content: center; gap: var(--space-sm); }
   .checkbox-row label { width: auto; text-align: left; font-size: var(--font-size-label); color: var(--text-secondary); cursor: pointer; }
 
   /* ── Manager ────────────────────────── */
