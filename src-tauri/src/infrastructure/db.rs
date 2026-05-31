@@ -543,9 +543,9 @@ impl SqliteSnapshotStore {
         eprintln!("DB_LOOKUP: searching for path='{}' folder_id={}", relative, folder_id);
         let fields = "SELECT id, library_folder_id, relative_path, file_name, size_bytes, video_codec, video_width, video_height, hdr_type, audio_tracks, subtitle_tracks, duration_seconds, bitrate_bps, file_mtime, probe_ok, probe_error, scanned_at, pix_fmt, frame_rate, color_primaries, color_transfer, color_space FROM file_snapshot";
         let sql = if folder_id > 0 {
-            format!("{fields} WHERE library_folder_id = ?1 AND relative_path = ?2")
+            format!("{fields} WHERE library_folder_id = ?1 AND REPLACE(relative_path, '\\', '/') = ?2")
         } else {
-            format!("{fields} WHERE relative_path = ?1 LIMIT 1")
+            format!("{fields} WHERE REPLACE(relative_path, '\\', '/') = ?1 LIMIT 1")
         };
         let params: &[&dyn rusqlite::types::ToSql] = if folder_id > 0 {
             &[&folder_id, &relative]
