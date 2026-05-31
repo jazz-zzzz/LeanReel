@@ -171,7 +171,10 @@ pub fn start_encode(
 }
 
 fn parse_file_key(file_key: &str) -> Result<String, String> {
-    Ok(file_key.replace('\\', "/"))
+    // Frontend sends "folder_id:relative/path" or just "relative/path".
+    // Strip the folder_id prefix if present — we search by path only.
+    let s = file_key.replace('\\', "/");
+    Ok(if let Some((_folder_id, path)) = s.split_once(':') { path.to_string() } else { s })
 }
 
 #[tauri::command]
