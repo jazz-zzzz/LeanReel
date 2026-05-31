@@ -1,219 +1,160 @@
----
-name: LeanReel
-description: 可解释的个人媒体库瘦身决策桌面工具
-colors:
-  base-warm-black: "#12100e"
-  surface-warm-panel: "#1c1a16"
-  surface-raised: "#24221d"
-  border-muted: "#2e2b25"
-  border-focus-amber: "#5c4a2e"
-  text-primary: "#e8e3db"
-  text-secondary: "#8a857c"
-  text-muted: "#5c5851"
-  accent-amber: "#c8963e"
-  accent-amber-hover: "#d9a84c"
-  success-green: "#6b9955"
-  danger-red: "#c4554a"
-  warning-yellow: "#c8a23e"
-  info-blue: "#5b8db8"
-  row-alternate: "#171512"
-  row-selection: "#3d2e14"
-typography:
-  body:
-    fontFamily: "Segoe UI, Microsoft YaHei, sans-serif"
-    fontSize: "13px"
-    fontWeight: 400
-    lineHeight: 1.4
-    letterSpacing: "0"
-  label:
-    fontFamily: "Segoe UI, Microsoft YaHei, sans-serif"
-    fontSize: "11px"
-    fontWeight: 600
-    lineHeight: 1.3
-    letterSpacing: "0"
-  data:
-    fontFamily: "Segoe UI, Microsoft YaHei, sans-serif"
-    fontSize: "13px"
-    fontWeight: 400
-    lineHeight: 1.35
-    letterSpacing: "0"
-  mono:
-    fontFamily: "Cascadia Code, Consolas, Fira Code, monospace"
-    fontSize: "12px"
-    fontWeight: 400
-    lineHeight: 1.35
-    letterSpacing: "0"
-rounded:
-  xs: "3px"
-  sm: "4px"
-  md: "6px"
-spacing:
-  xs: "4px"
-  sm: "6px"
-  md: "8px"
-  lg: "12px"
-  xl: "16px"
-components:
-  button-default:
-    backgroundColor: "{colors.surface-raised}"
-    textColor: "{colors.text-primary}"
-    rounded: "{rounded.sm}"
-    padding: "6px 16px"
-  button-primary:
-    backgroundColor: "{colors.accent-amber}"
-    textColor: "{colors.base-warm-black}"
-    rounded: "{rounded.md}"
-    padding: "12px 24px"
-  table-row-selected:
-    backgroundColor: "{colors.row-selection}"
-    textColor: "{colors.text-primary}"
-    rounded: "{rounded.xs}"
-    padding: "5px 8px"
-  input-default:
-    backgroundColor: "{colors.surface-raised}"
-    textColor: "{colors.text-primary}"
-    rounded: "{rounded.sm}"
-    padding: "5px 8px"
----
+# Design
 
-# Design System: LeanReel
+## Visual Theme
 
-## 1. Overview
+暗房单屏幕深夜场景。应用窗口采用亚克力半透明背景，透出桌面壁纸经强模糊后的微妙环境光。界面不是一块纯色板，而是通过不同层次的半透明表面叠加出景深。没有硬分割线，结构靠间距和半透明色差表达。
 
-**Creative North Star: "The Media Workbench"**
+### 材质层次（从底到顶）
 
-LeanReel should feel like a precise desktop workbench for media decisions. The visual system is dense, warm, and restrained: dark enough for long batch sessions, but not theatrical. The user is not here to admire media covers. They are here to make safe decisions about files.
+| 层级 | 用途 | 透明度 | 模糊 |
+|------|------|--------|------|
+| 窗口基底 | 应用主窗口 | `rgba(6,8,12,0.82)` | 80px blur |
+| 面板表面 | 侧栏、内容区、右面板 | `rgba(255,255,255,0.04)` | 40px blur |
+| 悬停层 | 表格行 hover、按钮 hover | `rgba(255,255,255,0.06)` | - |
+| 选中态 | 表格选中行、选中策略 | `rgba(91,155,213,0.12)` | - |
+| 提升层 | 弹出菜单、tooltip、下拉 | `rgba(18,22,28,0.95)` | 40px blur |
 
-The interface rejects landing-page spectacle, generic AI gradients, glass effects, and decorative motion. The dominant surface is a stable three-pane tool: library, file table, strategy settings. The table is the center of gravity; everything else supports scanning, filtering, explaining, and executing.
+## Color Palette
 
-**Key Characteristics:**
-- Dense, task-first information layout.
-- Warm dark neutral surfaces with one amber action accent.
-- Status vocabulary that combines color, text, and affordance.
-- Technical strategy names with short explanatory copy.
-- Protected sources shown as non-actionable, not as ordinary queued work.
+放弃暖棕色调。冷灰基底 + 冰蓝点缀。
 
-## 2. Colors
+```css
+:root {
+  /* 基础 */
+  --bg-window: rgba(6, 8, 12, 0.82);
+  --bg-surface: rgba(255, 255, 255, 0.04);
+  --bg-hover: rgba(255, 255, 255, 0.06);
+  --bg-active: rgba(255, 255, 255, 0.08);
+  --bg-selected: rgba(91, 155, 213, 0.12);
 
-The palette is restrained: warm tinted neutrals carry the workspace, amber marks primary action and focus, semantic colors mark outcomes.
+  /* 边框 / 分割 */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.08);
+  --border-focus: rgba(91, 155, 213, 0.4);
 
-### Primary
-- **Workbench Amber**: Primary action, selected strategy, active focus, progress. It must remain rare so it keeps authority.
+  /* 文字 */
+  --text-primary: rgba(255, 255, 255, 0.92);
+  --text-secondary: rgba(255, 255, 255, 0.55);
+  --text-muted: rgba(255, 255, 255, 0.28);
+  --text-disabled: rgba(255, 255, 255, 0.16);
 
-### Secondary
-- **Information Blue**: Skip and informational status, especially protected-source explanations.
-- **Operational Green**: Completed work and verified success.
-- **Risk Red**: Failed tasks, destructive or unrecoverable states.
-- **Warning Yellow**: Risky options, aggressive compression, debug-only toggles.
+  /* 强调色 */
+  --accent: #5b9bd5;
+  --accent-hover: #73b0e0;
+  --accent-dimmed: rgba(91, 155, 213, 0.18);
 
-### Neutral
-- **Warm Black Base**: Main window background.
-- **Warm Panel Surface**: Library panel, file table, menus, queue dock.
-- **Raised Surface**: Inputs, buttons, hover states, active rows.
-- **Muted Border**: Structural separation between panes and controls.
-- **Primary Text**: File names, table data, active control text.
-- **Secondary Text**: Labels, descriptions, supporting metadata.
-- **Muted Text**: Disabled and low-emphasis states.
+  /* 语义色 */
+  --success: #4ec9b0;
+  --warning: #dcdcaa;
+  --danger: #f14c4c;
+  --info: #569cd6;
 
-### Named Rules
+  /* 数据标签 */
+  --tag-hevc: rgba(78, 201, 176, 0.15);
+  --tag-av1: rgba(86, 156, 214, 0.15);
+  --tag-dv: rgba(193, 110, 230, 0.15);
+  --tag-hdr: rgba(220, 220, 170, 0.15);
+}
+```
 
-**The One Amber Rule.** Amber is for action, focus, and selected state. Do not use amber as decoration.
+## Typography
 
-**The Status Needs Text Rule.** Success, failure, skip, warning, and running states must not rely on color alone. Pair color with text, icon, or disabled behavior.
+- 正文：Segoe UI Variable / Inter, 13px, 400
+- 标签/小字：11px, 600, 大写 letter-spacing: 0.04em
+- 等宽数据：Cascadia Code, 12px, tabular-nums
+- 标题：13px, 600（不放大，靠字重区分）
+- 层级比：等宽 12 / 正文 13 / 标签 11 = 紧凑但分明
+- 行高：正文 1.5，表格内容 1.3
 
-**The Protected Source Rule.** HEVC/H.265, HDR10, HDR10+ and Dolby Vision should use an informational skip treatment, not a warning treatment. They are good files, not errors.
+## Layout
 
-## 3. Typography
+### 主窗口
+- 默认 1320×840，最小 900×600
+- 三栏自适应：侧栏 220px min / 内容弹性 / 右面板 300px
+- 无拖拽分割线，改用不可拖的 1px 半透明分隔
+- 底部队列栏：仅在队列非空时出现，从下边缘滑入（transform Y，250ms ease-out-quint）
 
-**Display Font:** Segoe UI / Microsoft YaHei system stack  
-**Body Font:** Segoe UI / Microsoft YaHei system stack  
-**Label/Mono Font:** Cascadia Code / Consolas / Fira Code for commands, codecs, and technical tokens only
+### 侧栏（库面板）
+- 顶部：新建库按钮 + 搜索图标（展开输入框）
+- 库树：文件夹图标仅用 ▸/▾ 三角，2 字缩进层级
+- 选中态：`--bg-selected` 背景 + 文字变亮
+- 右键菜单：亚克力提升面板，4px 圆角，无外描边
 
-**Character:** Native, quiet, and utilitarian. Type should disappear into the workflow. The product does not need a decorative display voice.
+### 中间内容区（文件表格）
+- 无网格线，只用半透明交替行底区分（`transparent` / `rgba(255,255,255,0.02)`）
+- 表头 11px 大写标签，底部 1px `--border-subtle`
+- 滚动：自定义细滚动条（4px 宽，`rgba(255,255,255,0.12)` 滑块，hover 变亮至 0.25）
+- 编码列：HEVC=绿色标签, AV1=蓝色标签, DV=紫色标签, HDR=金色标签
+- 分辨率列：等宽字体，右对齐
+- 文件大小列：等宽数字
+- 策略匹配列：可处理=绿色文字，受保护=灰色，探测失败=红色
 
-### Hierarchy
-- **Window and panel headings** (600, 13-14px, 1.3): Panel labels such as “压缩策略” and “编码设置”.
-- **Table body** (400, 13px, 1.35): File names, codecs, sizes, strategy names, savings estimates.
-- **Secondary labels** (400-600, 11-12px, 1.3): Strategy descriptions, queue metadata, helper text.
-- **Technical tokens** (400, 12px mono, 1.35): Codec names, CRF/CQ, command-like values, exact parameters.
-- **Status bar** (400, 12px, 1.3): Short operational state, no long prose.
+### 右面板（策略 + 自定义）
+- 预设策略：紧凑单选按钮（非卡片），每行显示策略名 + [GPU/CPU] 标签 + 节省率
+- 选中态：`--bg-selected` + `--accent` 文字
+- 描述区：选中策略时在下方展开，淡入动画
+- 自定义参数：折叠组（齿轮图标触发），展开时 push 下方内容
+- 编码设置：Worker 数量、删除源文件复选框 — 同样折叠
+- 底部：大"开始编码"按钮，`--accent` 底色，hover 时微提亮
 
-### Named Rules
+### 底部队列栏
+- 隐藏时：主布局占满 100vh
+- 出现时：从下方滑入，主布局同步收缩（无抖动）
+- 总进度条在顶部，下方滚动任务列表
+- 每个任务行：图标 (⟳/✓/✗) + 文件名 + 阶段详情 + 单独进度条
+- 待处理=暗灰图标，运行中=冰蓝，成功=绿，失败=红
+- 底部按钮：暂停/取消/清除已完成
 
-**The No Display Type Rule.** Product labels, buttons, table headers, queue rows, and status text use the system sans stack. Do not introduce display fonts into the app shell.
+### 历史面板
+- 全屏覆盖（非模态），左上角 ← 返回按钮
+- 16 列可排序表格，默认按完成时间倒序
+- 状态列：✓ 成功(绿) / ✗ 失败(红) / ⊘ 取消(灰) / → 跳过(蓝)
+- 库过滤下拉在顶部
 
-**The Technical Name Rule.** Strategy names expose encoder and quality parameter first, for example `x265 HEVC CRF 20 标准转码`. The explanatory sentence goes below or in a tooltip.
+## Components
 
-## 4. Elevation
+### 按钮
+- 主要操作（开始编码）：`--accent` 底色，白色文字，无边框，4px 圆角
+- 次要操作（扫描、历史）：`--bg-surface` 底色 + `--border-subtle` 边框
+- 危险操作（删除）：仅 hover 时显示，红色文字
+- 图标按钮（折叠、关闭）：24×24 点击区，无背景，hover 时 `--bg-hover`
 
-LeanReel uses tonal layering and borders, not heavy shadows. Depth is conveyed by background steps: base, panel, raised control, selected row. Shadows are not part of the current vocabulary and should remain absent unless a future floating overlay truly needs separation.
+### 输入框
+- 搜索/路径输入：`--bg-surface` 底色，`--border-default` 下划线风格（非全框）
+- focus：下划线颜色过渡到 `--accent`，250ms
+- placeholder：`--text-muted`，斜体
 
-### Named Rules
+### 滚动条
+- 全局定制：`::-webkit-scrollbar` 宽度 4px
+- 轨道：透明
+- 滑块：`rgba(255,255,255,0.10)`，4px 圆角，无按钮
+- hover：`rgba(255,255,255,0.25)`
+- 表头和底栏杜绝任何原生滚动条泄露
 
-**The Flat Workbench Rule.** Tables, panels, toolbars, and strategy rows are flat by default. Use borders and tonal changes for separation.
+### Checkbox
+- 自定义绘制：12×12，`--border-default` 边框，选中时 `--accent` 填充
+- 禁用态：透明度 0.3
+- 不使用原生 `<input type="checkbox">` 外观
 
-**The No Glass Rule.** Do not use blur, translucency, glow cards, or glass surfaces. They reduce readability in dense desktop tools.
+### Select 下拉
+- 自定义按钮式触发 + 下拉面板
+- 面板：`--bg-window` + 80px blur，4px 圆角，`--border-subtle` 边框
+- 选项：hover 时 `--bg-hover`
+- 不使用原生 `<select>`
 
-## 5. Components
+## Motion
 
-### Buttons
-- **Shape:** Gently squared desktop control (4-6px radius).
-- **Default:** Raised warm surface, muted border, primary text.
-- **Primary:** Amber fill, warm black text, bold 14-15px label. Use only for the main queue-start action or equivalent primary commitment.
-- **Hover / Focus:** Border shifts toward focus amber. Avoid layout shift.
-- **Disabled:** Muted text, no strong fill. Disabled must look unavailable, not merely low contrast.
+- 所有过渡使用 `cubic-bezier(0.16, 1, 0.3, 1)`（ease-out-expo）
+- 淡入：opacity 150ms
+- 展开：max-height 250ms
+- 滑入：transform 250ms
+- 进度条：width transition 300ms
+- 不动画 layout 属性（padding, margin, width, height）
+- 不弹跳、不回弹
 
-### Strategy Rows
-- **Style:** Single-line selectable rows, not large marketing cards.
-- **Content:** Indicator, technical strategy name, CPU/GPU/COPY tag, estimated savings.
-- **Description:** Separate description label below the selected row. Do not stuff long prose into every row.
-- **State:** Checked row uses amber border and selected warm background.
+## Iconography
 
-### File Table
-- **Role:** Primary decision surface.
-- **Columns:** File name, size, codec, HDR, matched strategy, estimated savings.
-- **Protected rows:** Checkbox disabled, strategy column shows skip reason, savings column should prefer “不处理” where space allows.
-- **Sorting:** Numeric columns sort by hidden numeric values, not display text.
-- **Selection:** Selection is for inspection. Checked state is for processing. They must stay visually distinct.
-
-### Inputs / Fields
-- **Style:** Raised surface, 1px muted border, 4px radius.
-- **Focus:** Amber border. Do not add glow.
-- **Disabled:** Muted text and no hover affordance.
-- **Technical values:** Use exact labels such as `CQ`, `CRF`, `NV 预设`, and add tooltips when the label is not self-explanatory.
-
-### Chips / Tags
-- **CPU/GPU/COPY:** Compact uppercase tags inside strategy rows.
-- **HDR and codec statuses:** Use color plus readable text. Avoid icon-only tags.
-- **Skip reasons:** Treat as informational status, not errors.
-
-### Navigation
-- **Library panel:** Tree navigation with search. Use folder hierarchy as structure, not decorative icons.
-- **View mode:** Flat/tree selection belongs near file table controls.
-- **Queue dock:** Bottom dock is a transient operational panel. It should summarize progress first, then show individual rows.
-
-### Queue Rows
-- **Status icon:** Running, completed, failed, skipped, pending, cancelled each get icon plus color.
-- **Primary text:** File name.
-- **Secondary text:** Current stage, size delta, or failure detail.
-- **Progress:** Overall progress sits above rows; per-row stage text is enough unless detailed progress becomes necessary.
-
-## 6. Do's and Don'ts
-
-### Do:
-- **Do** keep the three-pane layout as the default mental model: library, files, strategy.
-- **Do** show protected-source skip reasons plainly: `跳过：HEVC/H.265 片源`, `跳过：HDR10 片源`, `跳过：HDR10+ 片源`, `跳过：Dolby Vision 片源`.
-- **Do** use technical strategy names, then explain in one short sentence.
-- **Do** keep amber rare and meaningful.
-- **Do** make disabled checkboxes visibly disabled for files that must not be processed.
-- **Do** preserve dense tables, numeric sorting, and column resizing.
-- **Do** use tooltips for CRF, CQ, NV preset, debug toggles, and protected-source rules.
-
-### Don't:
-- **Don't** rename technical strategies back to vague labels like “轻量压缩”, “均衡压缩”, or “极限压缩”.
-- **Don't** process HEVC/H.265, HDR10, HDR10+ or Dolby Vision through default UI paths.
-- **Don't** use landing-page patterns, hero sections, decorative cards, or identical card grids.
-- **Don't** use purple-blue gradients, glassmorphism, glow borders, or gradient text.
-- **Don't** rely on color alone for task status.
-- **Don't** put long strategy descriptions inside every selectable row.
-- **Don't** use side-stripe borders as status accents. Use full borders, tags, text, or disabled behavior.
+- 状态：⟳ 运行中 / ✓ 完成 / ✗ 失败 / → 跳过 / ⊘ 取消 / ○ 等待
+- 导航：▸ 折叠 / ▾ 展开 / ← 返回
+- 操作：+ 添加 / × 删除 / ⚙ 设置
+- 不使用 emoji 作为图标（📁 📂 📋 等全部替换为 Unicode 符号或 SVG）

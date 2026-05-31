@@ -1,0 +1,114 @@
+<h2>LeanReel 当前架构 vs Tauri 重构</h2>
+<p class="subtitle">理解现状，看清重构的代价和收益</p>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">当前：PySide6 (Qt Widgets)</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 13px; line-height: 1.8; padding: 20px; color: #e8e3db;">
+      <div style="color: #c8963e; margin-bottom: 12px;">🖥️ Python 3.11+</div>
+
+      <div style="border: 1px solid #2e2b25; border-radius: 6px; padding: 12px; margin-bottom: 10px;">
+        <div style="color: #8a857c; font-size: 11px; margin-bottom: 4px;">GUI 层</div>
+        <div>QMainWindow / QSplitter</div>
+        <div>QTableView + 自定义 Model</div>
+        <div>QTreeWidget / QDockWidget</div>
+        <div>QSS 样式表（暗色主题）</div>
+        <div style="color: #c4554a; margin-top: 4px;">⚠ QPropertyAnimation 仅用于展开收起</div>
+      </div>
+
+      <div style="border: 1px solid #2e2b25; border-radius: 6px; padding: 12px; margin-bottom: 10px;">
+        <div style="color: #8a857c; font-size: 11px; margin-bottom: 4px;">业务层</div>
+        <div>Controllers / Services</div>
+        <div>SQLite / FFmpeg 子进程</div>
+      </div>
+
+      <div style="border: 1px solid #2e2b25; border-radius: 6px; padding: 12px;">
+        <div style="color: #8a857c; font-size: 11px; margin-bottom: 4px;">打包</div>
+        <div>PyInstaller → Windows .exe</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">Tauri 方案</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 13px; line-height: 1.8; padding: 20px; color: #e8e3db;">
+      <div style="color: #5b8db8; margin-bottom: 12px;">🦀 Rust + Web 前端</div>
+
+      <div style="border: 1px solid #2e2b25; border-radius: 6px; padding: 12px; margin-bottom: 10px;">
+        <div style="color: #8a857c; font-size: 11px; margin-bottom: 4px;">GUI 层</div>
+        <div>WebView2（系统 WebView）</div>
+        <div>HTML/CSS/JS 任意前端框架</div>
+        <div>CSS 动画 / Web Animations API</div>
+        <div style="color: #6b9955; margin-top: 4px;">✓ 完整的 Web 动画能力</div>
+      </div>
+
+      <div style="border: 1px solid #2e2b25; border-radius: 6px; padding: 12px; margin-bottom: 10px;">
+        <div style="color: #8a857c; font-size: 11px; margin-bottom: 4px;">业务层</div>
+        <div>Rust 命令（Tauri Commands）</div>
+        <div>SQLite / FFmpeg 子进程</div>
+      </div>
+
+      <div style="border: 1px solid #2e2b25; border-radius: 6px; padding: 12px;">
+        <div style="color: #8a857c; font-size: 11px; margin-bottom: 4px;">打包</div>
+        <div>Tauri Bundler → 更小的 .msi/.exe</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>动效能力对比</h3>
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>PySide6 (Qt)</h4>
+      <ul>
+        <li>QPropertyAnimation — 仅能动画 Qt 属性</li>
+        <li>无 CSS transition/animation</li>
+        <li>无 keyframe 动画系统</li>
+        <li>自定义动画代码量大、难维护</li>
+        <li>微交互几乎不可行</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>Tauri (Web)</h4>
+      <ul>
+        <li>CSS transitions / animations 全覆盖</li>
+        <li>Web Animations API（JS 控制）</li>
+        <li>丰富的第三方动效库可选</li>
+        <li>声明式动画，代码量少</li>
+        <li>微交互、转场、骨架屏均可实现</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>关键权衡因素</h3>
+  <table style="width:100%; border-collapse: collapse; font-size: 13px;">
+    <tr style="border-bottom: 1px solid #2e2b25;">
+      <th style="text-align:left; padding: 10px 12px; color: #8a857c; font-weight: 600;">维度</th>
+      <th style="text-align:left; padding: 10px 12px; color: #8a857c; font-weight: 600;">PySide6</th>
+      <th style="text-align:left; padding: 10px 12px; color: #8a857c; font-weight: 600;">Tauri</th>
+    </tr>
+    <tr style="border-bottom: 1px solid #2e2b25;">
+      <td style="padding: 10px 12px;">动效能力</td>
+      <td style="padding: 10px 12px; color: #c4554a;">受限</td>
+      <td style="padding: 10px 12px; color: #6b9955;">完整</td>
+    </tr>
+    <tr style="border-bottom: 1px solid #2e2b25;">
+      <td style="padding: 10px 12px;">重写工作量</td>
+      <td style="padding: 10px 12px; color: #6b9955;">无</td>
+      <td style="padding: 10px 12px; color: #c4554a;">极大（全部重写）</td>
+    </tr>
+    <tr style="border-bottom: 1px solid #2e2b25;">
+      <td style="padding: 10px 12px;">FFmpeg 集成</td>
+      <td style="padding: 10px 12px; color: #6b9955;">直接 subprocess</td>
+      <td style="padding: 10px 12px; color: #c8a23e;">Rust Command::new</td>
+    </tr>
+    <tr style="border-bottom: 1px solid #2e2b25;">
+      <td style="padding: 10px 12px;">打包体积</td>
+      <td style="padding: 10px 12px; color: #c4554a;">~80MB+ (含 Python 运行时)</td>
+      <td style="padding: 10px 12px; color: #6b9955;">~5-15MB (不含 WebView2)</td>
+    </tr>
+  </table>
+</div>

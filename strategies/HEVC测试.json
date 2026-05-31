@@ -1,0 +1,37 @@
+{
+  "name": "HEVC测试",
+  "description": "HEVC",
+  "is_preset": false,
+  "video": {
+    "encoder": "hevc_nvenc",
+    "crf": 20,
+    "preset": "p7",
+    "pix_fmt": "yuv420p10le",
+    "gpu": true,
+    "nv_preset": "",
+    "rc": "",
+    "cq": 26
+  },
+  "hdr": {
+    "mode": "",
+    "dv_handling": ""
+  },
+  "audio": {
+    "mode": "strip_commentary",
+    "remove_commentary": true,
+    "preferred_languages": [
+      "chi",
+      "zho",
+      "eng"
+    ]
+  },
+  "subtitle": {
+    "mode": "keep_all"
+  },
+  "filters": {
+    "skip_x265": false
+  },
+  "estimated_savings": "20%",
+  "quality_impact": "",
+  "sort_order": 3
+}
