@@ -160,6 +160,10 @@ export async function cancelEncode(): Promise<void> {
   return invoke('cancel_encode');
 }
 
+export async function cancelTask(jobId: string): Promise<void> {
+  return invoke('cancel_task', { jobId });
+}
+
 export interface HistoryEntry {
     id: number;
     source_path: string;

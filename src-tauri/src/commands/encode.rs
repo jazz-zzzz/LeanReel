@@ -196,9 +196,13 @@ pub fn resume_encode(state: State<AppState>) -> Result<(), String> {
 }
 #[tauri::command]
 pub fn cancel_encode(state: State<AppState>) -> Result<(), String> {
-    // Kill ffmpeg directly — worker's executor lock is held during encode, so
-    // we cannot acquire it in cancel(). Instead, access the shared FfmpegRunner.
     state.ffmpeg.cancel().ok();
     state.worker.cancel();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cancel_task(job_id: String, state: State<AppState>) -> Result<(), String> {
+    state.ffmpeg.cancel_job(&job_id).ok();
     Ok(())
 }

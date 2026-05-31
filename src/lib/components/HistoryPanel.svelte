@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { showHistory } from '$lib/stores/history';
   import { queue } from '$lib/stores/queue';
-  import { getHistory, cancelEncode } from '$lib/api';
+  import { getHistory, cancelEncode, cancelTask } from '$lib/api';
   import type { HistoryEntry } from '$lib/stores/history';
 
   let history = $state<HistoryEntry[]>([]);
@@ -127,7 +127,7 @@
             <div class="active-progress"><div class="active-progress-bar"><div class="active-progress-fill" style="width:{item.progress}%"></div></div></div>
             <span class="active-pct">{item.progress}%</span>
             {#if item.status === 'pending' || item.status === 'running'}
-              <button class="ghost danger" onclick={() => cancelEncode()}>取消</button>
+              <button class="ghost danger" onclick={() => cancelTask(item.id)}>取消</button>
             {/if}
           </div>
         {/each}

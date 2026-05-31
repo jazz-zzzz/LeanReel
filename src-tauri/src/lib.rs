@@ -75,6 +75,7 @@ pub fn run() {
             commands::encode::pause_encode,
             commands::encode::resume_encode,
             commands::encode::cancel_encode,
+            commands::encode::cancel_task,
             commands::history::get_history,
             commands::settings::get_settings,
             commands::settings::test_tool,
