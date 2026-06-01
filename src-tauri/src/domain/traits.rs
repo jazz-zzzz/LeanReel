@@ -13,6 +13,8 @@ pub struct FinishCompressionParams<'a> {
     pub sidecar_path: &'a str,
     pub source_deleted: i32,
     pub ffmpeg_command: &'a str,
+    /// JSON string with per-task performance metrics (fps, bitrate, SMB).
+    pub performance_metrics: &'a str,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -56,6 +58,25 @@ pub struct EncodeOutput {
     pub duration_ms: u64,
     /// The full ffmpeg command line used for this encode (space-joined args).
     pub command: String,
+    /// Peak FPS observed during encoding.
+    pub max_fps: f32,
+    /// Average encoding bitrate in kbps.
+    pub avg_bitrate_kbps: u32,
+    /// SMB performance metrics sampled during encoding.
+    pub smb_metrics: Option<SmbMetrics>,
+}
+
+/// SMB client performance counters sampled during an encoding task.
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize)]
+pub struct SmbMetrics {
+    /// Average Read Bytes/sec over the sample period.
+    pub read_bytes_per_sec: f64,
+    /// Average Write Bytes/sec over the sample period.
+    pub write_bytes_per_sec: f64,
+    /// Average bytes per SMB data request.
+    pub avg_data_bytes_per_request: f64,
+    /// Average data queue length.
+    pub avg_data_queue_length: f64,
 }
 
 /// 文件快照持久化
@@ -80,6 +101,7 @@ pub trait SnapshotStore {
     /// C2: Finalize a compression record on encode completion or failure.
     fn finish_compression(&self, params: FinishCompressionParams<'_>) -> Result<(), String>;
 }
+
 
 /// 媒体元数据探测
 pub trait MediaProber {

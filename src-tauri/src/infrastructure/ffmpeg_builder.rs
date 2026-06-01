@@ -87,6 +87,11 @@ pub fn build_ffmpeg_command(
     }
     cmd.push("-thread_queue_size".into());
     cmd.push("16384".into());
+    // Override the default 32 KB I/O buffer for the file protocol.
+    // Larger pkt_size reduces ReadFile() calls and benefits NAS/network
+    // throughput by reading in bigger sequential blocks.
+    cmd.push("-pkt_size".into());
+    cmd.push("8388608".into());
     cmd.push("-i".into());
     cmd.push(input_path.to_string_lossy().to_string());
     cmd.push("-map".into());

@@ -1,7 +1,9 @@
 use crate::domain::models::{FileSnapshot, Strategy, TaskStatus};
 use crate::domain::traits::{
-    Encoder, EncodingJob, FinishCompressionParams, MediaProber, ProgressEvent, SnapshotStore,
+    Encoder, EncodingJob, FinishCompressionParams, MediaProber, ProgressEvent, SmbMetrics,
+    SnapshotStore,
 };
+use crate::infrastructure::smb_metrics::spawn_smb_sampler;
 use crate::services::pipeline::{atomic_commit, cleanup_temp, temp_output_path, PipelinePlan};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -210,6 +212,7 @@ impl WorkerManager {
                                     sidecar_path: "",
                                     source_deleted: 0,
                                     ffmpeg_command: "",
+                                    performance_metrics: "",
                                 },
                             );
                             emit_progress(&progress_emitter, &task.id, "done", 100.0, "cancelled");
@@ -243,6 +246,7 @@ impl WorkerManager {
                                     sidecar_path: "",
                                     source_deleted: 0,
                                     ffmpeg_command: "",
+                                    performance_metrics: "",
                                 },
                             );
                             emit_progress(&progress_emitter, &task.id, "done", 100.0, "cancelled");
@@ -297,6 +301,7 @@ impl WorkerManager {
                                             sidecar_path: "",
                                             source_deleted: 0,
                                             ffmpeg_command: "",
+                                            performance_metrics: "",
                                         },
                                     );
                                     emit_progress(
@@ -345,6 +350,15 @@ impl WorkerManager {
                             } else {
                                 None
                             };
+                            // Start SMB performance sampling in background
+                            let smb_sampler: Option<(
+                                Arc<AtomicBool>,
+                                thread::JoinHandle<SmbMetrics>,
+                            )> = {
+                                let path_str = task.input_path.to_string_lossy();
+                                extract_share_unc(&path_str)
+                                    .and_then(|unc| spawn_smb_sampler(&unc))
+                            };
                             if is_task_cancelled(
                                 &cancel_generation,
                                 task_generation,
@@ -363,6 +377,7 @@ impl WorkerManager {
                                         sidecar_path: "",
                                         source_deleted: 0,
                                         ffmpeg_command: "",
+                                        performance_metrics: "",
                                     },
                                 );
                                 emit_progress(
@@ -422,8 +437,14 @@ impl WorkerManager {
                                 }
                             });
 
+                            // Stop SMB sampler and collect metrics
+                            let smb_metrics = smb_sampler.map(|(stop, handle)| {
+                                stop.store(true, Ordering::Relaxed);
+                                handle.join().unwrap_or_default()
+                            });
                             match result {
-                                Ok(output) => {
+                                Ok(mut output) => {
+                                    output.smb_metrics = smb_metrics;
                                     if is_task_cancelled(
                                         &cancel_generation,
                                         task_generation,
@@ -443,6 +464,7 @@ impl WorkerManager {
                                                 sidecar_path: "",
                                                 source_deleted: 0,
                                                 ffmpeg_command: "",
+                                                performance_metrics: "",
                                             },
                                         );
                                         emit_progress(
@@ -487,6 +509,7 @@ impl WorkerManager {
                                                 sidecar_path: "",
                                                 source_deleted: 0,
                                                 ffmpeg_command: &output.command,
+                                                performance_metrics: "",
                                             },
                                         );
                                         emit_progress(
@@ -578,6 +601,7 @@ impl WorkerManager {
                                                             sidecar_path: "",
                                                             source_deleted: 0,
                                                             ffmpeg_command: "",
+                                                            performance_metrics: "",
                                                         },
                                                     );
                                                     emit_progress(
@@ -612,6 +636,7 @@ impl WorkerManager {
                                                     sidecar_path: "",
                                                     source_deleted: 0,
                                                     ffmpeg_command: "",
+                                                    performance_metrics: "",
                                                 },
                                             );
                                             emit_progress(
@@ -695,6 +720,15 @@ impl WorkerManager {
                                     };
 
                                     // C2: Mark compression record as completed
+                                    let perf_json = serde_json::json!({
+                                        "max_fps": output.max_fps,
+                                        "avg_bitrate_kbps": output.avg_bitrate_kbps,
+                                        "smb_read_bytes_sec": output.smb_metrics.as_ref().map_or(0.0, |m| m.read_bytes_per_sec),
+                                        "smb_write_bytes_sec": output.smb_metrics.as_ref().map_or(0.0, |m| m.write_bytes_per_sec),
+                                        "smb_avg_bytes_per_request": output.smb_metrics.as_ref().map_or(0.0, |m| m.avg_data_bytes_per_request),
+                                        "smb_avg_queue_length": output.smb_metrics.as_ref().map_or(0.0, |m| m.avg_data_queue_length),
+                                    })
+                                    .to_string();
                                     finish_record(
                                         &store,
                                         FinishCompressionParams {
@@ -707,6 +741,7 @@ impl WorkerManager {
                                             sidecar_path: &sidecar_path,
                                             source_deleted: source_deleted_flag,
                                             ffmpeg_command: &output.command,
+                                            performance_metrics: &perf_json,
                                         },
                                     );
                                     emit_progress(
@@ -753,6 +788,7 @@ impl WorkerManager {
                                             sidecar_path: "",
                                             source_deleted: 0,
                                             ffmpeg_command: &e,
+                                            performance_metrics: "",
                                         },
                                     );
                                     emit_progress(
@@ -1101,6 +1137,21 @@ fn sync_output_snapshot(
 
     if let Err(e) = store.upsert(&[snap]) {
         eprintln!("保存输出快照失败: {}", e);
+    }
+}
+
+/// Extract the `\\server\share` UNC prefix from a full UNC path.
+/// Returns `None` for non-UNC (local) paths.
+fn extract_share_unc(path_str: &str) -> Option<String> {
+    let s = path_str.replace('\\', "/");
+    if !s.starts_with("//") {
+        return None;
+    }
+    let parts: Vec<&str> = s.trim_start_matches('/').splitn(3, '/').collect();
+    if parts.len() >= 2 {
+        Some(format!("\\\\{}\\{}", parts[0], parts[1]))
+    } else {
+        None
     }
 }
 

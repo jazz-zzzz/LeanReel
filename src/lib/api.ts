@@ -190,6 +190,7 @@ export interface HistoryEntry {
     started_at: string;
     source_deleted: boolean;
     error_message: string;
+    performance_metrics: string;
 }
 
 export async function getHistory(): Promise<HistoryEntry[]> {

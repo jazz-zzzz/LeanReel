@@ -434,4 +434,6 @@ pub struct HistoryEntry {
     pub source_deleted: bool,
     #[serde(default)]
     pub error_message: String,
+    #[serde(default)]
+    pub performance_metrics: String,
 }

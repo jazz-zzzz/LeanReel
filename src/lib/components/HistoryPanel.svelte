@@ -103,6 +103,33 @@
     return m[e] || e;
   }
 
+  interface PerfMetrics {
+    max_fps?: number;
+    avg_bitrate_kbps?: number;
+    smb_read_bytes_sec?: number;
+    smb_write_bytes_sec?: number;
+    smb_avg_bytes_per_request?: number;
+    smb_avg_queue_length?: number;
+  }
+
+  function parsePerf(json: string): PerfMetrics | null {
+    if (!json) return null;
+    try { return JSON.parse(json); } catch { return null; }
+  }
+
+  function fmtBytesSec(b: number | undefined): string {
+    if (!b) return '—';
+    if (b > 1e9) return (b/1e9).toFixed(1) + ' GB/s';
+    if (b > 1e6) return (b/1e6).toFixed(1) + ' MB/s';
+    if (b > 1e3) return (b/1e3).toFixed(0) + ' KB/s';
+    return b.toFixed(0) + ' B/s';
+  }
+
+  function fmtNum(v: number | undefined, unit: string): string {
+    if (v == null) return '—';
+    return v.toFixed(0) + unit;
+  }
+
   function closePanel() { showHistory.set(false); }
 
   async function cancelAllTasks() {
@@ -179,10 +206,17 @@
               <th class="sortable" class:active={sortKey === 'started_at'} onclick={() => toggleSort('started_at')}>开始时间{sortArrow('started_at')}</th>
               <th class="sortable" class:active={sortKey === 'completed_at'} onclick={() => toggleSort('completed_at')}>完成时间{sortArrow('completed_at')}</th>
               <th class="sortable mono-col" class:active={sortKey === 'source_deleted'} onclick={() => toggleSort('source_deleted')}>源已删{sortArrow('source_deleted')}</th>
+              <th class="mono-col">FPS</th>
+              <th class="mono-col">码率</th>
+              <th class="mono-col">SMB读</th>
+              <th class="mono-col">SMB写</th>
+              <th class="mono-col">B/Req</th>
+              <th class="mono-col">队列</th>
             </tr>
           </thead>
           <tbody>
             {#each sorted as rec, i (rec.id)}
+              {@const p = parsePerf(rec.performance_metrics)}
               <tr class:alt={i % 2 === 1}>
                 <td class="col-status">
                   {#if rec.status === 'failed' && rec.error_message}
@@ -221,6 +255,12 @@
                 <td class="col-time">{rec.started_at ? rec.started_at.replace('T', ' ').substring(0, 16) : '—'}</td>
                 <td class="col-time">{rec.completed_at ? rec.completed_at.replace('T', ' ').substring(0, 16) : '—'}</td>
                 <td class="mono-col">{rec.source_deleted ? '已删' : '—'}</td>
+                <td class="mono-col">{p?.max_fps ? p.max_fps.toFixed(0) : '—'}</td>
+                <td class="mono-col">{p?.avg_bitrate_kbps ? (p.avg_bitrate_kbps > 999 ? (p.avg_bitrate_kbps/1000).toFixed(1)+'M' : p.avg_bitrate_kbps+'k') : '—'}</td>
+                <td class="mono-col">{fmtBytesSec(p?.smb_read_bytes_sec)}</td>
+                <td class="mono-col">{fmtBytesSec(p?.smb_write_bytes_sec)}</td>
+                <td class="mono-col">{fmtNum(p?.smb_avg_bytes_per_request, '')}</td>
+                <td class="mono-col">{p?.smb_avg_queue_length != null ? p.smb_avg_queue_length.toFixed(1) : '—'}</td>
               </tr>
             {/each}
           </tbody>

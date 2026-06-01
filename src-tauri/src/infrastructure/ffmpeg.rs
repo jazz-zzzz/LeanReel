@@ -119,13 +119,12 @@ impl FfmpegRunner {
         }
     }
 
-    fn emit_progress_line(
-        line: &str,
-        duration_seconds: f64,
-        on_progress: &(dyn Fn(ProgressEvent) + Send + Sync),
-    ) {
+    /// Parse a single FFmpeg stderr progress line. Returns `None` if the line
+    /// doesn't contain a `time=` marker; otherwise returns the extracted
+    /// (percent, fps, bitrate_kbps) triple.
+    fn parse_progress_line(line: &str, duration_seconds: f64) -> Option<(f32, f32, u32)> {
         if !line.contains("time=") {
-            return;
+            return None;
         }
         eprintln!("PROGRESS_LINE dur={}: {}", duration_seconds, line);
         let percent = line
@@ -144,7 +143,7 @@ impl FfmpegRunner {
                     ((hours * 3600.0 + minutes * 60.0 + seconds) / duration_seconds).min(0.98)
                         as f32
                 } else {
-                    0.5 // unknown duration — show indeterminate
+                    0.5
                 };
                 Some(pct)
             })
@@ -162,11 +161,7 @@ impl FfmpegRunner {
             .and_then(|value| value.trim_end_matches("kbits/s").parse::<f32>().ok())
             .map(|value| value as u32)
             .unwrap_or(0);
-        on_progress(ProgressEvent::StageProgress {
-            percent,
-            fps,
-            bitrate_kbps,
-        });
+        Some((percent, fps, bitrate_kbps))
     }
 
     fn run_inner(
@@ -214,12 +209,30 @@ impl FfmpegRunner {
         let child = self.track_child(job.id.clone(), child)?;
         let mut err_tail = VecDeque::with_capacity(5);
         let mut line_count = 0u64;
+        let mut max_fps: f32 = 0.0;
+        let mut bitrate_sum: u64 = 0;
+        let mut bitrate_samples: u64 = 0;
         read_stderr_records(BufReader::new(stderr), |line| {
             line_count += 1;
             if line_count <= 5 {
                 eprintln!("STDERR[{}]: {}", line_count, &line[..line.len().min(120)]);
             }
-            Self::emit_progress_line(line, job.snapshot.duration_seconds, on_progress);
+            if let Some((percent, fps, bitrate_kbps)) =
+                Self::parse_progress_line(line, job.snapshot.duration_seconds)
+            {
+                if fps > max_fps {
+                    max_fps = fps;
+                }
+                if bitrate_kbps > 0 {
+                    bitrate_sum += bitrate_kbps as u64;
+                    bitrate_samples += 1;
+                }
+                on_progress(ProgressEvent::StageProgress {
+                    percent,
+                    fps,
+                    bitrate_kbps,
+                });
+            }
             if err_tail.len() == 5 {
                 err_tail.pop_front();
             }
@@ -250,12 +263,20 @@ impl FfmpegRunner {
         let compressed_size = std::fs::metadata(&job.output_path)
             .map(|m| m.len())
             .unwrap_or(0);
+        let avg_bitrate_kbps = if bitrate_samples > 0 {
+            (bitrate_sum / bitrate_samples) as u32
+        } else {
+            0
+        };
         Ok(EncodeOutput {
             output_path: job.output_path.clone(),
             original_size,
             compressed_size,
             duration_ms,
             command: ffmpeg_command.clone(),
+            max_fps,
+            avg_bitrate_kbps,
+            smb_metrics: None, // populated by the worker after SMB sampling
         })
     }
 

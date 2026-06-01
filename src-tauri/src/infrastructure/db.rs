@@ -295,6 +295,7 @@ impl SqliteSnapshotStore {
          COALESCE(ch.started_at, ''), \
          COALESCE(ch.source_deleted, 0), \
          COALESCE(ch.error_message, ''), \
+         COALESCE(ch.performance_metrics, ''), \
          COALESCE(l.name, ch.source_library_name, ''), \
          COALESCE(lf.path, ch.source_folder_path, '') \
          FROM compression_history ch \
@@ -330,6 +331,7 @@ impl SqliteSnapshotStore {
                     started_at: row.get(21)?,
                     source_deleted: row.get::<_, i32>(22)? != 0,
                     error_message: row.get(23)?,
+                    performance_metrics: row.get(24)?,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -374,7 +376,8 @@ impl SqliteSnapshotStore {
          COALESCE(stage, ''), \
          COALESCE(started_at, ''), \
          COALESCE(source_deleted, 0), \
-         COALESCE(error_message, '') \
+         COALESCE(error_message, ''), \
+         COALESCE(performance_metrics, '') \
          FROM compression_history ORDER BY COALESCE(completed_at, created_at) DESC",
             )
             .map_err(|e| e.to_string())?;
@@ -406,6 +409,7 @@ impl SqliteSnapshotStore {
                     started_at: row.get(21)?,
                     source_deleted: row.get::<_, i32>(22)? != 0,
                     error_message: row.get(23)?,
+                    performance_metrics: row.get(24)?,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -668,6 +672,7 @@ impl SqliteSnapshotStore {
                 audio_mode TEXT DEFAULT '',
                 sub_mode TEXT DEFAULT '',
                 ffmpeg_command TEXT DEFAULT '',
+                performance_metrics TEXT DEFAULT '',
                 sidecar_path TEXT DEFAULT '',
                 leanreel_version TEXT DEFAULT '',
                 source_deleted INTEGER DEFAULT 0,
@@ -731,6 +736,7 @@ impl SqliteSnapshotStore {
             "ALTER TABLE compression_history ADD COLUMN source_folder_path TEXT DEFAULT ''",
             "ALTER TABLE compression_history ADD COLUMN source_relative_path TEXT DEFAULT ''",
             "ALTER TABLE compression_history ADD COLUMN source_file_name TEXT DEFAULT ''",
+            "ALTER TABLE compression_history ADD COLUMN performance_metrics TEXT DEFAULT ''",
         ];
         for sql in migrations {
             // SQLite has no IF NOT EXISTS for ALTER TABLE — ignore "duplicate column" errors
@@ -870,6 +876,7 @@ impl SnapshotStore for SqliteSnapshotStore {
             sidecar_path,
             source_deleted,
             ffmpeg_command,
+            performance_metrics,
         } = params;
         let orig: i64 = self
             .conn
@@ -885,8 +892,8 @@ impl SnapshotStore for SqliteSnapshotStore {
             0.0
         };
         self.conn.execute(
-            "UPDATE compression_history SET status=?1, progress=?2, duration_seconds=?3, compressed_size=?4, output_size_bytes=?4, savings_pct=?5, error_message=?6, sidecar_path=?7, source_deleted=?8, ffmpeg_command=?9, completed_at=datetime('now','localtime'), updated_at=datetime('now','localtime') WHERE id=?10",
-            params![status, progress, duration_seconds, compressed_size, pct, error_message, sidecar_path, source_deleted, ffmpeg_command, record_id],
+            "UPDATE compression_history SET status=?1, progress=?2, duration_seconds=?3, compressed_size=?4, output_size_bytes=?4, savings_pct=?5, error_message=?6, sidecar_path=?7, source_deleted=?8, ffmpeg_command=?9, performance_metrics=?10, completed_at=datetime('now','localtime'), updated_at=datetime('now','localtime') WHERE id=?11",
+            params![status, progress, duration_seconds, compressed_size, pct, error_message, sidecar_path, source_deleted, ffmpeg_command, performance_metrics, record_id],
         ).map_err(|e| e.to_string())?;
         Ok(())
     }
