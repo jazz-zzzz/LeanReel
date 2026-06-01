@@ -48,17 +48,30 @@ pub fn read_audit_sidecar(sidecar_path: &Path) -> Result<AuditRecord, String> {
 /// H-029: Added 10+ missing fields: source_pix_fmt, source_frame_rate,
 /// source_color_primaries, source_color_transfer, source_color_space,
 /// platform, adaptive_cq_original, adaptive_cq_adjusted, adaptive_cq_reason.
-pub fn build_audit(
-    snapshot: &FileSnapshot,
-    output_path: &Path,
-    output_size: u64,
-    output_codec: &str,
-    strategy: &Strategy,
-    duration_ms: u64,
-    success: bool,
-    error: &str,
-    ffmpeg_command: &str,
-) -> CompressionAudit {
+pub struct BuildAuditParams<'a> {
+    pub snapshot: &'a FileSnapshot,
+    pub output_path: &'a Path,
+    pub output_size: u64,
+    pub output_codec: &'a str,
+    pub strategy: &'a Strategy,
+    pub duration_ms: u64,
+    pub success: bool,
+    pub error: &'a str,
+    pub ffmpeg_command: &'a str,
+}
+
+pub fn build_audit(params: BuildAuditParams<'_>) -> CompressionAudit {
+    let BuildAuditParams {
+        snapshot,
+        output_path,
+        output_size,
+        output_codec,
+        strategy,
+        duration_ms,
+        success,
+        error,
+        ffmpeg_command,
+    } = params;
     let source_size = snapshot.size_bytes as u64;
 
     let savings_pct = if source_size > 0 {

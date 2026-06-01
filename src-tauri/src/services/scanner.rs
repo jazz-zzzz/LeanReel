@@ -9,6 +9,8 @@ use std::sync::{
     Arc,
 };
 
+type ResultCallback = Box<dyn Fn(&FileSnapshot) + Send>;
+
 pub struct Scanner {
     prober: Box<dyn MediaProber + Send>,
     store: Box<dyn SnapshotStore + Send>,
@@ -18,7 +20,7 @@ pub struct Scanner {
     pub on_progress: Option<Box<dyn Fn(usize, usize) + Send>>,
     /// Optional per-file result callback — called for each file (cached or newly probed).
     /// Mirrors Python's `on_result` callback in `ProbeBatch`.
-    pub on_result: Option<Box<dyn Fn(&FileSnapshot) + Send>>,
+    pub on_result: Option<ResultCallback>,
 }
 
 impl Scanner {
@@ -118,19 +120,18 @@ impl Scanner {
                         .unwrap_or(0.0);
                     if cached_snap.size_bytes == size
                         && (cached_snap.file_mtime - mtime).abs() < 0.01
+                        && cached_snap.probe_complete()
                     {
-                        if cached_snap.probe_complete() {
-                            // File unchanged and previously probed successfully — skip probing
-                            // H-004: Fire per-file result callback for cached files
-                            probed_count += 1;
-                            if let Some(ref cb) = self.on_progress {
-                                cb(probed_count, total);
-                            }
-                            if let Some(ref cb) = self.on_result {
-                                cb(cached_snap);
-                            }
-                            continue;
+                        // File unchanged and previously probed successfully — skip probing
+                        // H-004: Fire per-file result callback for cached files
+                        probed_count += 1;
+                        if let Some(ref cb) = self.on_progress {
+                            cb(probed_count, total);
                         }
+                        if let Some(ref cb) = self.on_result {
+                            cb(cached_snap);
+                        }
+                        continue;
                     }
                 }
             }

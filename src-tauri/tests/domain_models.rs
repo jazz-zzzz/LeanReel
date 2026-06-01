@@ -131,8 +131,8 @@ fn test_strategy_deserialize_from_real_json() {
     assert_eq!(strategy.name, "AV1 NVENC CQ28");
     assert_eq!(strategy.video.encoder, "av1_nvenc");
     assert_eq!(strategy.video.cq, 28);
-    assert_eq!(strategy.video.gpu, true);
+    assert!(strategy.video.gpu);
     assert_eq!(strategy.hdr.mode, "preserve_hdr10");
-    assert_eq!(strategy.filters.skip_x265, true);
+    assert!(strategy.filters.skip_x265);
     assert!(strategy.filters.min_size_gb.is_none());
 }

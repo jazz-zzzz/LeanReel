@@ -1,11 +1,25 @@
 use crate::domain::models::*;
-use crate::domain::traits::SnapshotStore;
+use crate::domain::traits::{FinishCompressionParams, SnapshotStore};
 use rusqlite::OptionalExtension;
 use rusqlite::{params, Connection, Row};
 use std::path::Path;
 
 pub struct SqliteSnapshotStore {
     conn: Connection,
+}
+
+pub struct CreateCompressionRecordParams<'a> {
+    pub file_snapshot_id: i64,
+    pub batch_id: &'a str,
+    pub strategy_name: &'a str,
+    pub original_size: i64,
+    pub output_path: &'a str,
+    pub encoder: &'a str,
+    pub cq_value: i32,
+    pub preset: &'a str,
+    pub pix_fmt: &'a str,
+    pub audio_mode: &'a str,
+    pub sub_mode: &'a str,
 }
 
 /// Shared helper: map a rusqlite Row to a FileSnapshot.
@@ -145,18 +159,21 @@ impl SqliteSnapshotStore {
 
     pub fn create_compression_record(
         &self,
-        file_snapshot_id: i64,
-        batch_id: &str,
-        strategy_name: &str,
-        original_size: i64,
-        output_path: &str,
-        encoder: &str,
-        cq_value: i32,
-        preset: &str,
-        pix_fmt: &str,
-        audio_mode: &str,
-        sub_mode: &str,
+        params: CreateCompressionRecordParams<'_>,
     ) -> Result<i64, String> {
+        let CreateCompressionRecordParams {
+            file_snapshot_id,
+            batch_id,
+            strategy_name,
+            original_size,
+            output_path,
+            encoder,
+            cq_value,
+            preset,
+            pix_fmt,
+            audio_mode,
+            sub_mode,
+        } = params;
         self.conn.execute(
         "INSERT INTO compression_history (file_snapshot_id, batch_id, strategy_name, original_size, output_path, status, progress, stage, encoder, cq_value, preset, pix_fmt, audio_mode, sub_mode, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, 'pending', 0, '', ?6, ?7, ?8, ?9, ?10, ?11, datetime('now','localtime'))",
         params![file_snapshot_id, batch_id, strategy_name, original_size, output_path, encoder, cq_value, preset, pix_fmt, audio_mode, sub_mode],
@@ -220,7 +237,7 @@ impl SqliteSnapshotStore {
                     "running" => running += 1,
                     _ => pending_count += 1,
                 }
-                progress_sum += p.max(0.0).min(100.0);
+                progress_sum += p.clamp(0.0, 100.0);
                 Ok(())
             })
             .map_err(|e| e.to_string())?;
@@ -540,10 +557,15 @@ impl SqliteSnapshotStore {
         path: &Path,
     ) -> Result<Option<FileSnapshot>, String> {
         let relative = path.to_string_lossy().replace('\\', "/");
-        eprintln!("DB_LOOKUP: searching for path='{}' folder_id={}", relative, folder_id);
+        eprintln!(
+            "DB_LOOKUP: searching for path='{}' folder_id={}",
+            relative, folder_id
+        );
         let fields = "SELECT id, library_folder_id, relative_path, file_name, size_bytes, video_codec, video_width, video_height, hdr_type, audio_tracks, subtitle_tracks, duration_seconds, bitrate_bps, file_mtime, probe_ok, probe_error, scanned_at, pix_fmt, frame_rate, color_primaries, color_transfer, color_space FROM file_snapshot";
         let sql = if folder_id > 0 {
-            format!("{fields} WHERE library_folder_id = ?1 AND REPLACE(relative_path, '\\', '/') = ?2")
+            format!(
+                "{fields} WHERE library_folder_id = ?1 AND REPLACE(relative_path, '\\', '/') = ?2"
+            )
         } else {
             format!("{fields} WHERE REPLACE(relative_path, '\\', '/') = ?1 LIMIT 1")
         };
@@ -552,22 +574,24 @@ impl SqliteSnapshotStore {
         } else {
             &[&relative]
         };
-        let result = self.conn
+        let result = self
+            .conn
             .query_row(&sql, params, row_to_snapshot)
             .optional();
         if !matches!(result, Ok(Some(_))) {
             // Debug: list similar paths in DB
-            let mut stmt = self.conn.prepare("SELECT relative_path FROM file_snapshot WHERE relative_path LIKE '%' || ?1 || '%' LIMIT 5").ok();
+            let stmt = self.conn.prepare("SELECT relative_path FROM file_snapshot WHERE relative_path LIKE '%' || ?1 || '%' LIMIT 5").ok();
             if let Some(mut s) = stmt {
                 let needle = relative.rsplit('/').next().unwrap_or(&relative);
                 if let Ok(rows) = s.query_map(params![needle], |row| row.get::<_, String>(0)) {
                     eprintln!("DB_LOOKUP: similar paths in DB:");
-                    for r in rows.flatten() { eprintln!("  '{}'", r); }
+                    for r in rows.flatten() {
+                        eprintln!("  '{}'", r);
+                    }
                 }
             }
         }
-        result
-            .map_err(|e| e.to_string())
+        result.map_err(|e| e.to_string())
     }
 
     pub fn open_readonly(path: &Path) -> Result<Self, String> {
@@ -834,18 +858,18 @@ impl SnapshotStore for SqliteSnapshotStore {
     }
 
     /// C2: Finalize a compression record on encode completion or failure.
-    fn finish_compression(
-        &self,
-        record_id: i64,
-        status: &str,
-        progress: f64,
-        duration_seconds: i64,
-        compressed_size: i64,
-        error_message: &str,
-        sidecar_path: &str,
-        source_deleted: i32,
-        ffmpeg_command: &str,
-    ) -> Result<(), String> {
+    fn finish_compression(&self, params: FinishCompressionParams<'_>) -> Result<(), String> {
+        let FinishCompressionParams {
+            record_id,
+            status,
+            progress,
+            duration_seconds,
+            compressed_size,
+            error_message,
+            sidecar_path,
+            source_deleted,
+            ffmpeg_command,
+        } = params;
         let orig: i64 = self
             .conn
             .query_row(

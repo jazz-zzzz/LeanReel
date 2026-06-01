@@ -1,6 +1,9 @@
 use crate::domain::models::{FileSnapshot, Strategy, TaskStatus};
-use crate::domain::traits::{Encoder, EncodingJob, MediaProber, ProgressEvent, SnapshotStore};
+use crate::domain::traits::{
+    Encoder, EncodingJob, FinishCompressionParams, MediaProber, ProgressEvent, SnapshotStore,
+};
 use crate::services::pipeline::{atomic_commit, cleanup_temp, temp_output_path, PipelinePlan};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
@@ -52,7 +55,7 @@ pub type ProgressEmitter = Box<dyn Fn(&str, &str, f64, &str) + Send + Sync + 'st
 pub type Job = Box<dyn FnOnce() + Send + 'static>;
 
 enum WorkerCommand {
-    Submit(WorkerTask, usize),
+    Submit(Box<WorkerTask>, usize),
     Shutdown,
 }
 
@@ -76,6 +79,7 @@ pub struct WorkerManager {
     paused: Arc<AtomicBool>,
     cancelled: Arc<AtomicBool>,
     cancel_generation: Arc<AtomicUsize>,
+    cancelled_jobs: Arc<Mutex<HashSet<String>>>,
     executor: Arc<Mutex<Option<Arc<dyn Encoder + Send + Sync>>>>,
     /// Optional probe runner for post-encode file_snapshot sync (H-020)
     prober: Arc<Mutex<Option<Box<dyn MediaProber + Send>>>>,
@@ -98,12 +102,32 @@ pub struct WorkerManager {
     gpu_token_rx: Arc<Mutex<mpsc::Receiver<()>>>,
 }
 
+fn is_task_cancelled(
+    cancel_generation: &AtomicUsize,
+    task_generation: usize,
+    cancelled_jobs: &Mutex<HashSet<String>>,
+    job_id: &str,
+) -> bool {
+    cancel_generation.load(Ordering::Relaxed) != task_generation
+        || cancelled_jobs
+            .lock()
+            .map(|jobs| jobs.contains(job_id))
+            .unwrap_or(false)
+}
+
+fn clear_cancelled_task(cancelled_jobs: &Mutex<HashSet<String>>, job_id: &str) {
+    if let Ok(mut jobs) = cancelled_jobs.lock() {
+        jobs.remove(job_id);
+    }
+}
+
 impl WorkerManager {
     pub fn new(max_workers: usize) -> Self {
         let max = if max_workers == 0 { 2 } else { max_workers };
         let paused = Arc::new(AtomicBool::new(false));
         let cancelled = Arc::new(AtomicBool::new(false));
         let cancel_generation = Arc::new(AtomicUsize::new(0));
+        let cancelled_jobs = Arc::new(Mutex::new(HashSet::new()));
         let last_progress = Arc::new(Mutex::new(0.0f32));
         let executor: Arc<Mutex<Option<Arc<dyn Encoder + Send + Sync>>>> =
             Arc::new(Mutex::new(None));
@@ -130,6 +154,7 @@ impl WorkerManager {
             let rx = rx.clone();
             let paused = paused.clone();
             let cancel_generation = cancel_generation.clone();
+            let cancelled_jobs = cancelled_jobs.clone();
             let last_progress = last_progress.clone();
             let executor = executor.clone();
             let prober = prober.clone();
@@ -148,495 +173,590 @@ impl WorkerManager {
                 };
                 match cmd {
                     Ok(WorkerCommand::Submit(task, task_generation)) => {
-                        if cancel_generation.load(Ordering::Relaxed) != task_generation {
+                        if is_task_cancelled(
+                            &cancel_generation,
+                            task_generation,
+                            &cancelled_jobs,
+                            &task.id,
+                        ) {
                             finish_record(
                                 &store,
-                                task.history_id,
-                                "cancelled",
-                                0.0,
-                                0,
-                                0,
-                                "",
-                                "",
-                                0,
-                                "",
+                                FinishCompressionParams {
+                                    record_id: task.history_id,
+                                    status: "cancelled",
+                                    progress: 0.0,
+                                    duration_seconds: 0,
+                                    compressed_size: 0,
+                                    error_message: "",
+                                    sidecar_path: "",
+                                    source_deleted: 0,
+                                    ffmpeg_command: "",
+                                },
                             );
                             emit_progress(&progress_emitter, &task.id, "done", 100.0, "cancelled");
+                            clear_cancelled_task(&cancelled_jobs, &task.id);
                             continue;
                         }
                         while paused.load(Ordering::Relaxed)
-                            && cancel_generation.load(Ordering::Relaxed) == task_generation
+                            && !is_task_cancelled(
+                                &cancel_generation,
+                                task_generation,
+                                &cancelled_jobs,
+                                &task.id,
+                            )
                         {
                             thread::sleep(Duration::from_millis(100));
                         }
-                        if cancel_generation.load(Ordering::Relaxed) != task_generation {
+                        if is_task_cancelled(
+                            &cancel_generation,
+                            task_generation,
+                            &cancelled_jobs,
+                            &task.id,
+                        ) {
                             finish_record(
                                 &store,
-                                task.history_id,
-                                "cancelled",
-                                0.0,
-                                0,
-                                0,
-                                "",
-                                "",
-                                0,
-                                "",
+                                FinishCompressionParams {
+                                    record_id: task.history_id,
+                                    status: "cancelled",
+                                    progress: 0.0,
+                                    duration_seconds: 0,
+                                    compressed_size: 0,
+                                    error_message: "",
+                                    sidecar_path: "",
+                                    source_deleted: 0,
+                                    ffmpeg_command: "",
+                                },
                             );
                             emit_progress(&progress_emitter, &task.id, "done", 100.0, "cancelled");
+                            clear_cancelled_task(&cancelled_jobs, &task.id);
                             continue;
                         }
-                        let enc = { executor.lock().ok().and_then(|g| g.as_ref().map(|e| Arc::clone(e))) };
-                            if let Some(enc) = enc {
-                                let final_output = task.output_path.clone();
-                                let temp_output = temp_output_path(&final_output);
+                        let enc = {
+                            executor
+                                .lock()
+                                .ok()
+                                .and_then(|g| g.as_ref().map(Arc::clone))
+                        };
+                        if let Some(enc) = enc {
+                            let final_output = task.output_path.clone();
+                            let temp_output = temp_output_path(&final_output);
 
-                                let job = EncodingJob {
-                                    id: task.id.clone(),
-                                    input_path: task.input_path.clone(),
-                                    output_path: temp_output.clone(),
-                                    strategy: task.strategy.clone(),
-                                    has_dolby_vision: task.has_dolby_vision,
-                                    snapshot: task.snapshot.clone(),
-                                };
+                            let job = EncodingJob {
+                                id: task.id.clone(),
+                                input_path: task.input_path.clone(),
+                                output_path: temp_output.clone(),
+                                strategy: task.strategy.clone(),
+                                has_dolby_vision: task.has_dolby_vision,
+                                snapshot: task.snapshot.clone(),
+                            };
 
-                                // Build the multi-stage pipeline plan
-                                let plan = Arc::new(Mutex::new(PipelinePlan::build(&job)));
-                                let _num_stages = plan.lock().unwrap().len();
+                            // Build the multi-stage pipeline plan
+                            let plan = Arc::new(Mutex::new(PipelinePlan::build(&job)));
+                            let _num_stages = plan.lock().unwrap().len();
 
-                                // ── Stage 1: Prepare ─────────────────────────
-                                let prepare_idx = 0;
-                                plan.lock().unwrap().start_stage(prepare_idx);
-                                // C2: Update DB — preparing stage
-                                update_runtime(
+                            // ── Stage 1: Prepare ─────────────────────────
+                            let prepare_idx = 0;
+                            plan.lock().unwrap().start_stage(prepare_idx);
+                            // C2: Update DB — preparing stage
+                            update_runtime(&store, task.history_id, "running", 0.0, "preparing", 0);
+                            emit_progress(&progress_emitter, &task.id, "Prepare", 0.0, "running");
+                            // Prepare step: ensure parent directory exists
+                            if let Some(parent) = job.output_path.parent() {
+                                if let Err(e) = std::fs::create_dir_all(parent) {
+                                    plan.lock().unwrap().fail_stage(
+                                        prepare_idx,
+                                        format!("创建输出目录失败: {}", e),
+                                    );
+                                    plan.lock().unwrap().skip_remaining(prepare_idx + 1);
+                                    finish_record(
+                                        &store,
+                                        FinishCompressionParams {
+                                            record_id: task.history_id,
+                                            status: "failed",
+                                            progress: 0.0,
+                                            duration_seconds: 0,
+                                            compressed_size: 0,
+                                            error_message: &format!("创建输出目录失败: {}", e),
+                                            sidecar_path: "",
+                                            source_deleted: 0,
+                                            ffmpeg_command: "",
+                                        },
+                                    );
+                                    emit_progress(
+                                        &progress_emitter,
+                                        &task.id,
+                                        "done",
+                                        100.0,
+                                        "failed",
+                                    );
+                                    eprintln!("编码失败: {}", e);
+                                    cleanup_temp(&final_output);
+                                    continue;
+                                }
+                            }
+                            plan.lock().unwrap().complete_stage(prepare_idx);
+
+                            let transcode_idx = 1;
+
+                            // ── Stage 3: Transcode ───────────────────────
+                            plan.lock().unwrap().start_stage(transcode_idx);
+                            // C2: Update DB — transcoding stage start
+                            update_runtime(
+                                &store,
+                                task.history_id,
+                                "running",
+                                0.0,
+                                "transcoding",
+                                0,
+                            );
+                            emit_progress(&progress_emitter, &task.id, "Transcode", 0.0, "running");
+                            let plan_for_callback = plan.clone();
+                            let store_for_progress = store.clone();
+                            let history_id = task.history_id;
+                            let progress_emitter_for_cb = progress_emitter.clone();
+                            let job_id_for_cb = task.id.clone();
+                            // Acquire a GPU encode slot before spawning FFmpeg.
+                            // Consumer NVENC drivers cap concurrent sessions at 3;
+                            // CPU encodes skip the semaphore.
+                            let _gpu_token: Option<GpuToken> = if task.strategy.video.is_gpu() {
+                                match gpu_token_rx.lock().unwrap().recv() {
+                                    Ok(()) => Some(GpuToken {
+                                        sender: (*gpu_token_tx).clone(),
+                                    }),
+                                    Err(_) => None,
+                                }
+                            } else {
+                                None
+                            };
+                            if is_task_cancelled(
+                                &cancel_generation,
+                                task_generation,
+                                &cancelled_jobs,
+                                &task.id,
+                            ) {
+                                finish_record(
                                     &store,
-                                    task.history_id,
-                                    "running",
-                                    0.0,
-                                    "preparing",
-                                    0,
+                                    FinishCompressionParams {
+                                        record_id: task.history_id,
+                                        status: "cancelled",
+                                        progress: 0.0,
+                                        duration_seconds: 0,
+                                        compressed_size: 0,
+                                        error_message: "",
+                                        sidecar_path: "",
+                                        source_deleted: 0,
+                                        ffmpeg_command: "",
+                                    },
                                 );
                                 emit_progress(
                                     &progress_emitter,
                                     &task.id,
-                                    "Prepare",
-                                    0.0,
-                                    "running",
+                                    "done",
+                                    100.0,
+                                    "cancelled",
                                 );
-                                // Prepare step: ensure parent directory exists
-                                if let Some(parent) = job.output_path.parent() {
-                                    if let Err(e) = std::fs::create_dir_all(parent) {
-                                        plan.lock().unwrap().fail_stage(
-                                            prepare_idx,
-                                            format!("创建输出目录失败: {}", e),
+                                clear_cancelled_task(&cancelled_jobs, &task.id);
+                                cleanup_temp(&final_output);
+                                continue;
+                            }
+                            let result = enc.run(&job, &|event| {
+                                match &event {
+                                    ProgressEvent::StageStart { .. } => {}
+                                    ProgressEvent::StageProgress { percent, .. } => {
+                                        plan_for_callback
+                                            .lock()
+                                            .unwrap()
+                                            .set_stage_progress(transcode_idx, *percent);
+                                        if let Ok(mut lp) = last_progress.lock() {
+                                            *lp = *percent;
+                                        }
+                                        // C2: Update DB progress periodically
+                                        update_runtime(
+                                            &store_for_progress,
+                                            history_id,
+                                            "running",
+                                            *percent as f64,
+                                            "transcoding",
+                                            0,
                                         );
-                                        plan.lock().unwrap().skip_remaining(prepare_idx + 1);
+                                        // H-004: Fire external progress callback
+                                        if let Ok(cb_guard) = on_encode_progress.lock() {
+                                            if let Some(ref cb) = *cb_guard {
+                                                cb(ProgressEvent::StageProgress {
+                                                    percent: *percent,
+                                                    fps: 0.0,
+                                                    bitrate_kbps: 0,
+                                                });
+                                            }
+                                        }
+                                        // Task 4: Emit encode-progress event to frontend
+                                        emit_progress(
+                                            &progress_emitter_for_cb,
+                                            &job_id_for_cb,
+                                            "Transcode",
+                                            *percent as f64 * 100.0,
+                                            "running",
+                                        );
+                                    }
+                                    ProgressEvent::StageComplete { .. } => {}
+                                    ProgressEvent::Done { .. } => {}
+                                    ProgressEvent::Warning { message } => {
+                                        eprintln!("编码警告: {}", message);
+                                    }
+                                }
+                            });
+
+                            match result {
+                                Ok(output) => {
+                                    if is_task_cancelled(
+                                        &cancel_generation,
+                                        task_generation,
+                                        &cancelled_jobs,
+                                        &task.id,
+                                    ) {
+                                        let _ = std::fs::remove_file(&output.output_path);
                                         finish_record(
                                             &store,
-                                            task.history_id,
-                                            "failed",
-                                            0.0,
-                                            0,
-                                            0,
-                                            &format!("创建输出目录失败: {}", e),
-                                            "",
-                                            0,
-                                            "",
+                                            FinishCompressionParams {
+                                                record_id: task.history_id,
+                                                status: "cancelled",
+                                                progress: 0.0,
+                                                duration_seconds: 0,
+                                                compressed_size: 0,
+                                                error_message: "",
+                                                sidecar_path: "",
+                                                source_deleted: 0,
+                                                ffmpeg_command: "",
+                                            },
                                         );
                                         emit_progress(
                                             &progress_emitter,
                                             &task.id,
                                             "done",
                                             100.0,
-                                            "failed",
+                                            "cancelled",
                                         );
-                                        eprintln!("编码失败: {}", e);
+                                        clear_cancelled_task(&cancelled_jobs, &task.id);
                                         cleanup_temp(&final_output);
                                         continue;
                                     }
-                                }
-                                plan.lock().unwrap().complete_stage(prepare_idx);
-
-                                let transcode_idx = 1;
-
-                                // ── Stage 3: Transcode ───────────────────────
-                                plan.lock().unwrap().start_stage(transcode_idx);
-                                // C2: Update DB — transcoding stage start
-                                update_runtime(
-                                    &store,
-                                    task.history_id,
-                                    "running",
-                                    0.0,
-                                    "transcoding",
-                                    0,
-                                );
-                                emit_progress(
-                                    &progress_emitter,
-                                    &task.id,
-                                    "Transcode",
-                                    0.0,
-                                    "running",
-                                );
-                                let plan_for_callback = plan.clone();
-                                let store_for_progress = store.clone();
-                                let history_id = task.history_id;
-                                let progress_emitter_for_cb = progress_emitter.clone();
-                                let job_id_for_cb = task.id.clone();
-                                // Acquire a GPU encode slot before spawning FFmpeg.
-                                // Consumer NVENC drivers cap concurrent sessions at 3;
-                                // CPU encodes skip the semaphore.
-                                let _gpu_token: Option<GpuToken> = if task.strategy.video.is_gpu() {
-                                    match gpu_token_rx.lock().unwrap().recv() {
-                                        Ok(()) => Some(GpuToken { sender: (*gpu_token_tx).clone() }),
-                                        Err(_) => None,
+                                    // C19: Oversize guard — discard output when compressed >= original
+                                    if output.compressed_size >= output.original_size {
+                                        eprintln!(
+                                            "输出大于源文件，已丢弃: {} -> {} ({} -> {} bytes)",
+                                            task.input_path.display(),
+                                            output.output_path.display(),
+                                            output.original_size,
+                                            output.compressed_size,
+                                        );
+                                        let _ = std::fs::remove_file(&output.output_path);
+                                        eprintln!(
+                                            "超大输出文件已删除: {}",
+                                            output.output_path.display()
+                                        );
+                                        plan.lock()
+                                            .unwrap()
+                                            .fail_stage(transcode_idx, "输出大于源文件");
+                                        plan.lock().unwrap().skip_remaining(transcode_idx + 1);
+                                        // C2: Mark as discarded in DB
+                                        finish_record(
+                                            &store,
+                                            FinishCompressionParams {
+                                                record_id: task.history_id,
+                                                status: "discarded",
+                                                progress: 100.0,
+                                                duration_seconds: (output.duration_ms / 1000)
+                                                    as i64,
+                                                compressed_size: output.compressed_size as i64,
+                                                error_message: "",
+                                                sidecar_path: "",
+                                                source_deleted: 0,
+                                                ffmpeg_command: &output.command,
+                                            },
+                                        );
+                                        emit_progress(
+                                            &progress_emitter,
+                                            &task.id,
+                                            "done",
+                                            100.0,
+                                            "discarded",
+                                        );
+                                        cleanup_temp(&final_output);
+                                        continue;
                                     }
-                                } else {
-                                    None
-                                };
-                                let result = enc.run(&job, &|event| {
-                                    match &event {
-                                        ProgressEvent::StageStart { .. } => {}
-                                        ProgressEvent::StageProgress { percent, .. } => {
-                                            plan_for_callback
-                                                .lock()
-                                                .unwrap()
-                                                .set_stage_progress(transcode_idx, *percent);
-                                            if let Ok(mut lp) = last_progress.lock() {
-                                                *lp = *percent;
+                                    plan.lock().unwrap().complete_stage(transcode_idx);
+
+                                    let move_out_idx = 2;
+
+                                    // ── Stage 5: Move Out (atomic commit with retry) ─
+                                    let move_out_max_retries = {
+                                        plan.lock()
+                                            .unwrap()
+                                            .stages
+                                            .get(move_out_idx)
+                                            .map(|s| s.max_retries)
+                                            .unwrap_or(0)
+                                    };
+                                    plan.lock().unwrap().start_stage(move_out_idx);
+                                    // C2: Update DB — moving_out stage
+                                    update_runtime(
+                                        &store,
+                                        task.history_id,
+                                        "running",
+                                        0.0,
+                                        "moving_out",
+                                        0,
+                                    );
+                                    emit_progress(
+                                        &progress_emitter,
+                                        &task.id,
+                                        "MoveOut",
+                                        0.0,
+                                        "running",
+                                    );
+                                    let mut move_out_ok = false;
+                                    for attempt in 0..=move_out_max_retries {
+                                        if is_task_cancelled(
+                                            &cancel_generation,
+                                            task_generation,
+                                            &cancelled_jobs,
+                                            &task.id,
+                                        ) {
+                                            break;
+                                        }
+                                        if attempt > 0 {
+                                            std::thread::sleep(Duration::from_millis(300));
+                                            eprintln!("重试原子提交 (第 {} 次)", attempt);
+                                        }
+                                        match atomic_commit(&job.output_path, &final_output) {
+                                            Ok(()) => {
+                                                plan.lock().unwrap().complete_stage(move_out_idx);
+                                                move_out_ok = true;
+                                                break;
                                             }
-                                            // C2: Update DB progress periodically
-                                            update_runtime(
-                                                &store_for_progress,
-                                                history_id,
-                                                "running",
-                                                *percent as f64,
-                                                "transcoding",
-                                                0,
-                                            );
-                                            // H-004: Fire external progress callback
-                                            if let Ok(cb_guard) = on_encode_progress.lock() {
-                                                if let Some(ref cb) = *cb_guard {
-                                                    cb(ProgressEvent::StageProgress {
-                                                        percent: *percent,
-                                                        fps: 0.0,
-                                                        bitrate_kbps: 0,
-                                                    });
+                                            Err(e) => {
+                                                if attempt < move_out_max_retries {
+                                                    eprintln!("原子提交失败，将重试: {}", e);
+                                                } else {
+                                                    plan.lock().unwrap().fail_stage(
+                                                        move_out_idx,
+                                                        format!(
+                                                            "原子提交失败 (已重试{}次): {}",
+                                                            move_out_max_retries, e
+                                                        ),
+                                                    );
+                                                    plan.lock()
+                                                        .unwrap()
+                                                        .skip_remaining(move_out_idx + 1);
+                                                    finish_record(
+                                                        &store,
+                                                        FinishCompressionParams {
+                                                            record_id: task.history_id,
+                                                            status: "failed",
+                                                            progress: 0.0,
+                                                            duration_seconds: 0,
+                                                            compressed_size: 0,
+                                                            error_message: &format!(
+                                                                "原子提交失败 (已重试{}次): {}",
+                                                                move_out_max_retries, e
+                                                            ),
+                                                            sidecar_path: "",
+                                                            source_deleted: 0,
+                                                            ffmpeg_command: "",
+                                                        },
+                                                    );
+                                                    emit_progress(
+                                                        &progress_emitter,
+                                                        &task.id,
+                                                        "done",
+                                                        100.0,
+                                                        "failed",
+                                                    );
+                                                    cleanup_temp(&final_output);
+                                                    eprintln!("原子提交失败: {}", e);
                                                 }
                                             }
-                                            // Task 4: Emit encode-progress event to frontend
-                                            emit_progress(
-                                                &progress_emitter_for_cb,
-                                                &job_id_for_cb,
-                                                "Transcode",
-                                                *percent as f64 * 100.0,
-                                                "running",
-                                            );
-                                        }
-                                        ProgressEvent::StageComplete { .. } => {}
-                                        ProgressEvent::Done { .. } => {}
-                                        ProgressEvent::Warning { message } => {
-                                            eprintln!("编码警告: {}", message);
                                         }
                                     }
-                                });
-
-                                match result {
-                                    Ok(output) => {
-                                        // C19: Oversize guard — discard output when compressed >= original
-                                        if output.compressed_size >= output.original_size {
-                                            eprintln!(
-                                                "输出大于源文件，已丢弃: {} -> {} ({} -> {} bytes)",
-                                                task.input_path.display(),
-                                                output.output_path.display(),
-                                                output.original_size,
-                                                output.compressed_size,
-                                            );
-                                            let _ = std::fs::remove_file(&output.output_path);
-                                            eprintln!(
-                                                "超大输出文件已删除: {}",
-                                                output.output_path.display()
-                                            );
-                                            plan.lock()
-                                                .unwrap()
-                                                .fail_stage(transcode_idx, "输出大于源文件");
-                                            plan.lock().unwrap().skip_remaining(transcode_idx + 1);
-                                            // C2: Mark as discarded in DB
+                                    if !move_out_ok {
+                                        if is_task_cancelled(
+                                            &cancel_generation,
+                                            task_generation,
+                                            &cancelled_jobs,
+                                            &task.id,
+                                        ) {
                                             finish_record(
                                                 &store,
-                                                task.history_id,
-                                                "discarded",
-                                                100.0,
-                                                (output.duration_ms / 1000) as i64,
-                                                output.compressed_size as i64,
-                                                "",
-                                                "",
-                                                0,
-                                                &output.command,
+                                                FinishCompressionParams {
+                                                    record_id: task.history_id,
+                                                    status: "cancelled",
+                                                    progress: 0.0,
+                                                    duration_seconds: 0,
+                                                    compressed_size: 0,
+                                                    error_message: "",
+                                                    sidecar_path: "",
+                                                    source_deleted: 0,
+                                                    ffmpeg_command: "",
+                                                },
                                             );
                                             emit_progress(
                                                 &progress_emitter,
                                                 &task.id,
                                                 "done",
                                                 100.0,
-                                                "discarded",
+                                                "cancelled",
                                             );
                                             cleanup_temp(&final_output);
-                                            continue;
+                                            clear_cancelled_task(&cancelled_jobs, &task.id);
                                         }
-                                        plan.lock().unwrap().complete_stage(transcode_idx);
+                                        continue;
+                                    }
 
-                                        let move_out_idx = 2;
-
-                                        // ── Stage 5: Move Out (atomic commit with retry) ─
-                                        let move_out_max_retries = {
-                                            plan.lock()
-                                                .unwrap()
-                                                .stages
-                                                .get(move_out_idx)
-                                                .map(|s| s.max_retries)
-                                                .unwrap_or(0)
-                                        };
-                                        plan.lock().unwrap().start_stage(move_out_idx);
-                                        // C2: Update DB — moving_out stage
-                                        update_runtime(
-                                            &store,
-                                            task.history_id,
-                                            "running",
-                                            0.0,
-                                            "moving_out",
-                                            0,
-                                        );
-                                        emit_progress(
-                                            &progress_emitter,
-                                            &task.id,
-                                            "MoveOut",
-                                            0.0,
-                                            "running",
-                                        );
-                                        let mut move_out_ok = false;
-                                        for attempt in 0..=move_out_max_retries {
-                                            if cancel_generation.load(Ordering::Relaxed)
-                                                != task_generation
-                                            {
-                                                break;
-                                            }
-                                            if attempt > 0 {
-                                                std::thread::sleep(Duration::from_millis(300));
-                                                eprintln!("重试原子提交 (第 {} 次)", attempt);
-                                            }
-                                            match atomic_commit(&job.output_path, &final_output) {
-                                                Ok(()) => {
-                                                    plan.lock()
-                                                        .unwrap()
-                                                        .complete_stage(move_out_idx);
-                                                    move_out_ok = true;
-                                                    break;
-                                                }
-                                                Err(e) => {
-                                                    if attempt < move_out_max_retries {
-                                                        eprintln!("原子提交失败，将重试: {}", e);
-                                                    } else {
-                                                        plan.lock().unwrap().fail_stage(
-                                                            move_out_idx,
-                                                            format!(
-                                                                "原子提交失败 (已重试{}次): {}",
-                                                                move_out_max_retries, e
-                                                            ),
-                                                        );
-                                                        plan.lock()
-                                                            .unwrap()
-                                                            .skip_remaining(move_out_idx + 1);
-                                                        finish_record(
-                                                            &store,
-                                                            task.history_id,
-                                                            "failed",
-                                                            0.0,
-                                                            0,
-                                                            0,
-                                                            &format!(
-                                                                "原子提交失败 (已重试{}次): {}",
-                                                                move_out_max_retries, e
-                                                            ),
-                                                            "",
-                                                            0,
-                                                            "",
-                                                        );
-                                                        emit_progress(
-                                                            &progress_emitter,
-                                                            &task.id,
-                                                            "done",
-                                                            100.0,
-                                                            "failed",
-                                                        );
-                                                        cleanup_temp(&final_output);
-                                                        eprintln!("原子提交失败: {}", e);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        if !move_out_ok {
-                                            if cancel_generation.load(Ordering::Relaxed)
-                                                != task_generation
-                                            {
-                                                finish_record(
-                                                    &store,
-                                                    task.history_id,
-                                                    "cancelled",
-                                                    0.0,
-                                                    0,
-                                                    0,
-                                                    "",
-                                                    "",
-                                                    0,
-                                                    "",
-                                                );
-                                                emit_progress(
-                                                    &progress_emitter,
-                                                    &task.id,
-                                                    "done",
-                                                    100.0,
-                                                    "cancelled",
-                                                );
-                                                cleanup_temp(&final_output);
-                                            }
-                                            continue;
-                                        }
-
-                                        // Write audit sidecar on successful encode
-                                        let output_codec = &task.strategy.video.encoder;
-                                        let audit = crate::services::audit::build_audit(
-                                            &task.snapshot,
-                                            &final_output,
-                                            output.compressed_size,
+                                    // Write audit sidecar on successful encode
+                                    let output_codec = &task.strategy.video.encoder;
+                                    let audit = crate::services::audit::build_audit(
+                                        crate::services::audit::BuildAuditParams {
+                                            snapshot: &task.snapshot,
+                                            output_path: &final_output,
+                                            output_size: output.compressed_size,
                                             output_codec,
-                                            &task.strategy,
-                                            output.duration_ms,
-                                            true,
-                                            "",
-                                            &output.command,
-                                        );
-                                        let sidecar_path =
-                                            format!("{}.leanreel.json", final_output.display());
-                                        if let Err(e) = crate::services::audit::write_sidecar(
-                                            &final_output,
-                                            &audit,
-                                        ) {
-                                            eprintln!("写入审计文件失败: {}", e);
-                                        }
+                                            strategy: &task.strategy,
+                                            duration_ms: output.duration_ms,
+                                            success: true,
+                                            error: "",
+                                            ffmpeg_command: &output.command,
+                                        },
+                                    );
+                                    let sidecar_path =
+                                        format!("{}.leanreel.json", final_output.display());
+                                    if let Err(e) =
+                                        crate::services::audit::write_sidecar(&final_output, &audit)
+                                    {
+                                        eprintln!("写入审计文件失败: {}", e);
+                                    }
 
-                                        // ── H-020: Post-encode file_snapshot sync ──
-                                        // Re-probe the output file and insert/update file_snapshot
-                                        let library_folder_id = task.snapshot.library_folder_id;
-                                        sync_output_snapshot(
-                                            &prober,
-                                            &store,
-                                            library_folder_id,
-                                            &task.snapshot.relative_path,
-                                            &final_output,
-                                        );
+                                    // ── H-020: Post-encode file_snapshot sync ──
+                                    // Re-probe the output file and insert/update file_snapshot
+                                    let library_folder_id = task.snapshot.library_folder_id;
+                                    sync_output_snapshot(
+                                        &prober,
+                                        &store,
+                                        library_folder_id,
+                                        &task.snapshot.relative_path,
+                                        &final_output,
+                                    );
 
-                                        // ── H-021: Delete source file after successful encode ──
-                                        let source_deleted_flag: i32 = if task.delete_source {
-                                            match std::fs::remove_file(&task.input_path) {
-                                                Ok(()) => {
-                                                    eprintln!(
-                                                        "源文件已删除: {}",
-                                                        task.input_path.display()
-                                                    );
-                                                    // Mark as deleted in the DB store
-                                                    if let Ok(store_guard) = store.lock() {
-                                                        if let Some(ref s) = *store_guard {
-                                                            if let Err(e) = s.mark_deleted(
-                                                                task.snapshot.library_folder_id,
-                                                                Path::new(
-                                                                    &task.snapshot.relative_path,
-                                                                ),
-                                                            ) {
-                                                                eprintln!("DB 标记删除失败: {}", e);
-                                                            }
+                                    // ── H-021: Delete source file after successful encode ──
+                                    let source_deleted_flag: i32 = if task.delete_source {
+                                        match std::fs::remove_file(&task.input_path) {
+                                            Ok(()) => {
+                                                eprintln!(
+                                                    "源文件已删除: {}",
+                                                    task.input_path.display()
+                                                );
+                                                // Mark as deleted in the DB store
+                                                if let Ok(store_guard) = store.lock() {
+                                                    if let Some(ref s) = *store_guard {
+                                                        if let Err(e) = s.mark_deleted(
+                                                            task.snapshot.library_folder_id,
+                                                            Path::new(&task.snapshot.relative_path),
+                                                        ) {
+                                                            eprintln!("DB 标记删除失败: {}", e);
                                                         }
                                                     }
-                                                    1
                                                 }
-                                                Err(e) => {
-                                                    eprintln!(
-                                                        "删除源文件失败 ({}): {}",
-                                                        task.input_path.display(),
-                                                        e
-                                                    );
-                                                    0
-                                                }
+                                                1
                                             }
-                                        } else {
-                                            0
-                                        };
+                                            Err(e) => {
+                                                eprintln!(
+                                                    "删除源文件失败 ({}): {}",
+                                                    task.input_path.display(),
+                                                    e
+                                                );
+                                                0
+                                            }
+                                        }
+                                    } else {
+                                        0
+                                    };
 
-                                        // C2: Mark compression record as completed
-                                        finish_record(
-                                            &store,
-                                            task.history_id,
-                                            "completed",
-                                            100.0,
-                                            (output.duration_ms / 1000) as i64,
-                                            output.compressed_size as i64,
-                                            "",
-                                            &sidecar_path,
-                                            source_deleted_flag,
-                                            &output.command,
-                                        );
-                                        emit_progress(
-                                            &progress_emitter,
-                                            &task.id,
-                                            "done",
-                                            100.0,
-                                            "completed",
-                                        );
+                                    // C2: Mark compression record as completed
+                                    finish_record(
+                                        &store,
+                                        FinishCompressionParams {
+                                            record_id: task.history_id,
+                                            status: "completed",
+                                            progress: 100.0,
+                                            duration_seconds: (output.duration_ms / 1000) as i64,
+                                            compressed_size: output.compressed_size as i64,
+                                            error_message: "",
+                                            sidecar_path: &sidecar_path,
+                                            source_deleted: source_deleted_flag,
+                                            ffmpeg_command: &output.command,
+                                        },
+                                    );
+                                    emit_progress(
+                                        &progress_emitter,
+                                        &task.id,
+                                        "done",
+                                        100.0,
+                                        "completed",
+                                    );
 
-                                        eprintln!(
-                                            "编码完成: {} -> {} ({} -> {} bytes) [progress: {:.1}%]",
-                                            task.input_path.display(),
-                                            final_output.display(),
-                                            output.original_size,
-                                            output.compressed_size,
-                                            plan.lock().unwrap().overall_progress() * 100.0,
-                                        );
-                                    }
-                                    Err(e) => {
-                                        plan.lock().unwrap().fail_stage(transcode_idx, e.clone());
-                                        plan.lock().unwrap().skip_remaining(transcode_idx + 1);
-                                        let status = if cancel_generation.load(Ordering::Relaxed)
-                                            != task_generation
-                                        {
-                                            "cancelled"
-                                        } else {
-                                            "failed"
-                                        };
-                                        // The error string now contains the full FFmpeg command
-                                        // (see ffmpeg.rs format: "ffmpeg 异常退出 (…): …\n命令: …")
-                                        finish_record(
-                                            &store,
-                                            task.history_id,
+                                    eprintln!(
+                                        "编码完成: {} -> {} ({} -> {} bytes) [progress: {:.1}%]",
+                                        task.input_path.display(),
+                                        final_output.display(),
+                                        output.original_size,
+                                        output.compressed_size,
+                                        plan.lock().unwrap().overall_progress() * 100.0,
+                                    );
+                                }
+                                Err(e) => {
+                                    plan.lock().unwrap().fail_stage(transcode_idx, e.clone());
+                                    plan.lock().unwrap().skip_remaining(transcode_idx + 1);
+                                    let status = if is_task_cancelled(
+                                        &cancel_generation,
+                                        task_generation,
+                                        &cancelled_jobs,
+                                        &task.id,
+                                    ) {
+                                        "cancelled"
+                                    } else {
+                                        "failed"
+                                    };
+                                    // The error string now contains the full FFmpeg command
+                                    // (see ffmpeg.rs format: "ffmpeg 异常退出 (…): …\n命令: …")
+                                    finish_record(
+                                        &store,
+                                        FinishCompressionParams {
+                                            record_id: task.history_id,
                                             status,
-                                            0.0,
-                                            0,
-                                            0,
-                                            &e,
-                                            "",
-                                            0,
-                                            &e,
-                                        );
-                                        emit_progress(
-                                            &progress_emitter,
-                                            &task.id,
-                                            "done",
-                                            100.0,
-                                            status,
-                                        );
-                                        cleanup_temp(&final_output);
-                                        eprintln!("编码失败: {}", e);
+                                            progress: 0.0,
+                                            duration_seconds: 0,
+                                            compressed_size: 0,
+                                            error_message: &e,
+                                            sidecar_path: "",
+                                            source_deleted: 0,
+                                            ffmpeg_command: &e,
+                                        },
+                                    );
+                                    emit_progress(
+                                        &progress_emitter,
+                                        &task.id,
+                                        "done",
+                                        100.0,
+                                        status,
+                                    );
+                                    cleanup_temp(&final_output);
+                                    if status == "cancelled" {
+                                        clear_cancelled_task(&cancelled_jobs, &task.id);
                                     }
+                                    eprintln!("编码失败: {}", e);
                                 }
                             }
                         }
+                    }
                     Ok(WorkerCommand::Shutdown) | Err(_) => break,
                 }
             });
@@ -648,6 +768,7 @@ impl WorkerManager {
             paused,
             cancelled,
             cancel_generation,
+            cancelled_jobs,
             executor,
             prober,
             store,
@@ -668,7 +789,7 @@ impl WorkerManager {
     /// and will take effect on the next app restart.
     pub fn set_worker_count(&self, count: usize) {
         self.max_workers
-            .store(count.max(1).min(16), Ordering::Relaxed);
+            .store(count.clamp(1, 16), Ordering::Relaxed);
     }
     pub fn set_executor(&self, enc: Arc<dyn Encoder + Send + Sync>) {
         if let Ok(mut guard) = self.executor.lock() {
@@ -703,16 +824,19 @@ impl WorkerManager {
 
     pub fn set_app_handle(&self, handle: tauri::AppHandle) {
         self.set_progress_emitter(Box::new(move |job_id, stage, progress, status| {
-            let _ = handle.emit("encode-progress", serde_json::json!({
-                "job_id": job_id, "stage": stage, "progress": progress, "status": status,
-            }));
+            let _ = handle.emit(
+                "encode-progress",
+                serde_json::json!({
+                    "job_id": job_id, "stage": stage, "progress": progress, "status": status,
+                }),
+            );
         }));
     }
     pub fn submit(&self, task: WorkerTask) -> Result<(), String> {
         self.cancelled.store(false, Ordering::Relaxed);
         let generation = self.cancel_generation.load(Ordering::Relaxed);
         self.sender
-            .send(WorkerCommand::Submit(task, generation))
+            .send(WorkerCommand::Submit(Box::new(task), generation))
             .map_err(|e| format!("submit failed: {}", e))
     }
 
@@ -759,6 +883,22 @@ impl WorkerManager {
             }
         }
     }
+    pub fn cancel_task(&self, job_id: &str) -> Result<(), String> {
+        self.cancelled_jobs
+            .lock()
+            .map_err(|_| "cancelled jobs lock poisoned".to_string())?
+            .insert(job_id.to_string());
+        let encoder = self
+            .executor
+            .lock()
+            .map_err(|_| "encoder lock poisoned".to_string())?
+            .as_ref()
+            .map(Arc::clone);
+        if let Some(enc) = encoder {
+            let _ = enc.cancel(&job_id.to_string());
+        }
+        Ok(())
+    }
     pub fn is_paused(&self) -> bool {
         self.paused.load(Ordering::Relaxed)
     }
@@ -795,32 +935,15 @@ fn update_runtime(
 /// No-op when the store is not set or history_id is 0.
 fn finish_record(
     store: &Arc<Mutex<Option<Box<dyn SnapshotStore + Send>>>>,
-    history_id: i64,
-    status: &str,
-    progress: f64,
-    duration_seconds: i64,
-    compressed_size: i64,
-    error_message: &str,
-    sidecar_path: &str,
-    source_deleted: i32,
-    ffmpeg_command: &str,
+    params: FinishCompressionParams<'_>,
 ) {
+    let history_id = params.record_id;
     if history_id == 0 {
         return;
     }
     if let Ok(guard) = store.lock() {
         if let Some(ref s) = *guard {
-            if let Err(e) = s.finish_compression(
-                history_id,
-                status,
-                progress,
-                duration_seconds,
-                compressed_size,
-                error_message,
-                sidecar_path,
-                source_deleted,
-                ffmpeg_command,
-            ) {
+            if let Err(e) = s.finish_compression(params) {
                 eprintln!("DB 完成记录失败 (id={}): {}", history_id, e);
             }
         }

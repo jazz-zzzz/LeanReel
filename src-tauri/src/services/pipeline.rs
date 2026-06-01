@@ -76,16 +76,14 @@ pub struct PipelinePlan {
 impl PipelinePlan {
     /// Build the pipeline plan for a given encoding job.
     pub fn build(_job: &EncodingJob) -> Self {
-        let mut stages: Vec<StageSlot> = Vec::new();
-
-        // Stage 1: Prepare — always present
-        stages.push(StageSlot::new(StageKind::Prepare, 0.05, "准备", 0));
-
-        // Stage 2: Transcode — always present
-        stages.push(StageSlot::new(StageKind::Transcode, 0.85, "压缩视频", 0));
-
-        // Stage 3: Move out — always present
-        stages.push(StageSlot::new(StageKind::MoveOut, 0.10, "移入目标", 2));
+        let stages: Vec<StageSlot> = vec![
+            // Stage 1: Prepare — always present
+            StageSlot::new(StageKind::Prepare, 0.05, "准备", 0),
+            // Stage 2: Transcode — always present
+            StageSlot::new(StageKind::Transcode, 0.85, "压缩视频", 0),
+            // Stage 3: Move out — always present
+            StageSlot::new(StageKind::MoveOut, 0.10, "移入目标", 2),
+        ];
 
         Self { stages }
     }

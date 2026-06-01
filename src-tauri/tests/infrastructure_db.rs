@@ -1,6 +1,6 @@
 use leanreel_rs_lib::domain::models::*;
 use leanreel_rs_lib::domain::traits::SnapshotStore;
-use leanreel_rs_lib::infrastructure::db::SqliteSnapshotStore;
+use leanreel_rs_lib::infrastructure::db::{CreateCompressionRecordParams, SqliteSnapshotStore};
 use std::path::Path;
 
 fn make_test_snapshot(path: &str, codec: VideoCodec, hdr: HdrType) -> FileSnapshot {
@@ -8,7 +8,7 @@ fn make_test_snapshot(path: &str, codec: VideoCodec, hdr: HdrType) -> FileSnapsh
         id: None,
         library_folder_id: 1,
         relative_path: path.into(),
-        file_name: path.split('/').last().unwrap_or(path).into(),
+        file_name: path.split('/').next_back().unwrap_or(path).into(),
         size_bytes: 1_000_000_000,
         video_codec: codec,
         video_width: 1920,
@@ -182,19 +182,19 @@ fn test_compression_history_joined_includes_live_library_data() {
     let snap_id = all_snaps[0].id.unwrap();
 
     let record_id = store
-        .create_compression_record(
-            snap_id,
-            "batch-1",
-            "AV1 CQ28",
-            2_000_000_000,
-            "/output/test_out.mkv",
-            "av1_nvenc",
-            28,
-            "p7",
-            "yuv420p10le",
-            "copy",
-            "copy",
-        )
+        .create_compression_record(CreateCompressionRecordParams {
+            file_snapshot_id: snap_id,
+            batch_id: "batch-1",
+            strategy_name: "AV1 CQ28",
+            original_size: 2_000_000_000,
+            output_path: "/output/test_out.mkv",
+            encoder: "av1_nvenc",
+            cq_value: 28,
+            preset: "p7",
+            pix_fmt: "yuv420p10le",
+            audio_mode: "copy",
+            sub_mode: "copy",
+        })
         .unwrap();
 
     // Query via JOIN
@@ -229,19 +229,19 @@ fn test_both_history_methods_consistent() {
     let snap_id = all_snaps[0].id.unwrap();
 
     store
-        .create_compression_record(
-            snap_id,
-            "b2",
-            "H264 CRF23",
-            1_000_000_000,
-            "/o/f_out.mkv",
-            "libx264",
-            0,
-            "medium",
-            "yuv420p",
-            "copy",
-            "copy",
-        )
+        .create_compression_record(CreateCompressionRecordParams {
+            file_snapshot_id: snap_id,
+            batch_id: "b2",
+            strategy_name: "H264 CRF23",
+            original_size: 1_000_000_000,
+            output_path: "/o/f_out.mkv",
+            encoder: "libx264",
+            cq_value: 0,
+            preset: "medium",
+            pix_fmt: "yuv420p",
+            audio_mode: "copy",
+            sub_mode: "copy",
+        })
         .unwrap();
 
     // Explicitly set stored-copy columns so old method also works
@@ -325,19 +325,19 @@ fn test_batch_progress_consumes_query_rows() {
         .unwrap()
         .unwrap();
     store
-        .create_compression_record(
-            snapshot.id.unwrap(),
-            "batch-progress",
-            "strategy",
-            snapshot.size_bytes,
-            "output.mkv",
-            "libx265",
-            23,
-            "medium",
-            "yuv420p",
-            "copy",
-            "copy",
-        )
+        .create_compression_record(CreateCompressionRecordParams {
+            file_snapshot_id: snapshot.id.unwrap(),
+            batch_id: "batch-progress",
+            strategy_name: "strategy",
+            original_size: snapshot.size_bytes,
+            output_path: "output.mkv",
+            encoder: "libx265",
+            cq_value: 23,
+            preset: "medium",
+            pix_fmt: "yuv420p",
+            audio_mode: "copy",
+            sub_mode: "copy",
+        })
         .unwrap();
 
     let progress = store.get_batch_progress("batch-progress").unwrap();

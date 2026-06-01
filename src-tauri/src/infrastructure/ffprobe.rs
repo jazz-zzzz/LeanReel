@@ -169,10 +169,10 @@ fn detect_hdr(video: &Value) -> HdrType {
     let codec_name = video["codec_name"].as_str().unwrap_or("");
     if (profile_str.contains("10") || pix_fmt.contains("10"))
         && (codec_name == "hevc" || codec_name == "h265")
+        && color_transfer.is_empty()
+        && color_primaries.is_empty()
     {
-        if color_transfer.is_empty() && color_primaries.is_empty() {
-            return HdrType::Hdr10;
-        }
+        return HdrType::Hdr10;
     }
 
     HdrType::Sdr
@@ -344,7 +344,7 @@ impl MediaProber for FfprobeRunner {
 
         // Match Python's default 4 workers in ProbeBatch ThreadPoolExecutor
         let num_workers = 4.min(paths.len());
-        let chunk_size = (paths.len() + num_workers - 1) / num_workers;
+        let chunk_size = paths.len().div_ceil(num_workers);
 
         let results: Arc<Mutex<Vec<ProbeResult>>> =
             Arc::new(Mutex::new(Vec::with_capacity(paths.len())));

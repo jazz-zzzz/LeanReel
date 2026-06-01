@@ -1,5 +1,5 @@
 use leanreel_rs_lib::domain::models::*;
-use leanreel_rs_lib::domain::traits::{MediaProber, SnapshotStore};
+use leanreel_rs_lib::domain::traits::{FinishCompressionParams, MediaProber, SnapshotStore};
 use leanreel_rs_lib::services::scanner::Scanner;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -98,18 +98,7 @@ impl SnapshotStore for CountingStore {
     ) -> Result<(), String> {
         Ok(())
     }
-    fn finish_compression(
-        &self,
-        _record_id: i64,
-        _status: &str,
-        _progress: f64,
-        _duration_seconds: i64,
-        _compressed_size: i64,
-        _error_message: &str,
-        _sidecar_path: &str,
-        _source_deleted: i32,
-        _ffmpeg_command: &str,
-    ) -> Result<(), String> {
+    fn finish_compression(&self, _params: FinishCompressionParams<'_>) -> Result<(), String> {
         Ok(())
     }
 }
@@ -165,7 +154,7 @@ fn test_scanner_probes_and_stores_real_file() {
     assert!(upserted[0].size_bytes > 0, "Should have real file size");
     assert!(upserted[0].file_mtime > 0.0, "Should have real mtime");
     assert_eq!(upserted[0].file_name, "test_video.mkv");
-    assert_eq!(upserted[0].probe_ok, true);
+    assert!(upserted[0].probe_ok);
 }
 
 #[test]

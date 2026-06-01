@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use leanreel_rs_lib::domain::models::*;
 use leanreel_rs_lib::domain::traits::*;
-use leanreel_rs_lib::infrastructure::db::SqliteSnapshotStore;
+use leanreel_rs_lib::infrastructure::db::{CreateCompressionRecordParams, SqliteSnapshotStore};
 use leanreel_rs_lib::services::worker::{EncodeTask, WorkerManager, WorkerTask};
 
 // =============================================================================
@@ -236,7 +236,9 @@ fn test_complete_encode_lifecycle_via_submit_encode() {
 
     // 3. 创建源文件快照
     let snapshot = make_test_snapshot(folder_id, "test_video.mkv", VideoCodec::H264);
-    store.upsert(&[snapshot.clone()]).expect("upsert 快照失败");
+    store
+        .upsert(std::slice::from_ref(&snapshot))
+        .expect("upsert 快照失败");
 
     // 获取快照 ID
     let snapshots = store.query(&FileFilter::default()).expect("查询快照失败");
@@ -250,19 +252,19 @@ fn test_complete_encode_lifecycle_via_submit_encode() {
     let output_path = output_dir.join("test_video.mkv");
 
     let history_id = store
-        .create_compression_record(
-            snap_id,
-            "test-batch-lifecycle-1",
-            &strategy.name,
-            snapshot.size_bytes,
-            &output_path.to_string_lossy(),
-            &strategy.video.encoder,
-            strategy.video.cq,
-            &strategy.video.preset,
-            &strategy.video.pix_fmt,
-            &strategy.audio.mode,
-            &strategy.subtitle.mode,
-        )
+        .create_compression_record(CreateCompressionRecordParams {
+            file_snapshot_id: snap_id,
+            batch_id: "test-batch-lifecycle-1",
+            strategy_name: &strategy.name,
+            original_size: snapshot.size_bytes,
+            output_path: &output_path.to_string_lossy(),
+            encoder: &strategy.video.encoder,
+            cq_value: strategy.video.cq,
+            preset: &strategy.video.preset,
+            pix_fmt: &strategy.video.pix_fmt,
+            audio_mode: &strategy.audio.mode,
+            sub_mode: &strategy.subtitle.mode,
+        })
         .expect("创建压缩记录失败");
     assert!(history_id > 0, "history_id 应大于 0");
 
@@ -326,7 +328,7 @@ fn test_complete_encode_lifecycle_via_submit_encode() {
         output_path.display()
     );
     let output_content = std::fs::read(&output_path).expect("读取输出文件失败");
-    assert!(output_content.len() > 0, "输出文件不应为空");
+    assert!(!output_content.is_empty(), "输出文件不应为空");
 
     // 10. 验证审计侧挂文件存在
     let sidecar_path = PathBuf::from(format!("{}.leanreel.json", output_path.display()));
@@ -398,7 +400,9 @@ fn test_complete_encode_lifecycle_via_submit_direct() {
         .expect("添加文件夹失败");
 
     let snapshot = make_test_snapshot(folder_id, "movie_hevc.mkv", VideoCodec::H264);
-    store.upsert(&[snapshot.clone()]).expect("upsert 快照失败");
+    store
+        .upsert(std::slice::from_ref(&snapshot))
+        .expect("upsert 快照失败");
 
     let snapshots = store.query(&FileFilter::default()).expect("查询快照失败");
     let snap_id = snapshots[0].id.expect("快照应有 ID");
@@ -410,19 +414,19 @@ fn test_complete_encode_lifecycle_via_submit_direct() {
 
     // 创建 compression_history 记录，获取 history_id
     let history_id = store
-        .create_compression_record(
-            snap_id,
-            "test-batch-lifecycle-2",
-            &strategy.name,
-            snapshot.size_bytes,
-            &output_path.to_string_lossy(),
-            &strategy.video.encoder,
-            strategy.video.cq,
-            &strategy.video.preset,
-            &strategy.video.pix_fmt,
-            &strategy.audio.mode,
-            &strategy.subtitle.mode,
-        )
+        .create_compression_record(CreateCompressionRecordParams {
+            file_snapshot_id: snap_id,
+            batch_id: "test-batch-lifecycle-2",
+            strategy_name: &strategy.name,
+            original_size: snapshot.size_bytes,
+            output_path: &output_path.to_string_lossy(),
+            encoder: &strategy.video.encoder,
+            cq_value: strategy.video.cq,
+            preset: &strategy.video.preset,
+            pix_fmt: &strategy.video.pix_fmt,
+            audio_mode: &strategy.audio.mode,
+            sub_mode: &strategy.subtitle.mode,
+        })
         .expect("创建压缩记录失败");
 
     // 直接使用 WorkerTask（绕过 submit_encode 的转换）
@@ -513,7 +517,9 @@ fn test_encode_failure_updates_db_status() {
         .expect("添加文件夹失败");
 
     let snapshot = make_test_snapshot(folder_id, "fail_video.mkv", VideoCodec::H264);
-    store.upsert(&[snapshot.clone()]).expect("upsert 快照失败");
+    store
+        .upsert(std::slice::from_ref(&snapshot))
+        .expect("upsert 快照失败");
     let snapshots = store.query(&FileFilter::default()).expect("查询快照失败");
     let snap_id = snapshots[0].id.expect("快照应有 ID");
 
@@ -523,19 +529,19 @@ fn test_encode_failure_updates_db_status() {
     let output_path = output_dir.join("fail_video.mkv");
 
     let history_id = store
-        .create_compression_record(
-            snap_id,
-            "test-batch-fail",
-            &strategy.name,
-            snapshot.size_bytes,
-            &output_path.to_string_lossy(),
-            &strategy.video.encoder,
-            strategy.video.cq,
-            &strategy.video.preset,
-            &strategy.video.pix_fmt,
-            &strategy.audio.mode,
-            &strategy.subtitle.mode,
-        )
+        .create_compression_record(CreateCompressionRecordParams {
+            file_snapshot_id: snap_id,
+            batch_id: "test-batch-fail",
+            strategy_name: &strategy.name,
+            original_size: snapshot.size_bytes,
+            output_path: &output_path.to_string_lossy(),
+            encoder: &strategy.video.encoder,
+            cq_value: strategy.video.cq,
+            preset: &strategy.video.preset,
+            pix_fmt: &strategy.video.pix_fmt,
+            audio_mode: &strategy.audio.mode,
+            sub_mode: &strategy.subtitle.mode,
+        })
         .expect("创建压缩记录失败");
 
     let wm = WorkerManager::new(1);
@@ -616,19 +622,19 @@ fn test_encode_with_dolby_vision_flag() {
     let output_path = output_dir.join("dv_movie.mkv");
 
     let history_id = store
-        .create_compression_record(
-            snap_id,
-            "test-batch-dv",
-            &strategy.name,
-            dv_snapshot.size_bytes,
-            &output_path.to_string_lossy(),
-            &strategy.video.encoder,
-            strategy.video.cq,
-            &strategy.video.preset,
-            &strategy.video.pix_fmt,
-            &strategy.audio.mode,
-            &strategy.subtitle.mode,
-        )
+        .create_compression_record(CreateCompressionRecordParams {
+            file_snapshot_id: snap_id,
+            batch_id: "test-batch-dv",
+            strategy_name: &strategy.name,
+            original_size: dv_snapshot.size_bytes,
+            output_path: &output_path.to_string_lossy(),
+            encoder: &strategy.video.encoder,
+            cq_value: strategy.video.cq,
+            preset: &strategy.video.preset,
+            pix_fmt: &strategy.video.pix_fmt,
+            audio_mode: &strategy.audio.mode,
+            sub_mode: &strategy.subtitle.mode,
+        })
         .expect("创建压缩记录失败");
 
     let encoder = Arc::new(SpyEncoder::new());
@@ -743,7 +749,7 @@ fn test_multiple_encodes_in_sequence() {
             delete_source: false,
         };
         wm.submit_encode(task)
-            .expect(&format!("提交任务 {} 失败", i));
+            .unwrap_or_else(|_| panic!("提交任务 {} 失败", i));
     }
 
     // 等待所有任务完成

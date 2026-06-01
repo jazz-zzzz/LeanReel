@@ -66,12 +66,13 @@ pub fn build_ffmpeg_command(
         snapshot.hdr_type,
         HdrType::Hdr10 | HdrType::Hdr10Plus | HdrType::DolbyVision { .. }
     );
-    let mut cmd: Vec<String> = Vec::new();
-    cmd.push(ffmpeg_path.to_string());
-    cmd.push("-nostdin".into());
-    cmd.push("-y".into());
-    cmd.push("-fflags".into());
-    cmd.push("+genpts+discardcorrupt".into());
+    let mut cmd: Vec<String> = vec![
+        ffmpeg_path.to_string(),
+        "-nostdin".into(),
+        "-y".into(),
+        "-fflags".into(),
+        "+genpts+discardcorrupt".into(),
+    ];
     if is_gpu {
         let supports_nvdec = matches!(
             &snapshot.video_codec,

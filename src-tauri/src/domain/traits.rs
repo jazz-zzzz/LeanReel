@@ -3,6 +3,18 @@ use std::path::{Path, PathBuf};
 
 pub type JobId = String;
 
+pub struct FinishCompressionParams<'a> {
+    pub record_id: i64,
+    pub status: &'a str,
+    pub progress: f64,
+    pub duration_seconds: i64,
+    pub compressed_size: i64,
+    pub error_message: &'a str,
+    pub sidecar_path: &'a str,
+    pub source_deleted: i32,
+    pub ffmpeg_command: &'a str,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProgressEvent {
     StageStart {
@@ -66,18 +78,7 @@ pub trait SnapshotStore {
     ) -> Result<(), String>;
 
     /// C2: Finalize a compression record on encode completion or failure.
-    fn finish_compression(
-        &self,
-        record_id: i64,
-        status: &str,
-        progress: f64,
-        duration_seconds: i64,
-        compressed_size: i64,
-        error_message: &str,
-        sidecar_path: &str,
-        source_deleted: i32,
-        ffmpeg_command: &str,
-    ) -> Result<(), String>;
+    fn finish_compression(&self, params: FinishCompressionParams<'_>) -> Result<(), String>;
 }
 
 /// 媒体元数据探测

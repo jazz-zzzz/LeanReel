@@ -29,18 +29,7 @@ impl SnapshotStore for MockStore {
     ) -> Result<(), String> {
         Ok(())
     }
-    fn finish_compression(
-        &self,
-        _record_id: i64,
-        _status: &str,
-        _progress: f64,
-        _duration_seconds: i64,
-        _compressed_size: i64,
-        _error_message: &str,
-        _sidecar_path: &str,
-        _source_deleted: i32,
-        _ffmpeg_command: &str,
-    ) -> Result<(), String> {
+    fn finish_compression(&self, _params: FinishCompressionParams<'_>) -> Result<(), String> {
         Ok(())
     }
 }

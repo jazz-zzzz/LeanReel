@@ -67,7 +67,7 @@ fn test_filters_by_extension() {
 #[test]
 fn test_returns_relative_paths() {
     let dir = std::env::temp_dir().join("leanreel_test_relpath");
-    fs::create_dir_all(&dir.join("subdir")).unwrap();
+    fs::create_dir_all(dir.join("subdir")).unwrap();
     fs::write(dir.join("subdir").join("movie.mkv"), b"x").unwrap();
 
     let (files, _) = find_video_files(&dir);

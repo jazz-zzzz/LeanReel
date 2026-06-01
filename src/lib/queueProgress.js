@@ -29,6 +29,60 @@ function statusLabel(status) {
 }
 
 /**
+ * @param {QueueStatus} status
+ * @returns {boolean}
+ */
+export function isTerminalQueueStatus(status) {
+  return status === 'done'
+    || status === 'failed'
+    || status === 'cancelled'
+    || status === 'discarded';
+}
+
+/**
+ * @param {QueueItem[]} items
+ * @returns {boolean}
+ */
+export function hasActiveQueueItems(items) {
+  return items.some((item) => !isTerminalQueueStatus(item.status));
+}
+
+/**
+ * @param {QueueItem[]} items
+ * @returns {QueueItem[]}
+ */
+export function cancelActiveQueueItems(items) {
+  return items.map((item) => {
+    if (isTerminalQueueStatus(item.status)) return item;
+    return {
+      ...item,
+      progress: 100,
+      status: 'cancelled',
+      statusText: statusLabel('cancelled'),
+      stage: undefined,
+    };
+  });
+}
+
+/**
+ * @param {QueueItem[]} items
+ * @param {string} jobId
+ * @returns {QueueItem[]}
+ */
+export function cancelQueueItem(items, jobId) {
+  return items.map((item) => {
+    if (item.id !== jobId || isTerminalQueueStatus(item.status)) return item;
+    return {
+      ...item,
+      progress: 100,
+      status: 'cancelled',
+      statusText: statusLabel('cancelled'),
+      stage: undefined,
+    };
+  });
+}
+
+/**
  * Apply one backend progress event to the matching queue item.
  *
  * @param {QueueItem[]} items
@@ -41,6 +95,7 @@ export function applyEncodeProgress(items, event) {
 
     const progress = Math.round(event.progress * 10) / 10;
     const status = normalizeStatus(event.status);
+    if (isTerminalQueueStatus(item.status) && !isTerminalQueueStatus(status)) return item;
     return {
       ...item,
       progress,

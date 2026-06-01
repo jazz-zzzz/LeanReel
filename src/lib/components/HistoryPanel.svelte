@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { showHistory } from '$lib/stores/history';
   import { queue } from '$lib/stores/queue';
+  import { cancelActiveQueueItems, cancelQueueItem } from '$lib/queueProgress.js';
   import { getHistory, cancelEncode, cancelTask } from '$lib/api';
   import type { HistoryEntry } from '$lib/stores/history';
 
@@ -20,10 +21,12 @@
   let visibleActive = $derived(showAllActive ? activeTasks : activeTasks.slice(0, 5));
   let hasMore = $derived(activeTasks.length > 5);
 
-  onMount(async () => {
-    try { history = await getHistory(); }
-    catch (e) { error = `加载失败: ${e}`; }
-    finally { loading = false; }
+  onMount(() => {
+    void (async () => {
+      try { history = await getHistory(); }
+      catch (e) { error = `加载失败: ${e}`; }
+      finally { loading = false; }
+    })();
     // Auto-refresh every 5s while active tasks are running
     const timer = setInterval(async () => {
       try { history = await getHistory(); } catch (_) {}
@@ -101,6 +104,16 @@
   }
 
   function closePanel() { showHistory.set(false); }
+
+  async function cancelAllTasks() {
+    await cancelEncode();
+    queue.update(cancelActiveQueueItems);
+  }
+
+  async function cancelOneTask(jobId: string) {
+    await cancelTask(jobId);
+    queue.update(items => cancelQueueItem(items, jobId));
+  }
 </script>
 
 <svelte:window onkeydown={(e) => { if (e.key === 'Escape') closePanel(); }} />
@@ -118,7 +131,7 @@
         <button class="chip" class:active={statusFilter === 'failed'} onclick={() => statusFilter = 'failed'}>失败</button>
       </div>
       {#if activeTasks.length > 0}
-        <button class="ghost danger" onclick={() => cancelEncode()}>全部取消</button>
+        <button class="ghost danger" onclick={cancelAllTasks}>全部取消</button>
       {/if}
     </div>
 
@@ -132,7 +145,7 @@
             <div class="active-progress"><div class="active-progress-bar"><div class="active-progress-fill" style="width:{item.progress}%"></div></div></div>
             <span class="active-pct">{item.progress}%</span>
             {#if item.status === 'pending' || item.status === 'running'}
-              <button class="ghost danger" onclick={() => cancelTask(item.id)}>取消</button>
+              <button class="ghost danger" onclick={() => cancelOneTask(item.id)}>取消</button>
             {/if}
           </div>
         {/each}

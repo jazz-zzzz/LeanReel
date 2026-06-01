@@ -32,7 +32,7 @@ fn test_write_and_read_sidecar() {
 
     assert_eq!(restored.source_path, record.source_path);
     assert_eq!(restored.strategy_name, record.strategy_name);
-    assert_eq!(restored.success, true);
+    assert!(restored.success);
 }
 
 #[test]
@@ -68,10 +68,10 @@ fn test_read_nonexistent_sidecar() {
 
 // ── Helpers for building test fixtures ────────────────────────────────────────
 
-fn make_snapshot(
-    path: &str,
+struct SnapshotFixtureParams<'a> {
+    path: &'a str,
     size: i64,
-    codec: &str,
+    codec: &'a str,
     width: i32,
     height: i32,
     hdr: HdrType,
@@ -79,7 +79,21 @@ fn make_snapshot(
     bitrate: i64,
     audio: Vec<AudioTrack>,
     subs: Vec<SubtitleTrack>,
-) -> FileSnapshot {
+}
+
+fn make_snapshot(params: SnapshotFixtureParams<'_>) -> FileSnapshot {
+    let SnapshotFixtureParams {
+        path,
+        size,
+        codec,
+        width,
+        height,
+        hdr,
+        duration,
+        bitrate,
+        audio,
+        subs,
+    } = params;
     FileSnapshot {
         relative_path: path.to_string(),
         size_bytes: size,
@@ -95,17 +109,30 @@ fn make_snapshot(
     }
 }
 
-fn make_strategy(
-    name: &str,
-    encoder: &str,
+struct StrategyFixtureParams<'a> {
+    name: &'a str,
+    encoder: &'a str,
     cq: i32,
     crf: i32,
-    preset: &str,
-    pix_fmt: &str,
-    audio_mode: &str,
-    sub_mode: &str,
-    dv_handling: &str,
-) -> Strategy {
+    preset: &'a str,
+    pix_fmt: &'a str,
+    audio_mode: &'a str,
+    sub_mode: &'a str,
+    dv_handling: &'a str,
+}
+
+fn make_strategy(params: StrategyFixtureParams<'_>) -> Strategy {
+    let StrategyFixtureParams {
+        name,
+        encoder,
+        cq,
+        crf,
+        preset,
+        pix_fmt,
+        audio_mode,
+        sub_mode,
+        dv_handling,
+    } = params;
     Strategy {
         name: name.to_string(),
         video: VideoConfig {
@@ -135,52 +162,52 @@ fn make_strategy(
 
 #[test]
 fn test_build_audit_success() {
-    let snapshot = make_snapshot(
-        "/movies/test.mkv",
-        2_000_000_000,
-        "h264",
-        1920,
-        1080,
-        HdrType::Sdr,
-        3600.0,
-        4_000_000,
-        vec![AudioTrack {
+    let snapshot = make_snapshot(SnapshotFixtureParams {
+        path: "/movies/test.mkv",
+        size: 2_000_000_000,
+        codec: "h264",
+        width: 1920,
+        height: 1080,
+        hdr: HdrType::Sdr,
+        duration: 3600.0,
+        bitrate: 4_000_000,
+        audio: vec![AudioTrack {
             codec: "aac".into(),
             channels: 6,
             language: "eng".into(),
             title: "Surround".into(),
             is_commentary: false,
         }],
-        vec![SubtitleTrack {
+        subs: vec![SubtitleTrack {
             codec: "srt".into(),
             language: "eng".into(),
             title: "English".into(),
             is_forced: false,
         }],
-    );
-    let strategy = make_strategy(
-        "AV1 NVENC CQ28",
-        "av1_nvenc",
-        28,
-        0,
-        "p7",
-        "p010le",
-        "copy_all",
-        "keep_all",
-        "passthrough",
-    );
+    });
+    let strategy = make_strategy(StrategyFixtureParams {
+        name: "AV1 NVENC CQ28",
+        encoder: "av1_nvenc",
+        cq: 28,
+        crf: 0,
+        preset: "p7",
+        pix_fmt: "p010le",
+        audio_mode: "copy_all",
+        sub_mode: "keep_all",
+        dv_handling: "passthrough",
+    });
 
-    let audit = build_audit(
-        &snapshot,
-        Path::new("/movies/test_leanreel.mkv"),
-        800_000_000,
-        "av1",
-        &strategy,
-        120_000,
-        true,
-        "",
-        "ffmpeg -i test.mkv -c:v av1_nvenc -cq 28 -preset p7 out.mkv",
-    );
+    let audit = build_audit(BuildAuditParams {
+        snapshot: &snapshot,
+        output_path: Path::new("/movies/test_leanreel.mkv"),
+        output_size: 800_000_000,
+        output_codec: "av1",
+        strategy: &strategy,
+        duration_ms: 120_000,
+        success: true,
+        error: "",
+        ffmpeg_command: "ffmpeg -i test.mkv -c:v av1_nvenc -cq 28 -preset p7 out.mkv",
+    });
 
     // legacy assertions
     assert_eq!(audit.strategy_name, "AV1 NVENC CQ28");
@@ -213,41 +240,41 @@ fn test_build_audit_success() {
 
 #[test]
 fn test_build_audit_failure() {
-    let snapshot = make_snapshot(
-        "/movies/bad.mkv",
-        1_000_000_000,
-        "h264",
-        3840,
-        2160,
-        HdrType::Hdr10,
-        5400.0,
-        1_500_000,
-        vec![],
-        vec![],
-    );
-    let strategy = make_strategy(
-        "HEVC CRF22",
-        "libx265",
-        0,
-        22,
-        "medium",
-        "yuv420p10le",
-        "copy_all",
-        "no_subs",
-        "strip_dv",
-    );
+    let snapshot = make_snapshot(SnapshotFixtureParams {
+        path: "/movies/bad.mkv",
+        size: 1_000_000_000,
+        codec: "h264",
+        width: 3840,
+        height: 2160,
+        hdr: HdrType::Hdr10,
+        duration: 5400.0,
+        bitrate: 1_500_000,
+        audio: vec![],
+        subs: vec![],
+    });
+    let strategy = make_strategy(StrategyFixtureParams {
+        name: "HEVC CRF22",
+        encoder: "libx265",
+        cq: 0,
+        crf: 22,
+        preset: "medium",
+        pix_fmt: "yuv420p10le",
+        audio_mode: "copy_all",
+        sub_mode: "no_subs",
+        dv_handling: "strip_dv",
+    });
 
-    let audit = build_audit(
-        &snapshot,
-        Path::new("/movies/bad_leanreel.mkv"),
-        0,
-        "",
-        &strategy,
-        5000,
-        false,
-        "ffmpeg crashed",
-        "ffmpeg -i bad.mkv -c:v libx265 -crf 22 out.mkv",
-    );
+    let audit = build_audit(BuildAuditParams {
+        snapshot: &snapshot,
+        output_path: Path::new("/movies/bad_leanreel.mkv"),
+        output_size: 0,
+        output_codec: "",
+        strategy: &strategy,
+        duration_ms: 5000,
+        success: false,
+        error: "ffmpeg crashed",
+        ffmpeg_command: "ffmpeg -i bad.mkv -c:v libx265 -crf 22 out.mkv",
+    });
 
     assert!(!audit.success);
     assert_eq!(audit.error_message, "ffmpeg crashed");
@@ -264,18 +291,18 @@ fn test_build_audit_failure() {
 
 #[test]
 fn test_build_audit_with_dolby_vision() {
-    let snapshot = make_snapshot(
-        "/movies/dv.mkv",
-        5_000_000_000,
-        "hevc",
-        3840,
-        2160,
-        HdrType::DolbyVision {
+    let snapshot = make_snapshot(SnapshotFixtureParams {
+        path: "/movies/dv.mkv",
+        size: 5_000_000_000,
+        codec: "hevc",
+        width: 3840,
+        height: 2160,
+        hdr: HdrType::DolbyVision {
             profile: DvProfile::Profile5,
         },
-        7200.0,
-        5_500_000,
-        vec![
+        duration: 7200.0,
+        bitrate: 5_500_000,
+        audio: vec![
             AudioTrack {
                 codec: "eac3".into(),
                 channels: 8,
@@ -291,7 +318,7 @@ fn test_build_audit_with_dolby_vision() {
                 is_commentary: true,
             },
         ],
-        vec![
+        subs: vec![
             SubtitleTrack {
                 codec: "pgssub".into(),
                 language: "eng".into(),
@@ -305,30 +332,30 @@ fn test_build_audit_with_dolby_vision() {
                 is_forced: false,
             },
         ],
-    );
-    let strategy = make_strategy(
-        "AV1 DV Passthrough",
-        "av1_nvenc",
-        30,
-        0,
-        "p7",
-        "p010le",
-        "copy_all",
-        "keep_all",
-        "passthrough",
-    );
+    });
+    let strategy = make_strategy(StrategyFixtureParams {
+        name: "AV1 DV Passthrough",
+        encoder: "av1_nvenc",
+        cq: 30,
+        crf: 0,
+        preset: "p7",
+        pix_fmt: "p010le",
+        audio_mode: "copy_all",
+        sub_mode: "keep_all",
+        dv_handling: "passthrough",
+    });
 
-    let audit = build_audit(
-        &snapshot,
-        Path::new("/movies/dv_leanreel.mkv"),
-        2_000_000_000,
-        "av1",
-        &strategy,
-        300_000,
-        true,
-        "",
-        "ffmpeg -i dv.mkv -c:v av1_nvenc -cq 30 -preset p7 out.mkv",
-    );
+    let audit = build_audit(BuildAuditParams {
+        snapshot: &snapshot,
+        output_path: Path::new("/movies/dv_leanreel.mkv"),
+        output_size: 2_000_000_000,
+        output_codec: "av1",
+        strategy: &strategy,
+        duration_ms: 300_000,
+        success: true,
+        error: "",
+        ffmpeg_command: "ffmpeg -i dv.mkv -c:v av1_nvenc -cq 30 -preset p7 out.mkv",
+    });
 
     // C8: Dolby Vision specific assertions
     assert!(audit.has_dolby_vision);
@@ -345,41 +372,41 @@ fn test_sidecar_roundtrip_with_full_audit() {
     let sidecar_path = std::env::temp_dir().join("test_full_audit_output.mkv.leanreel.json");
     let _ = std::fs::remove_file(&sidecar_path);
 
-    let snapshot = make_snapshot(
-        "/src.mkv",
-        2_000_000_000,
-        "h264",
-        1920,
-        1080,
-        HdrType::Sdr,
-        3600.0,
-        4_000_000,
-        vec![],
-        vec![],
-    );
-    let strategy = make_strategy(
-        "AV1 CQ28",
-        "av1_nvenc",
-        28,
-        0,
-        "p7",
-        "p010le",
-        "copy_all",
-        "keep_all",
-        "",
-    );
+    let snapshot = make_snapshot(SnapshotFixtureParams {
+        path: "/src.mkv",
+        size: 2_000_000_000,
+        codec: "h264",
+        width: 1920,
+        height: 1080,
+        hdr: HdrType::Sdr,
+        duration: 3600.0,
+        bitrate: 4_000_000,
+        audio: vec![],
+        subs: vec![],
+    });
+    let strategy = make_strategy(StrategyFixtureParams {
+        name: "AV1 CQ28",
+        encoder: "av1_nvenc",
+        cq: 28,
+        crf: 0,
+        preset: "p7",
+        pix_fmt: "p010le",
+        audio_mode: "copy_all",
+        sub_mode: "keep_all",
+        dv_handling: "",
+    });
 
-    let audit = build_audit(
-        &snapshot,
-        Path::new("/out.mkv"),
-        800_000_000,
-        "av1",
-        &strategy,
-        100_000,
-        true,
-        "",
-        "ffmpeg -i src.mkv -c:v av1_nvenc -cq 28 out.mkv",
-    );
+    let audit = build_audit(BuildAuditParams {
+        snapshot: &snapshot,
+        output_path: Path::new("/out.mkv"),
+        output_size: 800_000_000,
+        output_codec: "av1",
+        strategy: &strategy,
+        duration_ms: 100_000,
+        success: true,
+        error: "",
+        ffmpeg_command: "ffmpeg -i src.mkv -c:v av1_nvenc -cq 28 out.mkv",
+    });
 
     write_sidecar(&out_path, &audit).unwrap();
     assert!(sidecar_path.exists());
@@ -398,33 +425,41 @@ fn test_sidecar_roundtrip_with_full_audit() {
 #[test]
 fn test_build_audit_zero_size_source() {
     // Edge case: empty source file should not cause division by zero
-    let snapshot = make_snapshot(
-        "/movies/empty.mkv",
-        0,
-        "unknown",
-        0,
-        0,
-        HdrType::Sdr,
-        0.0,
-        0,
-        vec![],
-        vec![],
-    );
-    let strategy = make_strategy(
-        "Default", "libx265", 0, 23, "fast", "yuv420p", "copy_all", "keep_all", "",
-    );
+    let snapshot = make_snapshot(SnapshotFixtureParams {
+        path: "/movies/empty.mkv",
+        size: 0,
+        codec: "unknown",
+        width: 0,
+        height: 0,
+        hdr: HdrType::Sdr,
+        duration: 0.0,
+        bitrate: 0,
+        audio: vec![],
+        subs: vec![],
+    });
+    let strategy = make_strategy(StrategyFixtureParams {
+        name: "Default",
+        encoder: "libx265",
+        cq: 0,
+        crf: 23,
+        preset: "fast",
+        pix_fmt: "yuv420p",
+        audio_mode: "copy_all",
+        sub_mode: "keep_all",
+        dv_handling: "",
+    });
 
-    let audit = build_audit(
-        &snapshot,
-        Path::new("/movies/empty_out.mkv"),
-        0,
-        "",
-        &strategy,
-        0,
-        false,
-        "no data",
-        "",
-    );
+    let audit = build_audit(BuildAuditParams {
+        snapshot: &snapshot,
+        output_path: Path::new("/movies/empty_out.mkv"),
+        output_size: 0,
+        output_codec: "",
+        strategy: &strategy,
+        duration_ms: 0,
+        success: false,
+        error: "no data",
+        ffmpeg_command: "",
+    });
 
     assert!(!audit.success);
     assert_eq!(audit.savings_pct, 0.0);
@@ -459,29 +494,29 @@ fn make_rich_snapshot() -> FileSnapshot {
 #[test]
 fn test_build_audit_includes_extended_source_fields() {
     let snapshot = make_rich_snapshot();
-    let strategy = make_strategy(
-        "HEVC CRF18",
-        "libx265",
-        0,
-        18,
-        "slow",
-        "yuv420p10le",
-        "copy_all",
-        "keep_all",
-        "",
-    );
+    let strategy = make_strategy(StrategyFixtureParams {
+        name: "HEVC CRF18",
+        encoder: "libx265",
+        cq: 0,
+        crf: 18,
+        preset: "slow",
+        pix_fmt: "yuv420p10le",
+        audio_mode: "copy_all",
+        sub_mode: "keep_all",
+        dv_handling: "",
+    });
 
-    let audit = build_audit(
-        &snapshot,
-        Path::new("/movies/rich_out.mkv"),
-        2_000_000_000,
-        "hevc",
-        &strategy,
-        300_000,
-        true,
-        "",
-        "ffmpeg -i in.mkv -c:v libx265 -crf 18 out.mkv",
-    );
+    let audit = build_audit(BuildAuditParams {
+        snapshot: &snapshot,
+        output_path: Path::new("/movies/rich_out.mkv"),
+        output_size: 2_000_000_000,
+        output_codec: "hevc",
+        strategy: &strategy,
+        duration_ms: 300_000,
+        success: true,
+        error: "",
+        ffmpeg_command: "ffmpeg -i in.mkv -c:v libx265 -crf 18 out.mkv",
+    });
 
     // H-029: Verify all 10 extended fields are populated
     assert_eq!(audit.source_pix_fmt, "yuv420p10le");
@@ -499,41 +534,41 @@ fn test_build_audit_includes_extended_source_fields() {
 
 #[test]
 fn test_build_audit_platform_is_detected() {
-    let snapshot = make_snapshot(
-        "/p.mkv",
-        1_000_000,
-        "h264",
-        1920,
-        1080,
-        HdrType::Sdr,
-        60.0,
-        2_000_000,
-        vec![],
-        vec![],
-    );
-    let strategy = make_strategy(
-        "Fast",
-        "av1_nvenc",
-        28,
-        0,
-        "p7",
-        "p010le",
-        "copy_all",
-        "keep_all",
-        "",
-    );
+    let snapshot = make_snapshot(SnapshotFixtureParams {
+        path: "/p.mkv",
+        size: 1_000_000,
+        codec: "h264",
+        width: 1920,
+        height: 1080,
+        hdr: HdrType::Sdr,
+        duration: 60.0,
+        bitrate: 2_000_000,
+        audio: vec![],
+        subs: vec![],
+    });
+    let strategy = make_strategy(StrategyFixtureParams {
+        name: "Fast",
+        encoder: "av1_nvenc",
+        cq: 28,
+        crf: 0,
+        preset: "p7",
+        pix_fmt: "p010le",
+        audio_mode: "copy_all",
+        sub_mode: "keep_all",
+        dv_handling: "",
+    });
 
-    let audit = build_audit(
-        &snapshot,
-        Path::new("/p_out.mkv"),
-        500_000,
-        "av1",
-        &strategy,
-        30_000,
-        true,
-        "",
-        "",
-    );
+    let audit = build_audit(BuildAuditParams {
+        snapshot: &snapshot,
+        output_path: Path::new("/p_out.mkv"),
+        output_size: 500_000,
+        output_codec: "av1",
+        strategy: &strategy,
+        duration_ms: 30_000,
+        success: true,
+        error: "",
+        ffmpeg_command: "",
+    });
 
     // Platform should contain the OS name
     let platform = &audit.platform;
@@ -570,21 +605,29 @@ fn test_build_audit_zero_size_preserves_extended_fields() {
         file_mtime: 0.0,
         ..Default::default()
     };
-    let strategy = make_strategy(
-        "D", "libx265", 0, 23, "fast", "yuv420p", "copy_all", "keep_all", "",
-    );
+    let strategy = make_strategy(StrategyFixtureParams {
+        name: "D",
+        encoder: "libx265",
+        cq: 0,
+        crf: 23,
+        preset: "fast",
+        pix_fmt: "yuv420p",
+        audio_mode: "copy_all",
+        sub_mode: "keep_all",
+        dv_handling: "",
+    });
 
-    let audit = build_audit(
-        &snapshot,
-        Path::new("/e.mkv"),
-        0,
-        "",
-        &strategy,
-        0,
-        false,
-        "error",
-        "",
-    );
+    let audit = build_audit(BuildAuditParams {
+        snapshot: &snapshot,
+        output_path: Path::new("/e.mkv"),
+        output_size: 0,
+        output_codec: "",
+        strategy: &strategy,
+        duration_ms: 0,
+        success: false,
+        error: "error",
+        ffmpeg_command: "",
+    });
 
     // Even with zero-size failure, extended fields should still be populated
     assert_eq!(audit.source_pix_fmt, "yuv420p");

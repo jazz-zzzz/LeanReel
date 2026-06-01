@@ -1,4 +1,5 @@
 use crate::domain::models::{HdrType, TaskStatus};
+use crate::infrastructure::db::CreateCompressionRecordParams;
 use crate::services::worker::WorkerTask;
 use crate::AppState;
 use serde::{Deserialize, Serialize};
@@ -112,25 +113,25 @@ pub fn start_encode(
 
         // C1: Create compression_history record before submitting to worker
         let history_id = store
-            .create_compression_record(
-                snapshot.id.unwrap_or(0),
-                &batch_id,
-                &strategy.name,
-                snapshot.size_bytes,
-                &output_path.to_string_lossy(),
-                &strategy.video.encoder,
-                strategy.video.cq,
-                &strategy.video.preset,
-                &snapshot.pix_fmt,
-                &strategy.audio.mode,
-                &strategy.subtitle.mode,
-            )
+            .create_compression_record(CreateCompressionRecordParams {
+                file_snapshot_id: snapshot.id.unwrap_or(0),
+                batch_id: &batch_id,
+                strategy_name: &strategy.name,
+                original_size: snapshot.size_bytes,
+                output_path: &output_path.to_string_lossy(),
+                encoder: &strategy.video.encoder,
+                cq_value: strategy.video.cq,
+                preset: &strategy.video.preset,
+                pix_fmt: &snapshot.pix_fmt,
+                audio_mode: &strategy.audio.mode,
+                sub_mode: &strategy.subtitle.mode,
+            })
             .map_err(|e| format!("创建压缩记录失败: {}", e))?;
 
         // H5: Backfill source library/folder/path columns from file_snapshot JOIN
-        if snapshot.id.is_some() {
+        if let Some(snapshot_id) = snapshot.id {
             store
-                .backfill_history_sources(history_id, snapshot.id.unwrap())
+                .backfill_history_sources(history_id, snapshot_id)
                 .map_err(|e| format!("回填历史源信息失败: {}", e))?;
         }
 
@@ -171,7 +172,11 @@ fn parse_file_key(file_key: &str) -> Result<String, String> {
     // Frontend sends "folder_id:relative/path" or just "relative/path".
     // Strip the folder_id prefix if present — we search by path only.
     let s = file_key.replace('\\', "/");
-    Ok(if let Some((_folder_id, path)) = s.split_once(':') { path.to_string() } else { s })
+    Ok(if let Some((_folder_id, path)) = s.split_once(':') {
+        path.to_string()
+    } else {
+        s
+    })
 }
 
 #[tauri::command]
@@ -200,6 +205,5 @@ pub fn cancel_encode(state: State<AppState>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn cancel_task(job_id: String, state: State<AppState>) -> Result<(), String> {
-    state.ffmpeg.cancel_job(&job_id).ok();
-    Ok(())
+    state.worker.cancel_task(&job_id)
 }

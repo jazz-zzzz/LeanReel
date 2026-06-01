@@ -1,9 +1,11 @@
 use leanreel_rs_lib::domain::models::*;
 use leanreel_rs_lib::domain::traits::{
-    EncodeOutput, Encoder, EncodingJob, JobId, MediaProber, ProgressEvent, SnapshotStore,
+    EncodeOutput, Encoder, EncodingJob, FinishCompressionParams, JobId, MediaProber, ProgressEvent,
+    SnapshotStore,
 };
 use leanreel_rs_lib::services::worker::{EncodeTask, WorkerManager, WorkerTask};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 #[test]
@@ -44,6 +46,105 @@ fn test_worker_pause_resume() {
     assert!(wm.is_paused());
     wm.resume();
     assert!(!wm.is_paused());
+}
+
+#[test]
+fn test_worker_cancel_task_reports_cancelled_without_cancelling_the_queue() {
+    struct BlockingEncoder {
+        started: Arc<AtomicBool>,
+        cancelled_jobs: Arc<Mutex<Vec<JobId>>>,
+    }
+
+    impl Encoder for BlockingEncoder {
+        fn run(
+            &self,
+            job: &EncodingJob,
+            _on_progress: &(dyn Fn(ProgressEvent) + Send + Sync),
+        ) -> Result<EncodeOutput, String> {
+            self.started.store(true, Ordering::Relaxed);
+            for _ in 0..100 {
+                if self.cancelled_jobs.lock().unwrap().contains(&job.id) {
+                    return Err("cancelled by user".into());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err("timed out waiting for cancellation".into())
+        }
+
+        fn cancel(&self, job_id: &JobId) -> Result<(), String> {
+            self.cancelled_jobs.lock().unwrap().push(job_id.clone());
+            Ok(())
+        }
+    }
+
+    let pool = WorkerManager::new(1);
+    let started = Arc::new(AtomicBool::new(false));
+    let cancelled_jobs = Arc::new(Mutex::new(Vec::new()));
+    pool.set_executor(Arc::new(BlockingEncoder {
+        started: started.clone(),
+        cancelled_jobs: cancelled_jobs.clone(),
+    }));
+
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let emitted_events = events.clone();
+    pool.set_progress_emitter(Box::new(move |job_id, stage, _progress, status| {
+        emitted_events.lock().unwrap().push((
+            job_id.to_string(),
+            stage.to_string(),
+            status.to_string(),
+        ));
+    }));
+
+    pool.submit(WorkerTask {
+        id: "single-cancel".into(),
+        file_name: "single-cancel.mkv".into(),
+        input_path: PathBuf::from("single-cancel.mkv"),
+        output_path: PathBuf::from("single-cancel-output.mkv"),
+        strategy: Default::default(),
+        snapshot: Default::default(),
+        status: TaskStatus::Pending,
+        progress: 0.0,
+        error_message: String::new(),
+        history_id: 0,
+        has_dolby_vision: false,
+        delete_source: false,
+    })
+    .unwrap();
+
+    for _ in 0..100 {
+        if started.load(Ordering::Relaxed) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(started.load(Ordering::Relaxed));
+
+    pool.cancel_task("single-cancel").unwrap();
+
+    for _ in 0..100 {
+        if events.lock().unwrap().iter().any(|event| {
+            event
+                == &(
+                    "single-cancel".to_string(),
+                    "done".to_string(),
+                    "cancelled".to_string(),
+                )
+        }) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    assert!(!pool.is_cancelled());
+    assert_eq!(cancelled_jobs.lock().unwrap().as_slice(), ["single-cancel"]);
+    assert!(events.lock().unwrap().iter().any(|event| {
+        event
+            == &(
+                "single-cancel".to_string(),
+                "done".to_string(),
+                "cancelled".to_string(),
+            )
+    }));
 }
 
 // ---------------------------------------------------------------------------
@@ -411,18 +512,7 @@ impl SnapshotStore for CapturingStore {
     ) -> Result<(), String> {
         Ok(())
     }
-    fn finish_compression(
-        &self,
-        _record_id: i64,
-        _status: &str,
-        _progress: f64,
-        _duration_seconds: i64,
-        _compressed_size: i64,
-        _error_message: &str,
-        _sidecar_path: &str,
-        _source_deleted: i32,
-        _ffmpeg_command: &str,
-    ) -> Result<(), String> {
+    fn finish_compression(&self, _params: FinishCompressionParams<'_>) -> Result<(), String> {
         Ok(())
     }
 }

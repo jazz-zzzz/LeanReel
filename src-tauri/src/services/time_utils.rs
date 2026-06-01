@@ -1,8 +1,8 @@
-/// Shared time utilities used by scanner and audit modules.
-///
-/// ⚠️  TODO: Uses hardcoded UTC+8 offset (China Standard Time).
-/// This will produce wrong timestamps for users in other timezones.
-/// Replace with `chrono::Local::now()` once the chrono dependency is added.
+//! Shared time utilities used by scanner and audit modules.
+//!
+//! ⚠️  TODO: Uses hardcoded UTC+8 offset (China Standard Time).
+//! This will produce wrong timestamps for users in other timezones.
+//! Replace with `chrono::Local::now()` once the chrono dependency is added.
 
 /// Convert Rata Die day number to (year, month, day).
 /// Algorithm: Howard Hinnant's civil_from_days (C++20 chrono).

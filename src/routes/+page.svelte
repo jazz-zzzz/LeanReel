@@ -5,7 +5,7 @@
   import { showHistory } from '$lib/stores/history';
   import { selectedLibraryId, selectedFolderId, libraries } from '$lib/stores/library';
   import { queue } from '$lib/stores/queue';
-  import { applyEncodeProgress } from '$lib/queueProgress.js';
+  import { applyEncodeProgress, hasActiveQueueItems, isTerminalQueueStatus } from '$lib/queueProgress.js';
   import { getLibraryFiles, getFolderFiles, scanDirectory, loadStrategies, startEncode, listLibraries, getSettings, saveSettings, type AppSettings, type FileEntry } from '$lib/api';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { listen } from '@tauri-apps/api/event';
@@ -35,8 +35,8 @@
   });
 
   let totalTasks = $derived($queue.length);
-  let doneTasks = $derived($queue.filter(t => t.status === 'done').length);
-  let failedTasks = $derived($queue.filter(t => t.status === 'failed' || t.status === 'cancelled').length);
+  let finishedTasks = $derived($queue.filter(t => isTerminalQueueStatus(t.status)).length);
+  let hasActiveTasks = $derived(hasActiveQueueItems($queue));
   let runningTasks = $derived($queue.filter(t => t.status === 'running'));
   let overallPct = $derived(totalTasks > 0 ? Math.round($queue.reduce((s, t) => s + (t.progress || 0), 0) / totalTasks) : 0);
 
@@ -252,14 +252,14 @@
             <div class="scan-progress-fill" style="width: {$scanProgress.total > 0 ? $scanProgress.done / $scanProgress.total * 100 : 0}%"></div>
           </div>
         {/if}
-        <button class="primary tasks-btn" class:pulse={totalTasks > 0 && doneTasks + failedTasks < totalTasks} onclick={() => showHistory.set(true)}>查看任务</button>
-        {#if totalTasks > 0 && doneTasks + failedTasks < totalTasks}
+        <button class="primary tasks-btn" class:pulse={hasActiveTasks} onclick={() => showHistory.set(true)}>查看任务</button>
+        {#if hasActiveTasks}
           <div class="encode-progress">
             <div class="encode-progress-bar">
               <div class="encode-progress-fill" style="width: {overallPct}%"></div>
             </div>
             <span class="encode-progress-text">
-              {overallPct}% {doneTasks}/{totalTasks}
+              {overallPct}% {finishedTasks}/{totalTasks}
               {#if displayTask}· {displayTask.fileName} {displayTask.progress}%{/if}{#if runningTasks.length > 1} +{runningTasks.length - 1}更多{/if}
             </span>
           </div>
