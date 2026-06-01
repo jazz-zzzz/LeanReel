@@ -70,6 +70,23 @@ impl Drop for GpuToken {
     }
 }
 
+struct TaskRegistration {
+    job_id: String,
+    submitted_jobs: Arc<Mutex<HashSet<String>>>,
+    cancelled_jobs: Arc<Mutex<HashSet<String>>>,
+}
+
+impl Drop for TaskRegistration {
+    fn drop(&mut self) {
+        if let Ok(mut submitted_jobs) = self.submitted_jobs.lock() {
+            submitted_jobs.remove(&self.job_id);
+            if let Ok(mut cancelled_jobs) = self.cancelled_jobs.lock() {
+                cancelled_jobs.remove(&self.job_id);
+            }
+        }
+    }
+}
+
 /// Maximum concurrent NVENC encode sessions for consumer GPUs (driver-limited to 3).
 const MAX_GPU_ENCODES: usize = 3;
 
@@ -79,6 +96,7 @@ pub struct WorkerManager {
     paused: Arc<AtomicBool>,
     cancelled: Arc<AtomicBool>,
     cancel_generation: Arc<AtomicUsize>,
+    submitted_jobs: Arc<Mutex<HashSet<String>>>,
     cancelled_jobs: Arc<Mutex<HashSet<String>>>,
     executor: Arc<Mutex<Option<Arc<dyn Encoder + Send + Sync>>>>,
     /// Optional probe runner for post-encode file_snapshot sync (H-020)
@@ -115,18 +133,13 @@ fn is_task_cancelled(
             .unwrap_or(false)
 }
 
-fn clear_cancelled_task(cancelled_jobs: &Mutex<HashSet<String>>, job_id: &str) {
-    if let Ok(mut jobs) = cancelled_jobs.lock() {
-        jobs.remove(job_id);
-    }
-}
-
 impl WorkerManager {
     pub fn new(max_workers: usize) -> Self {
         let max = if max_workers == 0 { 2 } else { max_workers };
         let paused = Arc::new(AtomicBool::new(false));
         let cancelled = Arc::new(AtomicBool::new(false));
         let cancel_generation = Arc::new(AtomicUsize::new(0));
+        let submitted_jobs = Arc::new(Mutex::new(HashSet::new()));
         let cancelled_jobs = Arc::new(Mutex::new(HashSet::new()));
         let last_progress = Arc::new(Mutex::new(0.0f32));
         let executor: Arc<Mutex<Option<Arc<dyn Encoder + Send + Sync>>>> =
@@ -154,6 +167,7 @@ impl WorkerManager {
             let rx = rx.clone();
             let paused = paused.clone();
             let cancel_generation = cancel_generation.clone();
+            let submitted_jobs = submitted_jobs.clone();
             let cancelled_jobs = cancelled_jobs.clone();
             let last_progress = last_progress.clone();
             let executor = executor.clone();
@@ -173,6 +187,11 @@ impl WorkerManager {
                 };
                 match cmd {
                     Ok(WorkerCommand::Submit(task, task_generation)) => {
+                        let _task_registration = TaskRegistration {
+                            job_id: task.id.clone(),
+                            submitted_jobs: submitted_jobs.clone(),
+                            cancelled_jobs: cancelled_jobs.clone(),
+                        };
                         if is_task_cancelled(
                             &cancel_generation,
                             task_generation,
@@ -194,7 +213,6 @@ impl WorkerManager {
                                 },
                             );
                             emit_progress(&progress_emitter, &task.id, "done", 100.0, "cancelled");
-                            clear_cancelled_task(&cancelled_jobs, &task.id);
                             continue;
                         }
                         while paused.load(Ordering::Relaxed)
@@ -228,7 +246,6 @@ impl WorkerManager {
                                 },
                             );
                             emit_progress(&progress_emitter, &task.id, "done", 100.0, "cancelled");
-                            clear_cancelled_task(&cancelled_jobs, &task.id);
                             continue;
                         }
                         let enc = {
@@ -355,7 +372,6 @@ impl WorkerManager {
                                     100.0,
                                     "cancelled",
                                 );
-                                clear_cancelled_task(&cancelled_jobs, &task.id);
                                 cleanup_temp(&final_output);
                                 continue;
                             }
@@ -436,7 +452,6 @@ impl WorkerManager {
                                             100.0,
                                             "cancelled",
                                         );
-                                        clear_cancelled_task(&cancelled_jobs, &task.id);
                                         cleanup_temp(&final_output);
                                         continue;
                                     }
@@ -607,7 +622,6 @@ impl WorkerManager {
                                                 "cancelled",
                                             );
                                             cleanup_temp(&final_output);
-                                            clear_cancelled_task(&cancelled_jobs, &task.id);
                                         }
                                         continue;
                                     }
@@ -749,9 +763,6 @@ impl WorkerManager {
                                         status,
                                     );
                                     cleanup_temp(&final_output);
-                                    if status == "cancelled" {
-                                        clear_cancelled_task(&cancelled_jobs, &task.id);
-                                    }
                                     eprintln!("编码失败: {}", e);
                                 }
                             }
@@ -768,6 +779,7 @@ impl WorkerManager {
             paused,
             cancelled,
             cancel_generation,
+            submitted_jobs,
             cancelled_jobs,
             executor,
             prober,
@@ -835,9 +847,21 @@ impl WorkerManager {
     pub fn submit(&self, task: WorkerTask) -> Result<(), String> {
         self.cancelled.store(false, Ordering::Relaxed);
         let generation = self.cancel_generation.load(Ordering::Relaxed);
-        self.sender
+        let job_id = task.id.clone();
+        self.submitted_jobs
+            .lock()
+            .map_err(|_| "submitted jobs lock poisoned".to_string())?
+            .insert(job_id.clone());
+        if let Err(e) = self
+            .sender
             .send(WorkerCommand::Submit(Box::new(task), generation))
-            .map_err(|e| format!("submit failed: {}", e))
+        {
+            if let Ok(mut submitted_jobs) = self.submitted_jobs.lock() {
+                submitted_jobs.remove(&job_id);
+            }
+            return Err(format!("submit failed: {}", e));
+        }
+        Ok(())
     }
 
     /// Submit an encoding task. Derives the output path from output_dir and the snapshot file name,
@@ -884,10 +908,18 @@ impl WorkerManager {
         }
     }
     pub fn cancel_task(&self, job_id: &str) -> Result<(), String> {
+        let submitted_jobs = self
+            .submitted_jobs
+            .lock()
+            .map_err(|_| "submitted jobs lock poisoned".to_string())?;
+        if !submitted_jobs.contains(job_id) {
+            return Ok(());
+        }
         self.cancelled_jobs
             .lock()
             .map_err(|_| "cancelled jobs lock poisoned".to_string())?
             .insert(job_id.to_string());
+        drop(submitted_jobs);
         let encoder = self
             .executor
             .lock()

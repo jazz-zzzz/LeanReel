@@ -226,7 +226,7 @@ impl SqliteSnapshotStore {
         let mapped = rows
             .query_map(params![batch_id], |row| {
                 let s: String = row.get(0)?;
-                let p: f64 = row.get(1)?;
+                let p: Option<f64> = row.get(1)?;
                 total += 1;
                 match s.as_str() {
                     "completed" => completed += 1,
@@ -237,7 +237,8 @@ impl SqliteSnapshotStore {
                     "running" => running += 1,
                     _ => pending_count += 1,
                 }
-                progress_sum += p.clamp(0.0, 100.0);
+                let p = p.unwrap_or(0.0);
+                progress_sum += if p.is_nan() { 0.0 } else { p.clamp(0.0, 100.0) };
                 Ok(())
             })
             .map_err(|e| e.to_string())?;

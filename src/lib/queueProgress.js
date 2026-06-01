@@ -51,6 +51,14 @@ export function hasActiveQueueItems(items) {
  * @param {QueueItem[]} items
  * @returns {QueueItem[]}
  */
+export function retainActiveQueueItems(items) {
+  return items.filter((item) => !isTerminalQueueStatus(item.status));
+}
+
+/**
+ * @param {QueueItem[]} items
+ * @returns {QueueItem[]}
+ */
 export function cancelActiveQueueItems(items) {
   return items.map((item) => {
     if (isTerminalQueueStatus(item.status)) return item;

@@ -5,7 +5,7 @@
   import { showHistory } from '$lib/stores/history';
   import { selectedLibraryId, selectedFolderId, libraries } from '$lib/stores/library';
   import { queue } from '$lib/stores/queue';
-  import { applyEncodeProgress, hasActiveQueueItems, isTerminalQueueStatus } from '$lib/queueProgress.js';
+  import { applyEncodeProgress, hasActiveQueueItems, isTerminalQueueStatus, retainActiveQueueItems } from '$lib/queueProgress.js';
   import { getLibraryFiles, getFolderFiles, scanDirectory, loadStrategies, startEncode, listLibraries, getSettings, saveSettings, type AppSettings, type FileEntry } from '$lib/api';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { listen } from '@tauri-apps/api/event';
@@ -204,7 +204,7 @@
       queue.update(current => {
         // Remove old entries for the same files
         const newNames = new Set(result.jobs.map(j => j.file_name));
-        const now = current.filter(i => !newNames.has(i.fileName));
+        const now = retainActiveQueueItems(current).filter(i => !newNames.has(i.fileName));
         for (const job of result.jobs) {
           now.push({
             id: job.id,

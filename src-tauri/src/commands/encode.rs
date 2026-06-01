@@ -136,7 +136,7 @@ pub fn start_encode(
         }
 
         // 4. Build proper WorkerTask with real Strategy and FileSnapshot
-        let job_id = format!("encode-{}", file_key);
+        let job_id = make_job_id(file_key);
         let task = WorkerTask {
             id: job_id.clone(),
             file_name: file_name.clone(),
@@ -177,6 +177,20 @@ fn parse_file_key(file_key: &str) -> Result<String, String> {
     } else {
         s
     })
+}
+
+fn make_job_id(file_key: &str) -> String {
+    format!("encode-{}-{}", file_key, uuid::Uuid::new_v4())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::make_job_id;
+
+    #[test]
+    fn job_ids_are_unique_for_repeated_submissions_of_the_same_file() {
+        assert_ne!(make_job_id("1:movie.mkv"), make_job_id("1:movie.mkv"));
+    }
 }
 
 #[tauri::command]

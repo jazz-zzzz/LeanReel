@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { applyEncodeProgress, cancelActiveQueueItems, cancelQueueItem, hasActiveQueueItems } from './queueProgress.js';
+import {
+  applyEncodeProgress,
+  cancelActiveQueueItems,
+  cancelQueueItem,
+  hasActiveQueueItems,
+  retainActiveQueueItems,
+} from './queueProgress.js';
 
 const pendingTask = {
   id: 'encode-movie.mkv',
@@ -110,4 +116,17 @@ test('marks only the selected queue item cancelled', () => {
   assert.equal(result[0].status, 'cancelled');
   assert.equal(result[0].progress, 100);
   assert.equal(result[1], otherTask);
+});
+
+test('removes historical terminal tasks before a new submission', () => {
+  const result = retainActiveQueueItems([
+    { ...pendingTask, id: 'done', status: 'done' },
+    { ...pendingTask, id: 'cancelled', status: 'cancelled' },
+    { ...pendingTask, id: 'failed', status: 'failed' },
+    { ...pendingTask, id: 'discarded', status: 'discarded' },
+    { ...pendingTask, id: 'running', status: 'running' },
+    { ...pendingTask, id: 'pending', status: 'pending' },
+  ]);
+
+  assert.deepEqual(result.map((item) => item.id), ['running', 'pending']);
 });

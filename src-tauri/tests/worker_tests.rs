@@ -5,7 +5,7 @@ use leanreel_rs_lib::domain::traits::{
 };
 use leanreel_rs_lib::services::worker::{EncodeTask, WorkerManager, WorkerTask};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 #[test]
@@ -145,6 +145,121 @@ fn test_worker_cancel_task_reports_cancelled_without_cancelling_the_queue() {
                 "cancelled".to_string(),
             )
     }));
+}
+
+#[test]
+fn test_worker_cancel_task_ignores_unknown_job() {
+    struct CountingEncoder {
+        runs: Arc<AtomicUsize>,
+    }
+
+    impl Encoder for CountingEncoder {
+        fn run(
+            &self,
+            _job: &EncodingJob,
+            _on_progress: &(dyn Fn(ProgressEvent) + Send + Sync),
+        ) -> Result<EncodeOutput, String> {
+            self.runs.fetch_add(1, Ordering::Relaxed);
+            Err("expected test failure".into())
+        }
+
+        fn cancel(&self, _job_id: &JobId) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    let pool = WorkerManager::new(1);
+    let runs = Arc::new(AtomicUsize::new(0));
+    pool.set_executor(Arc::new(CountingEncoder { runs: runs.clone() }));
+
+    pool.cancel_task("reused-id").unwrap();
+    pool.submit(WorkerTask {
+        id: "reused-id".into(),
+        file_name: "reused.mkv".into(),
+        input_path: PathBuf::from("reused.mkv"),
+        output_path: PathBuf::from("reused-output.mkv"),
+        strategy: Default::default(),
+        snapshot: Default::default(),
+        status: TaskStatus::Pending,
+        progress: 0.0,
+        error_message: String::new(),
+        history_id: 0,
+        has_dolby_vision: false,
+        delete_source: false,
+    })
+    .unwrap();
+
+    for _ in 0..100 {
+        if runs.load(Ordering::Relaxed) > 0 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    assert_eq!(runs.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn test_worker_late_cancel_after_completion_does_not_pollute_reused_id() {
+    struct CountingEncoder {
+        runs: Arc<AtomicUsize>,
+    }
+
+    impl Encoder for CountingEncoder {
+        fn run(
+            &self,
+            _job: &EncodingJob,
+            _on_progress: &(dyn Fn(ProgressEvent) + Send + Sync),
+        ) -> Result<EncodeOutput, String> {
+            self.runs.fetch_add(1, Ordering::Relaxed);
+            Err("expected test failure".into())
+        }
+
+        fn cancel(&self, _job_id: &JobId) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    fn make_task() -> WorkerTask {
+        WorkerTask {
+            id: "late-cancel".into(),
+            file_name: "late-cancel.mkv".into(),
+            input_path: PathBuf::from("late-cancel.mkv"),
+            output_path: PathBuf::from("late-cancel-output.mkv"),
+            strategy: Default::default(),
+            snapshot: Default::default(),
+            status: TaskStatus::Pending,
+            progress: 0.0,
+            error_message: String::new(),
+            history_id: 0,
+            has_dolby_vision: false,
+            delete_source: false,
+        }
+    }
+
+    let pool = WorkerManager::new(1);
+    let runs = Arc::new(AtomicUsize::new(0));
+    pool.set_executor(Arc::new(CountingEncoder { runs: runs.clone() }));
+
+    pool.submit(make_task()).unwrap();
+    for _ in 0..100 {
+        if runs.load(Ordering::Relaxed) == 1 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(runs.load(Ordering::Relaxed), 1);
+
+    pool.cancel_task("late-cancel").unwrap();
+    pool.submit(make_task()).unwrap();
+    for _ in 0..100 {
+        if runs.load(Ordering::Relaxed) == 2 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    assert_eq!(runs.load(Ordering::Relaxed), 2);
 }
 
 // ---------------------------------------------------------------------------

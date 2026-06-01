@@ -344,3 +344,42 @@ fn test_batch_progress_consumes_query_rows() {
     assert_eq!(progress["total"], 1);
     assert_eq!(progress["pending"], 1);
 }
+
+#[test]
+fn test_batch_progress_treats_nan_as_zero() {
+    let store = SqliteSnapshotStore::open_in_memory().unwrap();
+    ensure_folder(&store, 1, 1, "folder");
+    store
+        .upsert(&[make_test_snapshot(
+            "movie.mkv",
+            VideoCodec::H264,
+            HdrType::Sdr,
+        )])
+        .unwrap();
+    let snapshot = store
+        .get_by_folder_path(1, Path::new("movie.mkv"))
+        .unwrap()
+        .unwrap();
+    let record_id = store
+        .create_compression_record(CreateCompressionRecordParams {
+            file_snapshot_id: snapshot.id.unwrap(),
+            batch_id: "batch-nan",
+            strategy_name: "strategy",
+            original_size: snapshot.size_bytes,
+            output_path: "output.mkv",
+            encoder: "libx265",
+            cq_value: 23,
+            preset: "medium",
+            pix_fmt: "yuv420p",
+            audio_mode: "copy",
+            sub_mode: "copy",
+        })
+        .unwrap();
+
+    store
+        .update_compression_runtime(record_id, "running", f64::NAN, "transcoding", 0)
+        .unwrap();
+
+    let progress = store.get_batch_progress("batch-nan").unwrap();
+    assert_eq!(progress["percentage"], 0.0);
+}
