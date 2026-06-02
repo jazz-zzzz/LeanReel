@@ -24,6 +24,7 @@
   }));
 
   let sorted = $derived(sortList(filtered, sortKey, sortAsc));
+  let totalSaved = $derived($history.reduce((sum, e) => sum + (e.source_size_bytes || 0) - (e.output_size_bytes || 0), 0));
 
   function deltaBytes(rec: HistoryEntry): number {
     return (rec.source_size_bytes || 0) - (rec.output_size_bytes || 0);
@@ -142,6 +143,9 @@
       </div>
       {#if activeTasks.length > 0}
         <button class="ghost danger" onclick={cancelAllTasks}>全部取消</button>
+      {/if}
+      {#if totalSaved > 0}
+        <span class="total-saved">累计节省 {formatBytes(totalSaved)}</span>
       {/if}
     </div>
 
@@ -302,6 +306,13 @@
     font-size: var(--font-size-body);
     font-weight: 600;
     color: var(--text-primary);
+  }
+  .total-saved {
+    margin-left: auto;
+    font-size: var(--font-size-label);
+    color: var(--success);
+    font-weight: 600;
+    white-space: nowrap;
   }
   .back-arrow { font-size: 14px; margin-right: 4px; }
 
