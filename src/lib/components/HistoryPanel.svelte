@@ -128,7 +128,7 @@
 
 <svelte:window onkeydown={(e) => { if (e.key === 'Escape') closePanel(); }} />
 
-<div class="history-overlay" onclick={closePanel} role="dialog">
+<div class="history-overlay" class:visible={$showHistory} onclick={closePanel} role="dialog">
   <div class="history-sheet" onclick={(e) => e.stopPropagation()}>
     <div class="history-header" data-tauri-drag-region>
       <button class="ghost" onclick={closePanel}>
@@ -269,6 +269,10 @@
   .clickable:hover { color: var(--accent-hover); }
 
   .history-overlay {
+    display: none;
+  }
+  .history-overlay.visible {
+    display: block;
     position: fixed; inset: 0; z-index: 1000;
     background: rgba(0, 0, 0, 0.45);
     backdrop-filter: blur(4px);

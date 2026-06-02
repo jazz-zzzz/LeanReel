@@ -294,9 +294,7 @@
 
 </div>
 
-{#if $showHistory}
-  <HistoryPanel />
-{/if}
+<HistoryPanel />
 
 {#if showSettings}
   <div class="dialog-overlay" onclick={() => showSettings = false} onkeydown={(e) => e.key === 'Escape' && (showSettings = false)}>
