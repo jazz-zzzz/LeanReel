@@ -1,0 +1,22 @@
+{
+  "name": "CPU x265 CRF18 FRDS 胶片级",
+  "description": "FRDS 组参数移植。CRF18.5、psy-rd 2.0、关闭 SAO、降低去块——极致纹理保留，4K HDR 蓝光源接近视觉透明。速度极慢。",
+  "is_preset": true,
+  "video": {
+    "encoder": "libx265",
+    "crf": 18,
+    "preset": "slow",
+    "pix_fmt": "yuv420p10le",
+    "x265_params": "aq-mode=3:aq-strength=0.80:psy-rd=2.00:psy-rdoq=3.00:deblock=-1:-1:no-sao:ref=5:bframes=8:rc-lookahead=60:rect=1:pmode=1:cbqpoffs=-3:crqpoffs=-3:ipratio=1.40:pbratio=1.30:qcomp=0.70:vbv-maxrate=160000:vbv-bufsize=160000",
+    "gpu": false,
+    "nv_preset": "",
+    "rc": "",
+    "cq": 0
+  },
+  "hdr": {"mode": "preserve_hdr10", "dv_handling": "reinject_rpu"},
+  "audio": {"mode": "keep_original", "remove_commentary": false},
+  "subtitle": {"mode": "keep_all"},
+  "filters": {"skip_x265": true, "min_size_gb": null, "only_remux": false},
+  "estimated_savings": "20-40%",
+  "quality_impact": "存档级画质，速度约为实时 0.3-0.5x。适合精选收藏，不适合批量"
+}
