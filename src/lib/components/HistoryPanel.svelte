@@ -269,14 +269,18 @@
   .clickable:hover { color: var(--accent-hover); }
 
   .history-overlay {
-    display: none;
-  }
-  .history-overlay.visible {
-    display: block;
     position: fixed; inset: 0; z-index: 1000;
     background: rgba(0, 0, 0, 0.45);
     backdrop-filter: blur(4px);
     -webkit-backdrop-filter: blur(4px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.1s;
+    will-change: opacity;
+  }
+  .history-overlay.visible {
+    opacity: 1;
+    pointer-events: auto;
   }
   .history-sheet {
     height: 100%;
