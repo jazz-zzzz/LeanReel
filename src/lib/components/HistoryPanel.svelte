@@ -24,7 +24,7 @@
   }));
 
   let sorted = $derived(sortList(filtered, sortKey, sortAsc));
-  let totalSaved = $derived($history.reduce((sum, e) => sum + (e.source_size_bytes || 0) - (e.output_size_bytes || 0), 0));
+  let totalSaved = $derived($history.reduce((sum, e) => sum + (e.success ? (e.source_size_bytes || 0) - (e.output_size_bytes || 0) : 0), 0));
 
   function deltaBytes(rec: HistoryEntry): number {
     return (rec.source_size_bytes || 0) - (rec.output_size_bytes || 0);
