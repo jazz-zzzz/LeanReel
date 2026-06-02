@@ -2,8 +2,9 @@
   import { onMount } from 'svelte';
   import { showHistory } from '$lib/stores/history';
   import { queue } from '$lib/stores/queue';
-  import { cancelActiveQueueItems, cancelQueueItem } from '$lib/queueProgress.js';
+  import { cancelActiveQueueItems, cancelQueueItem, isTerminalQueueStatus } from '$lib/queueProgress.js';
   import { getHistory, cancelEncode, cancelTask } from '$lib/api';
+  import { listen } from '@tauri-apps/api/event';
   import type { HistoryEntry } from '$lib/stores/history';
 
   let history = $state<HistoryEntry[]>([]);
@@ -27,11 +28,17 @@
       catch (e) { error = `加载失败: ${e}`; }
       finally { loading = false; }
     })();
-    // Auto-refresh every 5s while active tasks are running
+    // Auto-refresh every 5s while panel is open
     const timer = setInterval(async () => {
       try { history = await getHistory(); } catch (_) {}
     }, 5000);
-    return () => clearInterval(timer);
+    // Also refresh immediately when a task finishes
+    const unlisten = listen<{job_id: string, status: string}>('encode-progress', (event) => {
+      if (isTerminalQueueStatus(event.payload.status)) {
+        void getHistory().then(h => history = h).catch(() => {});
+      }
+    });
+    return () => { clearInterval(timer); void unlisten.then(fn => fn()); };
   });
 
   let filtered = $derived(history.filter(e => {
