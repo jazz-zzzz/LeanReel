@@ -1,6 +1,18 @@
 # LeanReel
 
-桌面视频批量压缩工具。将 H.264/HEVC 视频转码为 AV1 或 HEVC，大幅缩减存储体积——**1,747 个文件从 2.4 TB 压缩到 974 GB，平均节省 59%。**
+<div align="center">
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078D6?logo=windows)](https://github.com/jazz-zzzz/LeanReel/releases)
+[![Release](https://img.shields.io/github/v/release/jazz-zzzz/LeanReel?label=release)](https://github.com/jazz-zzzz/LeanReel/releases/latest)
+[![Rust](https://img.shields.io/badge/built%20with-Rust-orange?logo=rust)](https://www.rust-lang.org/)
+[![Tauri 2](https://img.shields.io/badge/powered%20by-Tauri%202-FFC131?logo=tauri)](https://v2.tauri.app/)
+
+</div>
+
+桌面视频批量压缩工具。利用 GPU 硬件编码将 H.264/HEVC 视频转码为 AV1 或 HEVC，大幅缩减存储体积，同时保留画质。
+
+**实测数据**：1,747 个文件，2.4 TB → 973.9 GB，平均节省 59%。
 
 <p align="center">
   <img src="docs/screenshot.png" alt="LeanReel 主界面" width="800">
@@ -8,97 +20,123 @@
 
 ## 安装
 
-从 [Releases](https://github.com/jazz-zzzz/LeanReel/releases) 下载最新 `.msi` 或 `.exe` 安装包，双击安装。
+从 [Releases](https://github.com/jazz-zzzz/LeanReel/releases) 下载 `leanreel-rs_*.exe` 安装包（~3 MB），双击安装。
 
-**系统要求：**
+**系统要求**
+
 - Windows 10/11 x64
-- 自备 [FFmpeg](https://www.gyan.dev/ffmpeg/builds/)（首次启动在设置中配置路径）
-- GPU 编码需 NVIDIA RTX 显卡（CPU 编码无此要求）
+- 自备 [FFmpeg](https://www.gyan.dev/ffmpeg/builds/)（首次启动在设置面板配置路径）
+- GPU 编码需 NVIDIA RTX 系列显卡。CPU 编码（libx265）无此要求
+
+单个 exe，无 Node.js、Python、.NET 运行时依赖。SQLite 和 WebView 静态编译进二进制。
 
 ## 功能
 
-- **批量编码** — 选中目录一次性处理成百上千个文件，16 线程并行
-- **GPU 加速** — 支持 AV1/HEVC/H.264 NVENC 硬件编码，RTX 40 系列 AV1 编码速度 8-15× 实时
-- **智能限流** — 自动控制 GPU 并发会话数，避免驱动层报错
-- **多种策略** — 内置 AV1 CQ28 保画质 / CQ32 均衡快速 / CPU x265 慢速高质量，支持自定义
-- **实时进度** — 多任务轮播展示进度、FPS、码率、SMB 网络吞吐
-- **性能采样** — 每任务自动采集编码 FPS/码率，NAS 场景采集 SMB 读写速率和 I/O 队列
+- **GPU 硬件编码** — AV1 / HEVC / H.264 NVENC 三选一，RTX 40 系列 AV1 速度 8-15× 实时
+- **16 线程并行** — 自动区分 CPU/GPU 编码，CPU 任务不受限制，GPU 任务通过通道信号量排队
+- **智能 GPU 限流** — NVIDIA 消费级显卡硬限制 3 个并发 NVENC 会话，工具自动排队避免驱动报错
+- **内置策略** — AV1 CQ28 保画质、AV1 CQ32 均衡快速、x265 CRF18 慢速高质量，支持自定义编码参数
+- **实时进度** — 多任务轮播展示文件名和进度，显示整体完成百分比
+- **性能采样** — 每任务采集编码 FPS、平均码率、进程级 I/O 读写速率（`GetProcessIoCounters`），自动区分本地/SMB/混合存储拓扑
 - **原子写入** — 临时文件编码完成后 `rename` 到目标路径，崩溃不丢源文件
-- **超大保护** — 输出大于源文件自动丢弃，避免反向压缩
-- **历史追溯** — 全部编码记录可查，含完整 FFmpeg 命令行和性能数据
+- **超大保护** — 输出大于源文件自动丢弃输出
+- **完整追溯** — 所有历史记录可查，含完整 FFmpeg 命令行、编码参数、性能数据
 
 ## 使用
 
-1. **添加库** — 左侧面板创建库，添加视频目录
-2. **扫描** — 点击"扫描"，自动用 ffprobe 探测所有文件的编码/HDR/音轨信息
-3. **选择文件** — 表格中勾选要处理的文件（支持 Ctrl/Shift 批量选）
-4. **选择策略** — 右侧面板选择编码策略，或自定义参数
-5. **开始编码** — 底部"开始编码"按钮，支持删除源文件选项
-6. **查看结果** — 顶部"查看任务"面板查看历史、性能数据和累计节省空间
+1. **新建库** → 左侧面板创建库，添加一个或多个视频目录
+2. **扫描目录** → ffprobe 自动探测编码格式、HDR 类型、音轨/字幕信息
+3. **选择文件** → 表格中勾选目标文件（支持 Ctrl/Shift 批量操作），支持按编码/大小/策略匹配过滤
+4. **选择策略** → 右侧面板点选预设策略，或自定义编码器、CQ/CRF、Preset 参数
+5. **开始编码** → 可选"编码后删除源文件"
+6. **查看结果** → 顶部「查看任务」面板展示历史记录、累计节省空间、逐任务性能指标
 
 ## 策略
 
-| 策略 | 编码器 | 参数 | 适用场景 |
-|------|--------|------|----------|
-| AV1 CQ28 保画质 | `av1_nvenc` | CQ28, preset p6 | 高画质需求，适合电影/动画蓝光源 |
-| AV1 CQ32 均衡快速 | `av1_nvenc` | CQ32, preset p5 | 日常批量压缩，体积优先 |
-| x265 CRF18 慢速 | `libx265` | CRF18, preset slow | CPU 高质量，兼容无 NVIDIA 环境 |
+| 策略 | 编码器 | CQ/CRF | Preset | 适用场景 |
+|------|--------|--------|--------|----------|
+| AV1 CQ28 保画质 | `av1_nvenc` | CQ 28 | p6 | 高画质，适合蓝光电影、动画 BD 源 |
+| AV1 CQ32 均衡快速 | `av1_nvenc` | CQ 32 | p5 | 批量处理，体积优先，日用首选 |
+| x265 CRF18 慢速 | `libx265` | CRF 18 | slow | CPU 编码，无 NVIDIA 显卡时使用 |
 
-> **提示**：AV1 对高码率蓝光源（>5 Mbps）压缩效果极佳，但对已高度压缩的低码率文件（<2 Mbps）可能反而膨胀。遇到膨胀会自动丢弃输出。
+自定义策略支持指定编码器、CQ/CRF、Preset、音频/字幕处理模式。
 
-## 架构
+> AV1 对高码率源（蓝光原盘、大体积 H.264）效果极佳；对已压缩到极限的低码率文件（动画 TV 源 < 2 Mbps）可能膨胀。工具自动丢弃输出大于源的结果。
+
+## 技术架构
 
 ```
-策略 JSON 配置
-      │
-  ┌───▼──────────────┐
-  │ 命令层 (commands) │  Tauri IPC 入口
-  └───┬──────────────┘
-  ┌───▼──────────────┐
-  │ 服务层 (services) │  扫描/匹配/流水线/Worker 线程池
-  └───┬──────────────┘
-  ┌───▼───────────────┐
-  │ 基础设施 (infra)   │  FFmpeg/FFprobe/SQLite/SMB 采样
-  └───┬───────────────┘
-  ┌───▼──────┐
-  │ 领域模型  │  类型定义与接口
-  └──────────┘
+前端 (Svelte 5)                   后端 (Rust)
+──────────────                    ────────────
+invoke('scan')    ──IPC──→   #[tauri::command] fn scan()
+invoke('encode')  ──IPC──→   #[tauri::command] fn start_encode()
+emit('progress')  ←──事件──   Worker::emit_progress()
+
+         │                              │
+         └──── Tauri IPC 桥 ────────────┘
 ```
 
-**编码流水线**：Prepare → Transcode → MoveOut，原子提交，失败自动清理。
+**架构层级**（单向依赖）：Commands → Services → Infrastructure → Domain
 
-**GPU 并发控制**：NVIDIA 消费级显卡驱动限制 3 个并发 NVENC 会话。超过此数会触发 `NV_ENC_ERR_INVALID_PARAM`。本工具用 Channel 令牌信号量自动排队——GPU 任务获取令牌后执行、完成后归还，CPU 任务不受影响。
+- **Commands**：Tauri 命令入口，接收前端调用，返回结果或触发事件
+- **Services**：Worker 线程池（16 线程）、策略匹配器、编码流水线
+- **Infrastructure**：FFmpeg/FFprobe 子进程管理、SQLite 持久化、Windows 进程 I/O 采样
+- **Domain**：类型定义（`Strategy`、`EncodeOutput`、`IoMetrics`）与 trait 接口
+
+**编码流水线**：Prepare（创建输出目录）→ Transcode（spawn ffmpeg）→ MoveOut（原子 rename）。三阶段固定，失败自动清理临时文件。
+
+**GPU 并发控制**：
 
 ```
 16 线程池
-  ├─ CPU (libx265) ────────────→ 直接执行
-  └─ GPU (NVENC) ──→ 取令牌 ──→ 编码 ──→ 还令牌
-                      ↑ 最多 3 个并发
+  ├─ CPU (libx265) ────────────→ 绕过信号量，直接执行
+  └─ GPU (NVENC) ──→ 取令牌 ──→ 编码 ──→ 还令牌（Drop RAII）
+                      ↑ 最多 3 个并发（MPSc channel 预填 3 令牌）
 ```
 
-**I/O 优化**：NAS 编码场景通过 `-pkt_size 8MB` 扩大 FFmpeg 文件协议缓冲、关闭 Windows SMB 带宽节流（`EnableBandwidthThrottling=false`），确保网络吞吐最大化。
+`mpsc::channel` 天然 FIFO 保证公平排队，`GpuToken` 在 Drop 时自动归还令牌，异常安全。
+
+**I/O 优化**：
+
+- `-pkt_size 8MB` 覆盖 FFmpeg file 协议默认 32 KB 缓冲，NAS 场景大幅减少 ReadFile 次数
+- Windows SMB 带宽节流关闭（`EnableBandwidthThrottling=false`），避免系统主动限速
+- 进程级 I/O 采样通过 `GetProcessIoCounters` 直接读取子进程计数器，替代共享级 `typeperf` 方案，实现逐任务隔离
 
 ## 从源码构建
 
 ```powershell
-# 需要 Rust 工具链 + pnpm
+# 依赖: Rust 工具链 + pnpm
 pnpm install
-pnpm tauri build
+pnpm tauri build     # 产物在 src-tauri/target/release/bundle/
 ```
-
-输出在 `src-tauri/target/release/bundle/`。
 
 ## FAQ
 
-**Q: 为什么 AV1 编码有些文件反而变大？**  
-A: AV1 在 CQ28 下对低码率源（<2 Mbps）可能膨胀。这类文件的 H.264 压缩已接近极限，AV1 试图保留那些"细节"（本质是编码噪声）反而产生反向压缩。工具会自动丢弃输出大于源的结果。
+**AV1 编码为什么有些文件反而变大？**
 
-**Q: 支持 Mac/Linux 吗？**  
-A: 目前仅 Windows。Tauri 框架本身跨平台，但 GPU 编码路径和 SMB 采样依赖 Windows 特定 API。
+低码率 H.264 源（< 2 Mbps）已接近压缩极限，AV1 在 CQ28 质量级下将编码噪声当作细节保留，反向膨胀。工具自动丢弃输出大于源的结果。详见 [#34](https://github.com/jazz-zzzz/LeanReel/issues) 审计数据。
 
-**Q: 为什么限制 3 个并发 GPU 编码？**  
-A: NVIDIA 消费级驱动硬限制，无法绕过。CPU 编码（libx265）无此限制。
+**为什么限制 3 个并发 GPU 编码？**
+
+NVIDIA 消费级 GPU 驱动硬限制 3 个并发 NVENC 会话，无法通过软件绕过。CPU 编码（libx265）不受此限，16 线程可以全速并行。
+
+**支持 Mac/Linux 吗？**
+
+目前仅 Windows。Tauri 2 框架跨平台，但 `GetProcessIoCounters` 和 SMB 调优依赖 Windows API。欢迎 PR 适配。
+
+## 贡献
+
+欢迎提交 Issue 或 PR。新功能或重大改动建议先开 Issue 讨论方案。
+
+本地开发：`pnpm tauri dev`，需要本地安装 FFmpeg 并在设置面板配置路径。
+
+## 致谢
+
+- [Tauri](https://v2.tauri.app/) — 轻量级桌面应用框架
+- [FFmpeg](https://ffmpeg.org/) — 音视频处理引擎
+- [Svelte](https://svelte.dev/) — 响应式 UI 框架
+- [rusqlite](https://github.com/rusqlite/rusqlite) — Rust SQLite 绑定
 
 ## 许可
 
-MIT
+MIT © 2026
