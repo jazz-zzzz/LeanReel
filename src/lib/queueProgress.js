@@ -34,6 +34,7 @@ function statusLabel(status) {
  */
 export function isTerminalQueueStatus(status) {
   return status === 'done'
+    || status === 'completed'
     || status === 'failed'
     || status === 'cancelled'
     || status === 'discarded';
