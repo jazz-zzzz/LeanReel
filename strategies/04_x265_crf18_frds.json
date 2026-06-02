@@ -1,6 +1,6 @@
 {
-  "name": "CPU x265 CRF18 FRDS 胶片级",
-  "description": "FRDS 组参数移植。CRF18.5、psy-rd 2.0、关闭 SAO、降低去块——极致纹理保留，4K HDR 蓝光源接近视觉透明。速度极慢。",
+  "name": "CPU x265 CRF18 胶片级",
+  "description": "CRF18、psy-rd 2.0、关闭 SAO、降低去块——极致纹理保留，4K HDR 蓝光源接近视觉透明。速度极慢。",
   "is_preset": true,
   "video": {
     "encoder": "libx265",
