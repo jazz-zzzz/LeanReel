@@ -2,11 +2,11 @@
   import { onMount } from 'svelte';
   import { files, scanStatus, scanProgress, selectedFilePaths } from '$lib/stores/files';
   import { strategies, selectedStrategy } from '$lib/stores/strategy';
-  import { showHistory } from '$lib/stores/history';
+  import { showHistory, history } from '$lib/stores/history';
   import { selectedLibraryId, selectedFolderId, libraries } from '$lib/stores/library';
   import { queue } from '$lib/stores/queue';
   import { applyEncodeProgress, hasActiveQueueItems, isTerminalQueueStatus, retainActiveQueueItems } from '$lib/queueProgress.js';
-  import { getLibraryFiles, getFolderFiles, scanDirectory, loadStrategies, startEncode, listLibraries, getSettings, saveSettings, type AppSettings, type FileEntry } from '$lib/api';
+  import { getLibraryFiles, getFolderFiles, scanDirectory, loadStrategies, startEncode, listLibraries, getSettings, saveSettings, getHistory, type AppSettings, type FileEntry } from '$lib/api';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { listen } from '@tauri-apps/api/event';
   import { open } from '@tauri-apps/plugin-dialog';
@@ -86,6 +86,16 @@
       appSettings = await getSettings();
     } catch (_) {}
     listen<string>('tool-status', (e) => { toolWarning = e.payload; });
+
+    // Preload history in background so the panel opens instantly
+    void getHistory().then(h => history.set(h)).catch(() => {});
+    const histTimer = setInterval(() => { void getHistory().then(h => history.set(h)).catch(() => {}); }, 10000);
+    const unlistenHist = listen<{status: string}>('encode-progress', (event) => {
+      if (isTerminalQueueStatus(event.payload.status)) {
+        void getHistory().then(h => history.set(h)).catch(() => {});
+      }
+    });
+
     const unlisten = listen<{job_id: string, stage: string, progress: number, status: string}>('encode-progress', (event) => {
       scanStatus.set(`${event.payload.stage}: ${Math.round(event.payload.progress)}%`);
       queue.update(items => applyEncodeProgress(items, event.payload));
