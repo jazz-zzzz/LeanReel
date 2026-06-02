@@ -62,21 +62,29 @@ pub struct EncodeOutput {
     pub max_fps: f32,
     /// Average encoding bitrate in kbps.
     pub avg_bitrate_kbps: u32,
-    /// SMB performance metrics sampled during encoding.
-    pub smb_metrics: Option<SmbMetrics>,
+    /// Per-process I/O metrics measured during encoding.
+    pub io_metrics: Option<IoMetrics>,
 }
 
 /// SMB client performance counters sampled during an encoding task.
+/// Deprecated: kept for reading legacy history records. New encodes use IoMetrics.
 #[derive(Debug, Clone, PartialEq, Default, serde::Serialize)]
 pub struct SmbMetrics {
-    /// Average Read Bytes/sec over the sample period.
     pub read_bytes_per_sec: f64,
-    /// Average Write Bytes/sec over the sample period.
     pub write_bytes_per_sec: f64,
-    /// Average bytes per SMB data request.
     pub avg_data_bytes_per_request: f64,
-    /// Average data queue length.
     pub avg_data_queue_length: f64,
+}
+
+/// Process I/O counters sampled during an encoding task.
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize)]
+pub struct IoMetrics {
+    /// Storage topology: local, smb, or mixed.
+    pub io_type: String,
+    /// Average read bytes/sec over the measurement window.
+    pub read_bytes_per_sec: f64,
+    /// Average write bytes/sec over the measurement window.
+    pub write_bytes_per_sec: f64,
 }
 
 /// 文件快照持久化

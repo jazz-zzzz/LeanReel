@@ -1,9 +1,8 @@
 use crate::domain::models::{FileSnapshot, Strategy, TaskStatus};
 use crate::domain::traits::{
-    Encoder, EncodingJob, FinishCompressionParams, MediaProber, ProgressEvent, SmbMetrics,
+    Encoder, EncodingJob, FinishCompressionParams, IoMetrics, MediaProber, ProgressEvent,
     SnapshotStore,
 };
-use crate::infrastructure::smb_metrics::spawn_smb_sampler;
 use crate::services::pipeline::{atomic_commit, cleanup_temp, temp_output_path, PipelinePlan};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -350,15 +349,6 @@ impl WorkerManager {
                             } else {
                                 None
                             };
-                            // Start SMB performance sampling in background
-                            let smb_sampler: Option<(
-                                Arc<AtomicBool>,
-                                thread::JoinHandle<SmbMetrics>,
-                            )> = {
-                                let path_str = task.input_path.to_string_lossy();
-                                extract_share_unc(&path_str)
-                                    .and_then(|unc| spawn_smb_sampler(unc))
-                            };
                             if is_task_cancelled(
                                 &cancel_generation,
                                 task_generation,
@@ -438,13 +428,8 @@ impl WorkerManager {
                             });
 
                             // Stop SMB sampler and collect metrics
-                            let smb_metrics = smb_sampler.map(|(stop, handle)| {
-                                stop.store(true, Ordering::Relaxed);
-                                handle.join().unwrap_or_default()
-                            });
                             match result {
-                                Ok(mut output) => {
-                                    output.smb_metrics = smb_metrics;
+                                Ok(output) => {
                                     if is_task_cancelled(
                                         &cancel_generation,
                                         task_generation,
@@ -720,15 +705,11 @@ impl WorkerManager {
                                     };
 
                                     // C2: Mark compression record as completed
-                                    let perf_json = serde_json::json!({
-                                        "max_fps": output.max_fps,
-                                        "avg_bitrate_kbps": output.avg_bitrate_kbps,
-                                        "smb_read_bytes_sec": output.smb_metrics.as_ref().map_or(0.0, |m| m.read_bytes_per_sec),
-                                        "smb_write_bytes_sec": output.smb_metrics.as_ref().map_or(0.0, |m| m.write_bytes_per_sec),
-                                        "smb_avg_bytes_per_request": output.smb_metrics.as_ref().map_or(0.0, |m| m.avg_data_bytes_per_request),
-                                        "smb_avg_queue_length": output.smb_metrics.as_ref().map_or(0.0, |m| m.avg_data_queue_length),
-                                    })
-                                    .to_string();
+                                    let perf_json = performance_metrics_json(
+                                        output.max_fps,
+                                        output.avg_bitrate_kbps,
+                                        output.io_metrics.as_ref(),
+                                    );
                                     finish_record(
                                         &store,
                                         FinishCompressionParams {
@@ -1142,19 +1123,19 @@ fn sync_output_snapshot(
 
 /// Extract the `\\server\share` UNC prefix from a full UNC path.
 /// Returns `None` for non-UNC (local) paths.
-/// Extract the share name portion from a UNC path for Windows performance counters.
-/// `\\server\share\folder\file` → `\server\share` (single backslash prefix, counter format).
-fn extract_share_unc(path_str: &str) -> Option<String> {
-    if !path_str.starts_with("\\\\") {
-        return None;
-    }
-    let rest = &path_str[2..]; // skip leading \\
-    let parts: Vec<&str> = rest.splitn(3, '\\').collect();
-    if parts.len() >= 2 {
-        Some(format!("\\{}\\{}", parts[0], parts[1]))
-    } else {
-        None
-    }
+fn performance_metrics_json(
+    max_fps: f32,
+    avg_bitrate_kbps: u32,
+    io: Option<&IoMetrics>,
+) -> String {
+    serde_json::json!({
+        "max_fps": max_fps,
+        "avg_bitrate_kbps": avg_bitrate_kbps,
+        "io_type": io.map(|m| m.io_type.as_str()),
+        "io_read_bytes_sec": io.map(|m| m.read_bytes_per_sec),
+        "io_write_bytes_sec": io.map(|m| m.write_bytes_per_sec),
+    })
+    .to_string()
 }
 
 impl Drop for WorkerManager {

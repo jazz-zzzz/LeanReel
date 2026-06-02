@@ -3,6 +3,7 @@
   import { queue } from '$lib/stores/queue';
   import { cancelActiveQueueItems, cancelQueueItem } from '$lib/queueProgress.js';
   import { cancelEncode, cancelTask } from '$lib/api';
+  import { normalizeIoMetrics } from '$lib/ioMetrics.js';
   import type { HistoryEntry } from '$lib/stores/history';
 
   let statusFilter = $state<'all' | 'success' | 'failed'>('all');
@@ -192,14 +193,15 @@
               <th class="sortable mono-col" class:active={sortKey === 'source_deleted'} onclick={() => toggleSort('source_deleted')}>源已删{sortArrow('source_deleted')}</th>
               <th class="mono-col">FPS</th>
               <th class="mono-col">码率</th>
-              <th class="mono-col">SMB读</th>
-              <th class="mono-col">SMB写</th>
-              <th class="mono-col">B/Req</th>
+              <th class="mono-col">IO类型</th>
+              <th class="mono-col">IO读</th>
+              <th class="mono-col">IO写</th>
             </tr>
           </thead>
           <tbody>
             {#each sorted as rec, i (rec.id)}
               {@const p = parsePerf(rec.performance_metrics)}
+              {@const io = normalizeIoMetrics(rec.performance_metrics)}
               <tr class:alt={i % 2 === 1}>
                 <td class="col-status">
                   {#if rec.status === 'failed' && rec.error_message}
@@ -240,9 +242,9 @@
                 <td class="mono-col">{rec.source_deleted ? '已删' : '—'}</td>
                 <td class="mono-col">{p?.max_fps ? p.max_fps.toFixed(0) : '—'}</td>
                 <td class="mono-col">{p?.avg_bitrate_kbps ? (p.avg_bitrate_kbps > 999 ? (p.avg_bitrate_kbps/1000).toFixed(1)+'M' : p.avg_bitrate_kbps+'k') : '—'}</td>
-                <td class="mono-col">{fmtBytesSec(p?.smb_read_bytes_sec)}</td>
-                <td class="mono-col">{fmtBytesSec(p?.smb_write_bytes_sec)}</td>
-                <td class="mono-col">{fmtNum(p?.smb_avg_bytes_per_request, '')}</td>
+                <td class="mono-col">{io?.type || '—'}</td>
+                <td class="mono-col">{fmtBytesSec(io?.readBytesSec)}</td>
+                <td class="mono-col">{fmtBytesSec(io?.writeBytesSec)}</td>
               </tr>
             {/each}
           </tbody>

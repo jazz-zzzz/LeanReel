@@ -288,7 +288,7 @@ impl Encoder for TestEncoder {
             command: String::new(),
             max_fps: 0.0,
             avg_bitrate_kbps: 0,
-            smb_metrics: None,
+            io_metrics: None,
         };
         *self.output.lock().unwrap() = Some(out.clone());
         Ok(out)
@@ -442,7 +442,7 @@ fn test_encode_task_with_dolby_vision() {
                 command: String::new(),
                 max_fps: 0.0,
                 avg_bitrate_kbps: 0,
-                smb_metrics: None,
+                io_metrics: None,
             };
             *self.output.lock().unwrap() = Some(out.clone());
             Ok(out)

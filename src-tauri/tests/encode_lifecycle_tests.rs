@@ -76,7 +76,7 @@ impl Encoder for SpyEncoder {
             command: "ffmpeg -y -i input.mkv -c:v av1_nvenc -cq 28 out.mkv".into(),
             max_fps: 0.0,
             avg_bitrate_kbps: 0,
-            smb_metrics: None,
+            io_metrics: None,
         })
     }
 

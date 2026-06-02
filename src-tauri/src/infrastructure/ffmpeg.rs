@@ -5,8 +5,9 @@ use std::process::{Child, Command};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use crate::domain::traits::{EncodeOutput, Encoder, EncodingJob, JobId, ProgressEvent};
+use crate::domain::traits::{EncodeOutput, Encoder, EncodingJob, IoMetrics, JobId, ProgressEvent};
 use crate::infrastructure::ffmpeg_builder::build_ffmpeg_command;
+use crate::infrastructure::process_io::{io_type_for_paths, snapshot_process_io, summarize_io};
 
 pub struct FfmpegRunner {
     ffmpeg_path: Arc<Mutex<PathBuf>>,
@@ -207,6 +208,10 @@ impl FfmpegRunner {
             .take()
             .ok_or_else(|| "无法读取 ffmpeg stderr".to_string())?;
         let child = self.track_child(job.id.clone(), child)?;
+
+        // Capture initial I/O counters right after spawn
+        let io_start = snapshot_process_io(&*child.lock().map_err(|_| "互斥锁中毒".to_string())?);
+
         let mut err_tail = VecDeque::with_capacity(5);
         let mut line_count = 0u64;
         let mut max_fps: f32 = 0.0;
@@ -238,6 +243,13 @@ impl FfmpegRunner {
             }
             err_tail.push_back(line.to_string());
         })?;
+
+        // Capture final I/O snapshot while child handle is still alive
+        let io_end = {
+            let guard = child.lock().map_err(|_| "互斥锁中毒".to_string())?;
+            snapshot_process_io(&*guard)
+        };
+
         let status = child
             .lock()
             .map_err(|_| "互斥锁中毒".to_string())?
@@ -268,6 +280,14 @@ impl FfmpegRunner {
         } else {
             0
         };
+        let io_metrics = match (io_start, io_end) {
+            (Some(start), Some(end)) => {
+                let io_type = io_type_for_paths(&job.input_path, &job.output_path);
+                summarize_io(start, end, encode_start.elapsed(), io_type)
+            }
+            _ => None,
+        };
+
         Ok(EncodeOutput {
             output_path: job.output_path.clone(),
             original_size,
@@ -276,7 +296,7 @@ impl FfmpegRunner {
             command: ffmpeg_command.clone(),
             max_fps,
             avg_bitrate_kbps,
-            smb_metrics: None, // populated by the worker after SMB sampling
+            io_metrics,
         })
     }
 
