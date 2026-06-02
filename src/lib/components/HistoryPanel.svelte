@@ -147,7 +147,7 @@
 
 <div class="history-overlay" onclick={closePanel} role="dialog">
   <div class="history-sheet" onclick={(e) => e.stopPropagation()}>
-    <div class="history-header">
+    <div class="history-header" data-tauri-drag-region>
       <button class="ghost" onclick={closePanel}>
         <span class="back-arrow">←</span> 返回
       </button>
@@ -211,7 +211,6 @@
               <th class="mono-col">SMB读</th>
               <th class="mono-col">SMB写</th>
               <th class="mono-col">B/Req</th>
-              <th class="mono-col">队列</th>
             </tr>
           </thead>
           <tbody>
@@ -260,7 +259,6 @@
                 <td class="mono-col">{fmtBytesSec(p?.smb_read_bytes_sec)}</td>
                 <td class="mono-col">{fmtBytesSec(p?.smb_write_bytes_sec)}</td>
                 <td class="mono-col">{fmtNum(p?.smb_avg_bytes_per_request, '')}</td>
-                <td class="mono-col">{p?.smb_avg_queue_length != null ? p.smb_avg_queue_length.toFixed(1) : '—'}</td>
               </tr>
             {/each}
           </tbody>

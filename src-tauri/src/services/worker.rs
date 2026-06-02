@@ -357,7 +357,7 @@ impl WorkerManager {
                             )> = {
                                 let path_str = task.input_path.to_string_lossy();
                                 extract_share_unc(&path_str)
-                                    .and_then(|unc| spawn_smb_sampler(&unc))
+                                    .and_then(|unc| spawn_smb_sampler(unc))
                             };
                             if is_task_cancelled(
                                 &cancel_generation,
@@ -1142,14 +1142,16 @@ fn sync_output_snapshot(
 
 /// Extract the `\\server\share` UNC prefix from a full UNC path.
 /// Returns `None` for non-UNC (local) paths.
+/// Extract the share name portion from a UNC path for Windows performance counters.
+/// `\\server\share\folder\file` → `\server\share` (single backslash prefix, counter format).
 fn extract_share_unc(path_str: &str) -> Option<String> {
-    let s = path_str.replace('\\', "/");
-    if !s.starts_with("//") {
+    if !path_str.starts_with("\\\\") {
         return None;
     }
-    let parts: Vec<&str> = s.trim_start_matches('/').splitn(3, '/').collect();
+    let rest = &path_str[2..]; // skip leading \\
+    let parts: Vec<&str> = rest.splitn(3, '\\').collect();
     if parts.len() >= 2 {
-        Some(format!("\\\\{}\\{}", parts[0], parts[1]))
+        Some(format!("\\{}\\{}", parts[0], parts[1]))
     } else {
         None
     }

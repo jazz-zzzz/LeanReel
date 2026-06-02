@@ -11,11 +11,13 @@ use std::time::Duration;
 /// Returns a join handle and a stop flag. Caller sets the flag to stop
 /// sampling, then joins the handle to collect aggregated metrics.
 /// Returns `None` if `typeperf` isn't available (non-Windows or missing).
-pub fn spawn_smb_sampler(share_unc: &str) -> Option<(Arc<AtomicBool>, thread::JoinHandle<SmbMetrics>)> {
+pub fn spawn_smb_sampler(share_unc: String) -> Option<(Arc<AtomicBool>, thread::JoinHandle<SmbMetrics>)> {
     // typeperf only exists on Windows
     if !cfg!(windows) {
         return None;
     }
+
+    let share_label = share_unc.clone(); // for error messages inside the thread
 
     let counters = format!(
         "\"\\SMB Client Shares({})\\Read Bytes/sec\" \
@@ -28,7 +30,7 @@ pub fn spawn_smb_sampler(share_unc: &str) -> Option<(Arc<AtomicBool>, thread::Jo
     let mut child = match Command::new("typeperf")
         .args(["-si", "2", &counters])
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
     {
         Ok(c) => c,
@@ -82,6 +84,21 @@ pub fn spawn_smb_sampler(share_unc: &str) -> Option<(Arc<AtomicBool>, thread::Jo
 
         let _ = child.kill();
         let _ = child.wait();
+
+        // If we got no samples, typeperf likely failed — read stderr for diagnostics
+        if read_vals.is_empty() {
+            if let Some(stderr) = child.stderr.take() {
+                let err_text = BufReader::new(stderr)
+                    .lines()
+                    .filter_map(|l| l.ok())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if !err_text.is_empty() {
+                    eprintln!("SMB typeperf stderr: {}", err_text);
+                }
+            }
+            eprintln!("SMB 采样数据为空，检查计数器实例名是否正确: {}", share_label);
+        }
 
         let avg = |v: &[f64]| {
             if v.is_empty() {
