@@ -352,6 +352,7 @@
     border-bottom: 1px solid var(--border-subtle);
     white-space: nowrap;
   }
+  tbody tr { content-visibility: auto; contain-intrinsic-height: auto 38px; }
   tbody tr.alt { background: rgba(255, 255, 255, 0.015); }
   tbody tr:hover { background: var(--bg-hover); }
 
