@@ -38,16 +38,17 @@
   let finishedTasks = $derived($queue.filter(t => isTerminalQueueStatus(t.status)).length);
   let hasActiveTasks = $derived(hasActiveQueueItems($queue));
   let runningTasks = $derived($queue.filter(t => t.status === 'running'));
+  let runningCount = $derived(runningTasks.length);
   let overallPct = $derived(totalTasks > 0 ? Math.round($queue.reduce((s, t) => s + (t.progress || 0), 0) / totalTasks) : 0);
 
   // Rotate through running tasks display
   let rotateIdx = $state(0);
   $effect(() => {
-    if (runningTasks.length <= 1) return;
-    const timer = setInterval(() => rotateIdx = (rotateIdx + 1) % runningTasks.length, 1500);
+    if (runningCount <= 1) return;
+    const timer = setInterval(() => rotateIdx = (rotateIdx + 1) % runningCount, 1500);
     return () => clearInterval(timer);
   });
-  let displayTask = $derived(runningTasks.length > 0 ? runningTasks[rotateIdx % runningTasks.length] : null);
+  let displayTask = $derived(runningCount > 0 ? runningTasks[rotateIdx % runningCount] : null);
 
   onMount(async () => {
     listen<{done: number, total: number}>('scan-progress', (event) => {
