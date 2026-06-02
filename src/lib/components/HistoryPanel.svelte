@@ -12,8 +12,6 @@
   let sortAsc = $state(false);
   let cmdDetail = $state<string | null>(null);
   let showAllActive = $state(false);
-  let page = $state(1);
-  const perPage = 50;
 
   let activeTasks = $derived($queue.filter(q => q.status === 'pending' || q.status === 'running'));
   let visibleActive = $derived(showAllActive ? activeTasks : activeTasks.slice(0, 5));
@@ -26,11 +24,6 @@
   }));
 
   let sorted = $derived(sortList(filtered, sortKey, sortAsc));
-  let totalPages = $derived(Math.max(1, Math.ceil(sorted.length / perPage)));
-  let paged = $derived(sorted.slice((page - 1) * perPage, page * perPage));
-
-  // Reset page when filter or sort changes
-  $effect(() => { void sortKey; void statusFilter; page = 1; });
 
   function deltaBytes(rec: HistoryEntry): number {
     return (rec.source_size_bytes || 0) - (rec.output_size_bytes || 0);
@@ -200,7 +193,7 @@
             </tr>
           </thead>
           <tbody>
-            {#each paged as rec, i (rec.id)}
+            {#each sorted as rec, i (rec.id)}
               {@const p = parsePerf(rec.performance_metrics)}
               <tr class:alt={i % 2 === 1}>
                 <td class="col-status">
@@ -249,11 +242,6 @@
             {/each}
           </tbody>
         </table>
-      </div>
-      <div class="pagination">
-        <button class="ghost" disabled={page <= 1} onclick={() => page = Math.max(1, page - 1)}>← 上一页</button>
-        <span>{page} / {totalPages} ({sorted.length} 条)</span>
-        <button class="ghost" disabled={page >= totalPages} onclick={() => page = Math.min(totalPages, page + 1)}>下一页 →</button>
       </div>
     {/if}
   </div>
@@ -338,14 +326,6 @@
   .error { color: var(--danger); }
 
   .table-scroll { flex: 1; overflow: auto; }
-
-  .pagination {
-    display: flex; align-items: center; justify-content: center; gap: var(--space-md);
-    padding: var(--space-sm) var(--space-md);
-    border-top: 1px solid var(--border-subtle);
-    font-size: var(--font-size-label); color: var(--text-secondary);
-    flex-shrink: 0;
-  }
 
   table { width: 100%; border-collapse: collapse; min-width: 1300px; }
 
