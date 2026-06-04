@@ -333,18 +333,13 @@ fn test_complete_encode_lifecycle_via_submit_encode() {
     let output_content = std::fs::read(&output_path).expect("读取输出文件失败");
     assert!(!output_content.is_empty(), "输出文件不应为空");
 
-    // 10. 验证审计侧挂文件存在
+    // 10. 审计信息写入 SQL，不再生成 sidecar 文件
     let sidecar_path = PathBuf::from(format!("{}.leanreel.json", output_path.display()));
     assert!(
-        sidecar_path.exists(),
-        "审计侧挂文件应存在: {}",
+        !sidecar_path.exists(),
+        "不应生成审计 sidecar 文件: {}",
         sidecar_path.display()
     );
-
-    // 验证审计 JSON 内容
-    let audit_json = std::fs::read_to_string(&sidecar_path).expect("读取审计文件失败");
-    assert!(audit_json.contains("AV1 NVENC CQ28"), "审计应包含策略名称");
-    assert!(audit_json.contains("av1_nvenc"), "审计应包含编码器名称");
 
     // 11. 验证临时文件已清理
     let temp_path = temp_output_path(&output_path);
@@ -379,6 +374,13 @@ fn test_complete_encode_lifecycle_via_submit_encode() {
     // 节约百分比应 > 0（因为 compressed=30 < original=1_000_000_000）
     assert!(record.savings_pct > 0.0, "应有正节约率");
     assert!(!record.ffmpeg_command.is_empty(), "应记录 ffmpeg 命令");
+    let audit = verify_store
+        .get_compression_audit(history_id)
+        .expect("query audit from SQL")
+        .expect("audit should be stored in SQL");
+    assert_eq!(audit.strategy_name, "AV1 NVENC CQ28");
+    assert_eq!(audit.encoder, "av1_nvenc");
+    assert_eq!(audit.ffmpeg_command, record.ffmpeg_command);
 
     // ── 清理 ────────────────────────────────────────────────────────────────
     drop(verify_store);
@@ -465,9 +467,9 @@ fn test_complete_encode_lifecycle_via_submit_direct() {
     // 验证输出文件
     assert!(output_path.exists());
 
-    // 验证审计侧挂文件
+    // 验证不再生成审计 sidecar 文件
     let sidecar_path = PathBuf::from(format!("{}.leanreel.json", output_path.display()));
-    assert!(sidecar_path.exists());
+    assert!(!sidecar_path.exists());
 
     // 验证 DB 记录
     drop(wm);
@@ -676,14 +678,9 @@ fn test_encode_with_dolby_vision_flag() {
     // 输出文件应存在
     assert!(output_path.exists(), "DV 编码输出文件应存在");
 
-    // DV 审计记录应包含 DV 标志
+    // DV audit is persisted in SQL, not emitted as a sidecar file.
     let sidecar_path = PathBuf::from(format!("{}.leanreel.json", output_path.display()));
-    assert!(sidecar_path.exists());
-    let audit_json = std::fs::read_to_string(&sidecar_path).expect("读取审计文件失败");
-    assert!(
-        audit_json.contains("has_dolby_vision"),
-        "审计应包含 Dolby Vision 信息"
-    );
+    assert!(!sidecar_path.exists());
 
     // DB 验证
     drop(wm);
@@ -696,6 +693,14 @@ fn test_encode_with_dolby_vision_flag() {
         .find(|r| r.id == history_id)
         .expect("应找到 DV 记录");
     assert_eq!(record.status, "completed");
+    let audit = verify_store
+        .get_compression_audit(history_id)
+        .expect("query DV audit from SQL")
+        .expect("DV audit should be stored in SQL");
+    assert!(
+        audit.has_dolby_vision,
+        "SQL audit should include Dolby Vision info"
+    );
 
     drop(verify_store);
     let _ = std::fs::remove_dir_all(&tmp_dir);

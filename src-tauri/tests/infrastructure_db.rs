@@ -1,6 +1,7 @@
 use leanreel_rs_lib::domain::models::*;
-use leanreel_rs_lib::domain::traits::SnapshotStore;
+use leanreel_rs_lib::domain::traits::{FinishCompressionParams, SnapshotStore};
 use leanreel_rs_lib::infrastructure::db::{CreateCompressionRecordParams, SqliteSnapshotStore};
+use leanreel_rs_lib::services::audit::{build_audit, BuildAuditParams};
 use std::path::Path;
 
 fn make_test_snapshot(path: &str, codec: VideoCodec, hdr: HdrType) -> FileSnapshot {
@@ -382,4 +383,101 @@ fn test_batch_progress_treats_nan_as_zero() {
 
     let progress = store.get_batch_progress("batch-nan").unwrap();
     assert_eq!(progress["percentage"], 0.0);
+}
+
+#[test]
+fn test_finish_compression_persists_full_audit_in_sql() {
+    let store = SqliteSnapshotStore::open_in_memory().unwrap();
+    ensure_folder(&store, 1, 1, "folder");
+
+    let mut snapshot = make_test_snapshot("movie.mkv", VideoCodec::Hevc, HdrType::Hdr10);
+    snapshot.pix_fmt = "yuv420p10le".into();
+    snapshot.frame_rate = "24000/1001".into();
+    snapshot.color_primaries = "bt2020".into();
+    snapshot.color_transfer = "smpte2084".into();
+    snapshot.color_space = "bt2020nc".into();
+    store.upsert(&[snapshot.clone()]).unwrap();
+    let stored_snapshot = store
+        .get_by_folder_path(1, Path::new("movie.mkv"))
+        .unwrap()
+        .unwrap();
+
+    let record_id = store
+        .create_compression_record(CreateCompressionRecordParams {
+            file_snapshot_id: stored_snapshot.id.unwrap(),
+            batch_id: "audit-sql",
+            strategy_name: "x265 CRF18",
+            original_size: stored_snapshot.size_bytes,
+            output_path: "output.mkv",
+            encoder: "libx265",
+            cq_value: 0,
+            preset: "slow",
+            pix_fmt: "yuv420p10le",
+            audio_mode: "copy",
+            sub_mode: "copy",
+        })
+        .unwrap();
+
+    let strategy = Strategy {
+        name: "x265 CRF18".into(),
+        video: VideoConfig {
+            encoder: "libx265".into(),
+            crf: 18,
+            preset: "slow".into(),
+            pix_fmt: "yuv420p10le".into(),
+            ..Default::default()
+        },
+        audio: AudioConfig {
+            mode: "copy".into(),
+            ..Default::default()
+        },
+        subtitle: SubtitleConfig {
+            mode: "copy".into(),
+            ..Default::default()
+        },
+        hdr: HdrConfig {
+            dv_handling: "passthrough".into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let audit = build_audit(BuildAuditParams {
+        snapshot: &stored_snapshot,
+        output_path: Path::new("output.mkv"),
+        output_size: 700_000_000,
+        output_codec: "libx265",
+        strategy: &strategy,
+        duration_ms: 12_345,
+        success: true,
+        error: "",
+        ffmpeg_command: "ffmpeg -i movie.mkv output.mkv",
+    });
+
+    store
+        .finish_compression(FinishCompressionParams {
+            record_id,
+            status: "completed",
+            progress: 100.0,
+            duration_seconds: 12,
+            compressed_size: 700_000_000,
+            error_message: "",
+            sidecar_path: "",
+            source_deleted: 0,
+            ffmpeg_command: "ffmpeg -i movie.mkv output.mkv",
+            performance_metrics: "{}",
+            audit: Some(&audit),
+        })
+        .unwrap();
+
+    let restored = store
+        .get_compression_audit(record_id)
+        .unwrap()
+        .expect("audit should be stored in SQL");
+    assert_eq!(restored.strategy_name, audit.strategy_name);
+    assert_eq!(restored.ffmpeg_command, audit.ffmpeg_command);
+    assert_eq!(restored.ffmpeg_version, audit.ffmpeg_version);
+    assert_eq!(restored.dovi_tool_version, audit.dovi_tool_version);
+    assert_eq!(restored.crf_value, 18);
+    assert_eq!(restored.source_color_transfer, "smpte2084");
+    assert_eq!(restored.platform, audit.platform);
 }

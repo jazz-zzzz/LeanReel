@@ -15,6 +15,8 @@ pub struct FinishCompressionParams<'a> {
     pub ffmpeg_command: &'a str,
     /// JSON string with per-task performance metrics (fps, bitrate, SMB).
     pub performance_metrics: &'a str,
+    /// Full audit snapshot persisted in SQL. Absent for cancelled/skipped records.
+    pub audit: Option<&'a CompressionAudit>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -109,7 +111,6 @@ pub trait SnapshotStore {
     /// C2: Finalize a compression record on encode completion or failure.
     fn finish_compression(&self, params: FinishCompressionParams<'_>) -> Result<(), String>;
 }
-
 
 /// 媒体元数据探测
 pub trait MediaProber {

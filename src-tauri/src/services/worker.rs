@@ -212,6 +212,7 @@ impl WorkerManager {
                                     source_deleted: 0,
                                     ffmpeg_command: "",
                                     performance_metrics: "",
+                                    audit: None,
                                 },
                             );
                             emit_progress(&progress_emitter, &task.id, "done", 100.0, "cancelled");
@@ -246,6 +247,7 @@ impl WorkerManager {
                                     source_deleted: 0,
                                     ffmpeg_command: "",
                                     performance_metrics: "",
+                                    audit: None,
                                 },
                             );
                             emit_progress(&progress_emitter, &task.id, "done", 100.0, "cancelled");
@@ -301,6 +303,7 @@ impl WorkerManager {
                                             source_deleted: 0,
                                             ffmpeg_command: "",
                                             performance_metrics: "",
+                                            audit: None,
                                         },
                                     );
                                     emit_progress(
@@ -368,6 +371,7 @@ impl WorkerManager {
                                         source_deleted: 0,
                                         ffmpeg_command: "",
                                         performance_metrics: "",
+                                        audit: None,
                                     },
                                 );
                                 emit_progress(
@@ -450,6 +454,7 @@ impl WorkerManager {
                                                 source_deleted: 0,
                                                 ffmpeg_command: "",
                                                 performance_metrics: "",
+                                                audit: None,
                                             },
                                         );
                                         emit_progress(
@@ -495,6 +500,7 @@ impl WorkerManager {
                                                 source_deleted: 0,
                                                 ffmpeg_command: &output.command,
                                                 performance_metrics: "",
+                                                audit: None,
                                             },
                                         );
                                         emit_progress(
@@ -587,6 +593,7 @@ impl WorkerManager {
                                                             source_deleted: 0,
                                                             ffmpeg_command: "",
                                                             performance_metrics: "",
+                                                            audit: None,
                                                         },
                                                     );
                                                     emit_progress(
@@ -622,6 +629,7 @@ impl WorkerManager {
                                                     source_deleted: 0,
                                                     ffmpeg_command: "",
                                                     performance_metrics: "",
+                                                    audit: None,
                                                 },
                                             );
                                             emit_progress(
@@ -636,7 +644,7 @@ impl WorkerManager {
                                         continue;
                                     }
 
-                                    // Write audit sidecar on successful encode
+                                    // Build the full audit snapshot for SQL persistence.
                                     let output_codec = &task.strategy.video.encoder;
                                     let audit = crate::services::audit::build_audit(
                                         crate::services::audit::BuildAuditParams {
@@ -651,14 +659,6 @@ impl WorkerManager {
                                             ffmpeg_command: &output.command,
                                         },
                                     );
-                                    let sidecar_path =
-                                        format!("{}.leanreel.json", final_output.display());
-                                    if let Err(e) =
-                                        crate::services::audit::write_sidecar(&final_output, &audit)
-                                    {
-                                        eprintln!("写入审计文件失败: {}", e);
-                                    }
-
                                     // ── H-020: Post-encode file_snapshot sync ──
                                     // Re-probe the output file and insert/update file_snapshot
                                     let library_folder_id = task.snapshot.library_folder_id;
@@ -719,10 +719,11 @@ impl WorkerManager {
                                             duration_seconds: (output.duration_ms / 1000) as i64,
                                             compressed_size: output.compressed_size as i64,
                                             error_message: "",
-                                            sidecar_path: &sidecar_path,
+                                            sidecar_path: "",
                                             source_deleted: source_deleted_flag,
                                             ffmpeg_command: &output.command,
                                             performance_metrics: &perf_json,
+                                            audit: Some(&audit),
                                         },
                                     );
                                     emit_progress(
@@ -770,6 +771,7 @@ impl WorkerManager {
                                             source_deleted: 0,
                                             ffmpeg_command: &e,
                                             performance_metrics: "",
+                                            audit: None,
                                         },
                                     );
                                     emit_progress(
@@ -1123,11 +1125,7 @@ fn sync_output_snapshot(
 
 /// Extract the `\\server\share` UNC prefix from a full UNC path.
 /// Returns `None` for non-UNC (local) paths.
-fn performance_metrics_json(
-    max_fps: f32,
-    avg_bitrate_kbps: u32,
-    io: Option<&IoMetrics>,
-) -> String {
+fn performance_metrics_json(max_fps: f32, avg_bitrate_kbps: u32, io: Option<&IoMetrics>) -> String {
     serde_json::json!({
         "max_fps": max_fps,
         "avg_bitrate_kbps": avg_bitrate_kbps,

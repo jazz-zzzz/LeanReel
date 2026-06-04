@@ -258,6 +258,25 @@ impl SqliteSnapshotStore {
         }))
     }
 
+    pub fn get_compression_audit(
+        &self,
+        record_id: i64,
+    ) -> Result<Option<CompressionAudit>, String> {
+        let audit_json: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT NULLIF(audit_json, '') FROM compression_history WHERE id=?1",
+                params![record_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+
+        audit_json
+            .map(|json| serde_json::from_str(&json).map_err(|e| e.to_string()))
+            .transpose()
+    }
+
     /// Join-based history query (H-030): reads live data from
     /// compression_history ← file_snapshot ← library_folder ← library.
     ///
@@ -674,7 +693,35 @@ impl SqliteSnapshotStore {
                 ffmpeg_command TEXT DEFAULT '',
                 performance_metrics TEXT DEFAULT '',
                 sidecar_path TEXT DEFAULT '',
+                audit_json TEXT DEFAULT '',
                 leanreel_version TEXT DEFAULT '',
+                ffmpeg_version TEXT DEFAULT '',
+                dovi_tool_version TEXT DEFAULT '',
+                source_codec TEXT DEFAULT '',
+                source_width INTEGER DEFAULT 0,
+                source_height INTEGER DEFAULT 0,
+                source_hdr TEXT DEFAULT '',
+                source_duration_seconds REAL DEFAULT 0,
+                source_bitrate_bps INTEGER DEFAULT 0,
+                source_audio_count INTEGER DEFAULT 0,
+                source_subtitle_count INTEGER DEFAULT 0,
+                source_pix_fmt TEXT DEFAULT '',
+                source_frame_rate TEXT DEFAULT '',
+                source_color_primaries TEXT DEFAULT '',
+                source_color_transfer TEXT DEFAULT '',
+                source_color_space TEXT DEFAULT '',
+                source_mtime REAL DEFAULT 0,
+                output_codec TEXT DEFAULT '',
+                size_delta_bytes INTEGER DEFAULT 0,
+                crf_value INTEGER DEFAULT 0,
+                success INTEGER DEFAULT 0,
+                audit_timestamp TEXT DEFAULT '',
+                has_dolby_vision INTEGER DEFAULT 0,
+                dv_handling TEXT DEFAULT '',
+                platform TEXT DEFAULT '',
+                adaptive_cq_original INTEGER DEFAULT 0,
+                adaptive_cq_adjusted INTEGER DEFAULT 0,
+                adaptive_cq_reason TEXT DEFAULT '',
                 source_deleted INTEGER DEFAULT 0,
                 progress REAL DEFAULT 0,
                 stage TEXT DEFAULT '',
@@ -722,7 +769,35 @@ impl SqliteSnapshotStore {
             "ALTER TABLE compression_history ADD COLUMN sub_mode TEXT DEFAULT ''",
             "ALTER TABLE compression_history ADD COLUMN ffmpeg_command TEXT DEFAULT ''",
             "ALTER TABLE compression_history ADD COLUMN sidecar_path TEXT DEFAULT ''",
+            "ALTER TABLE compression_history ADD COLUMN audit_json TEXT DEFAULT ''",
             "ALTER TABLE compression_history ADD COLUMN leanreel_version TEXT DEFAULT ''",
+            "ALTER TABLE compression_history ADD COLUMN ffmpeg_version TEXT DEFAULT ''",
+            "ALTER TABLE compression_history ADD COLUMN dovi_tool_version TEXT DEFAULT ''",
+            "ALTER TABLE compression_history ADD COLUMN source_codec TEXT DEFAULT ''",
+            "ALTER TABLE compression_history ADD COLUMN source_width INTEGER DEFAULT 0",
+            "ALTER TABLE compression_history ADD COLUMN source_height INTEGER DEFAULT 0",
+            "ALTER TABLE compression_history ADD COLUMN source_hdr TEXT DEFAULT ''",
+            "ALTER TABLE compression_history ADD COLUMN source_duration_seconds REAL DEFAULT 0",
+            "ALTER TABLE compression_history ADD COLUMN source_bitrate_bps INTEGER DEFAULT 0",
+            "ALTER TABLE compression_history ADD COLUMN source_audio_count INTEGER DEFAULT 0",
+            "ALTER TABLE compression_history ADD COLUMN source_subtitle_count INTEGER DEFAULT 0",
+            "ALTER TABLE compression_history ADD COLUMN source_pix_fmt TEXT DEFAULT ''",
+            "ALTER TABLE compression_history ADD COLUMN source_frame_rate TEXT DEFAULT ''",
+            "ALTER TABLE compression_history ADD COLUMN source_color_primaries TEXT DEFAULT ''",
+            "ALTER TABLE compression_history ADD COLUMN source_color_transfer TEXT DEFAULT ''",
+            "ALTER TABLE compression_history ADD COLUMN source_color_space TEXT DEFAULT ''",
+            "ALTER TABLE compression_history ADD COLUMN source_mtime REAL DEFAULT 0",
+            "ALTER TABLE compression_history ADD COLUMN output_codec TEXT DEFAULT ''",
+            "ALTER TABLE compression_history ADD COLUMN size_delta_bytes INTEGER DEFAULT 0",
+            "ALTER TABLE compression_history ADD COLUMN crf_value INTEGER DEFAULT 0",
+            "ALTER TABLE compression_history ADD COLUMN success INTEGER DEFAULT 0",
+            "ALTER TABLE compression_history ADD COLUMN audit_timestamp TEXT DEFAULT ''",
+            "ALTER TABLE compression_history ADD COLUMN has_dolby_vision INTEGER DEFAULT 0",
+            "ALTER TABLE compression_history ADD COLUMN dv_handling TEXT DEFAULT ''",
+            "ALTER TABLE compression_history ADD COLUMN platform TEXT DEFAULT ''",
+            "ALTER TABLE compression_history ADD COLUMN adaptive_cq_original INTEGER DEFAULT 0",
+            "ALTER TABLE compression_history ADD COLUMN adaptive_cq_adjusted INTEGER DEFAULT 0",
+            "ALTER TABLE compression_history ADD COLUMN adaptive_cq_reason TEXT DEFAULT ''",
             "ALTER TABLE compression_history ADD COLUMN source_deleted INTEGER DEFAULT 0",
             "ALTER TABLE compression_history ADD COLUMN progress REAL DEFAULT 0",
             "ALTER TABLE compression_history ADD COLUMN stage TEXT DEFAULT ''",
@@ -877,6 +952,7 @@ impl SnapshotStore for SqliteSnapshotStore {
             source_deleted,
             ffmpeg_command,
             performance_metrics,
+            audit,
         } = params;
         let orig: i64 = self
             .conn
@@ -891,9 +967,68 @@ impl SnapshotStore for SqliteSnapshotStore {
         } else {
             0.0
         };
+        let audit_json = audit
+            .map(|a| serde_json::to_string_pretty(a))
+            .transpose()
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default();
+        let a = audit;
         self.conn.execute(
-            "UPDATE compression_history SET status=?1, progress=?2, duration_seconds=?3, compressed_size=?4, output_size_bytes=?4, savings_pct=?5, error_message=?6, sidecar_path=?7, source_deleted=?8, ffmpeg_command=?9, performance_metrics=?10, completed_at=datetime('now','localtime'), updated_at=datetime('now','localtime') WHERE id=?11",
-            params![status, progress, duration_seconds, compressed_size, pct, error_message, sidecar_path, source_deleted, ffmpeg_command, performance_metrics, record_id],
+            "UPDATE compression_history SET \
+             status=?1, progress=?2, duration_seconds=?3, compressed_size=?4, output_size_bytes=?4, \
+             savings_pct=?5, error_message=?6, sidecar_path=?7, source_deleted=?8, ffmpeg_command=?9, \
+             performance_metrics=?10, audit_json=?11, leanreel_version=?12, ffmpeg_version=?13, \
+             dovi_tool_version=?14, source_codec=?15, source_width=?16, source_height=?17, \
+             source_hdr=?18, source_duration_seconds=?19, source_bitrate_bps=?20, \
+             source_audio_count=?21, source_subtitle_count=?22, source_pix_fmt=?23, \
+             source_frame_rate=?24, source_color_primaries=?25, source_color_transfer=?26, \
+             source_color_space=?27, source_mtime=?28, output_codec=?29, size_delta_bytes=?30, \
+             crf_value=?31, success=?32, audit_timestamp=?33, has_dolby_vision=?34, \
+             dv_handling=?35, platform=?36, adaptive_cq_original=?37, adaptive_cq_adjusted=?38, \
+             adaptive_cq_reason=?39, completed_at=datetime('now','localtime'), \
+             updated_at=datetime('now','localtime') WHERE id=?40",
+            params![
+                status,
+                progress,
+                duration_seconds,
+                compressed_size,
+                pct,
+                error_message,
+                sidecar_path,
+                source_deleted,
+                ffmpeg_command,
+                performance_metrics,
+                audit_json,
+                a.map(|v| v.leanreel_version.as_str()).unwrap_or(""),
+                a.map(|v| v.ffmpeg_version.as_str()).unwrap_or(""),
+                a.map(|v| v.dovi_tool_version.as_str()).unwrap_or(""),
+                a.map(|v| v.source_codec.as_str()).unwrap_or(""),
+                a.map(|v| v.source_width).unwrap_or_default(),
+                a.map(|v| v.source_height).unwrap_or_default(),
+                a.map(|v| v.source_hdr.as_str()).unwrap_or(""),
+                a.map(|v| v.source_duration_seconds).unwrap_or_default(),
+                a.map(|v| v.source_bitrate_bps).unwrap_or_default(),
+                a.map(|v| v.source_audio_count as i64).unwrap_or_default(),
+                a.map(|v| v.source_subtitle_count as i64).unwrap_or_default(),
+                a.map(|v| v.source_pix_fmt.as_str()).unwrap_or(""),
+                a.map(|v| v.source_frame_rate.as_str()).unwrap_or(""),
+                a.map(|v| v.source_color_primaries.as_str()).unwrap_or(""),
+                a.map(|v| v.source_color_transfer.as_str()).unwrap_or(""),
+                a.map(|v| v.source_color_space.as_str()).unwrap_or(""),
+                a.map(|v| v.source_mtime).unwrap_or_default(),
+                a.map(|v| v.output_codec.as_str()).unwrap_or(""),
+                a.map(|v| v.size_delta_bytes).unwrap_or_default(),
+                a.map(|v| v.crf_value).unwrap_or_default(),
+                a.map(|v| if v.success { 1 } else { 0 }).unwrap_or_default(),
+                a.map(|v| v.timestamp.as_str()).unwrap_or(""),
+                a.map(|v| if v.has_dolby_vision { 1 } else { 0 }).unwrap_or_default(),
+                a.map(|v| v.dv_handling.as_str()).unwrap_or(""),
+                a.map(|v| v.platform.as_str()).unwrap_or(""),
+                a.map(|v| v.adaptive_cq_original).unwrap_or_default(),
+                a.map(|v| v.adaptive_cq_adjusted).unwrap_or_default(),
+                a.map(|v| v.adaptive_cq_reason.as_str()).unwrap_or(""),
+                record_id
+            ],
         ).map_err(|e| e.to_string())?;
         Ok(())
     }

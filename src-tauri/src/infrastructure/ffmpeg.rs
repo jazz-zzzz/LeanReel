@@ -5,7 +5,7 @@ use std::process::{Child, Command};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use crate::domain::traits::{EncodeOutput, Encoder, EncodingJob, IoMetrics, JobId, ProgressEvent};
+use crate::domain::traits::{EncodeOutput, Encoder, EncodingJob, JobId, ProgressEvent};
 use crate::infrastructure::ffmpeg_builder::build_ffmpeg_command;
 use crate::infrastructure::process_io::{io_type_for_paths, snapshot_process_io, summarize_io};
 
