@@ -1,0 +1,21 @@
+[package]
+name = "leanreel-rs"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[lib]
+name = "leanreel_rs_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+leanreel-core = { path = "../leanreel-core" }
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2.7.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

@@ -4,6 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078D6?logo=windows)](https://github.com/jazz-zzzz/LeanReel/releases)
+[![Platform: Linux](https://img.shields.io/badge/platform-Linux%20TUI-FCC624?logo=linux)](https://github.com/jazz-zzzz/LeanReel)
 [![Release](https://img.shields.io/github/v/release/jazz-zzzz/LeanReel?label=release)](https://github.com/jazz-zzzz/LeanReel/releases/latest)
 [![Rust](https://img.shields.io/badge/built%20with-Rust-orange?logo=rust)](https://www.rust-lang.org/)
 [![Tauri 2](https://img.shields.io/badge/powered%20by-Tauri%202-FFC131?logo=tauri)](https://v2.tauri.app/)
@@ -44,12 +45,67 @@
 
 ## 使用
 
+### Windows GUI
+
 1. **新建库** → 左侧面板创建库，添加一个或多个视频目录
 2. **扫描目录** → ffprobe 自动探测编码格式、HDR 类型、音轨/字幕信息
 3. **选择文件** → 表格中勾选目标文件（支持 Ctrl/Shift 批量操作），支持按编码/大小/策略匹配过滤
 4. **选择策略** → 右侧面板点选预设策略，或自定义编码器、CQ/CRF、Preset 参数
 5. **开始编码** → 可选"编码后删除源文件"
 6. **查看结果** → 顶部「查看任务」面板展示历史记录、累计节省空间、逐任务性能指标
+
+### Linux TUI
+
+Linux 版本为终端交互界面（TUI），功能与 Windows GUI 一致，纯键盘操作。
+
+**启动**
+
+```bash
+git clone https://github.com/jazz-zzzz/LeanReel.git
+cd LeanReel
+cargo run -p leanreel-tui
+```
+
+需要 Rust 1.85+。首次启动会自动在设置面板探测 FFmpeg/FFprobe 路径。
+
+**界面布局**
+
+```
+┌──────────────────────────────────────────────┐
+│  LeanReel TUI                      Mode      │  标题栏
+├───────────┬──────────────────┬───────────────┤
+│ 库面板     │ 文件表格           │ 策略面板      │  主内容区
+│ (25%)     │ (50%)             │ (25%)         │
+│           │                   │               │
+│ ▾ 我的库   │ ☑ file1.mkv ...  │ > AV1 CQ28   │
+│   /videos │ ☐ file2.mp4 ...  │   GPU  CQ:28 │
+│           │                   │               │
+│           │                   │ [e] 开始编码   │
+├───────────┴──────────────────┴───────────────┤
+│ Scan: 0/0 │ Enc: 2/10 │ Tab:switch q:quit    │  状态栏
+└──────────────────────────────────────────────┘
+```
+
+**键盘操作**
+
+| 按键 | 作用 |
+|------|------|
+| `Tab` / `Shift+Tab` | 切换焦点面板（库 → 文件 → 策略） |
+| `↑` `↓` | 当前面板内导航 |
+| `Enter` | 展开库 / 选中文件夹 |
+| `Space` | 勾选/取消勾选文件 |
+| `s` | 扫描当前选中文件夹 |
+| `e` | 开始编码 |
+| `h` | 打开任务历史（`a` 全部 `s` 成功 `f` 失败） |
+| `g` | 打开设置（配置 ffprobe/ffmpeg 路径） |
+| `m` | 打开策略管理器（`j` `k` 排序 `n` 新建 `d` 删除） |
+| `1`-`6` | 文件表格排序（名称/编码/HDR/分辨率/大小/策略） |
+| `f` | 文件表格过滤（全部/可处理/受保护/探测失败/已勾选） |
+| `d` | 策略面板：切换"编码后删除源文件" |
+| `n` | 库面板：新建库 |
+| `d` | 库面板：删除选中库 |
+| `Esc` | 关闭弹窗 / 返回 |
+| `q` | 退出程序 |
 
 ## 策略
 
@@ -104,10 +160,20 @@ emit('progress')  ←──事件──   Worker::emit_progress()
 
 ## 从源码构建
 
+### Windows GUI
+
 ```powershell
 # 依赖: Rust 工具链 + pnpm
 pnpm install
 pnpm tauri build     # 产物在 src-tauri/target/release/bundle/
+```
+
+### Linux TUI
+
+```bash
+# 依赖: Rust 1.85+ (必须，cargo 需支持 edition2024)
+cargo build -p leanreel-tui --release
+# 二进制文件: target/release/leanreel-tui
 ```
 
 ## FAQ
@@ -122,7 +188,7 @@ NVIDIA 消费级 GPU 驱动硬限制 3 个并发 NVENC 会话，无法通过软�
 
 **支持 Mac/Linux 吗？**
 
-目前仅 Windows。Tauri 2 框架跨平台，但 `GetProcessIoCounters` 和 SMB 调优依赖 Windows API。欢迎 PR 适配。
+Windows 有完整 GUI（Tauri 2 + Svelte）。Linux 提供终端 TUI 版本（ratatui + crossterm），功能与 GUI 一致，通过 `/proc/[pid]/io` 实现进程 I/O 采样，`/proc/mounts` 检测 SMB/CIFS 挂载。macOS 暂未适配，欢迎 PR。
 
 ## 贡献
 
