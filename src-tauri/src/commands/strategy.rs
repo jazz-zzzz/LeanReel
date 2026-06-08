@@ -12,25 +12,9 @@ use tauri::State;
 ///
 /// Deduplicates by name (first occurrence wins). Sorted by sort_order.
 pub fn load_strategies_from_disk() -> Result<Vec<Strategy>, String> {
+    let dir = resolve_strategy_dir()?;
     let mut strategies = Vec::new();
     let mut seen_names: HashSet<String> = HashSet::new();
-    let dirs = [
-        std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|d| d.join("strategies"))),
-        Some(std::path::PathBuf::from("strategies")),
-        Some(std::path::PathBuf::from("../strategies")),
-    ]
-    .into_iter()
-    .flatten();
-    let mut found = None;
-    for d in dirs {
-        if d.exists() && d.is_dir() {
-            found = Some(d);
-            break;
-        }
-    }
-    let dir = found.ok_or("未找到策略目录".to_string())?;
     for entry in fs::read_dir(&dir).map_err(|e| format!("读取失败: {}", e))? {
         let entry = entry.map_err(|_| "读取文件失败".to_string())?;
         let path = entry.path();
@@ -64,6 +48,19 @@ fn resolve_strategy_dir() -> Result<std::path::PathBuf, String> {
         }
     }
     Err("未找到策略目录".to_string())
+}
+
+/// Reload strategies from disk and replace the matcher state.
+/// Returns the number of loaded strategies.
+fn refresh_matcher(state: &AppState) -> Result<usize, String> {
+    let strategies = load_strategies_from_disk()?;
+    let count = strategies.len();
+    let mut matcher = state
+        .matcher
+        .lock()
+        .map_err(|_| "策略锁获取失败".to_string())?;
+    *matcher = crate::services::matcher::StrategyMatcher::new(strategies);
+    Ok(count)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -114,11 +111,7 @@ pub fn load_strategies(state: State<AppState>) -> Result<StrategyListResult, Str
         })
         .collect();
 
-    let mut matcher = state
-        .matcher
-        .lock()
-        .map_err(|_| "策略锁获取失败".to_string())?;
-    *matcher = crate::services::matcher::StrategyMatcher::new(strategies);
+    refresh_matcher(&state)?;
 
     Ok(StrategyListResult {
         count,
@@ -136,10 +129,7 @@ pub fn save_strategy(
     let dir = resolve_strategy_dir()?;
     let path = dir.join(format!("{}.json", name));
     fs::write(&path, strategy_json).map_err(|e| format!("写入策略失败: {}", e))?;
-    let strategies = load_strategies_from_disk()?;
-    if let Ok(mut matcher) = state.matcher.lock() {
-        *matcher = crate::services::matcher::StrategyMatcher::new(strategies);
-    }
+    refresh_matcher(&state)?;
     Ok(())
 }
 
@@ -150,10 +140,7 @@ pub fn delete_strategy(name: String, state: State<AppState>) -> Result<(), Strin
     if path.exists() {
         fs::remove_file(&path).map_err(|e| format!("删除策略失败: {}", e))?;
     }
-    let strategies = load_strategies_from_disk()?;
-    if let Ok(mut matcher) = state.matcher.lock() {
-        *matcher = crate::services::matcher::StrategyMatcher::new(strategies);
-    }
+    refresh_matcher(&state)?;
     Ok(())
 }
 
@@ -174,10 +161,6 @@ pub fn save_strategy_order(
             }
         }
     }
-    // Reload matcher with updated order
-    let strategies = load_strategies_from_disk()?;
-    if let Ok(mut matcher) = state.matcher.lock() {
-        *matcher = crate::services::matcher::StrategyMatcher::new(strategies);
-    }
+    refresh_matcher(&state)?;
     Ok(())
 }

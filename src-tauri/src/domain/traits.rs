@@ -19,6 +19,22 @@ pub struct FinishCompressionParams<'a> {
     pub audit: Option<&'a CompressionAudit>,
 }
 
+/// Params for creating a new compression_history record before encoding starts.
+/// Mirrors Python's compression record initialization.
+pub struct CreateCompressionRecordParams<'a> {
+    pub file_snapshot_id: i64,
+    pub batch_id: &'a str,
+    pub strategy_name: &'a str,
+    pub original_size: i64,
+    pub output_path: &'a str,
+    pub encoder: &'a str,
+    pub cq_value: i32,
+    pub preset: &'a str,
+    pub pix_fmt: &'a str,
+    pub audio_mode: &'a str,
+    pub sub_mode: &'a str,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProgressEvent {
     StageStart {
