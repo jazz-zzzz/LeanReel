@@ -1,5 +1,5 @@
 use crate::domain::models::{HdrType, TaskStatus};
-use crate::infrastructure::db::CreateCompressionRecordParams;
+use crate::domain::traits::CreateCompressionRecordParams;
 use crate::services::worker::WorkerTask;
 use crate::AppState;
 use serde::{Deserialize, Serialize};
