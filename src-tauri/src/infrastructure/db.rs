@@ -95,6 +95,8 @@ fn row_to_snapshot(row: &Row) -> rusqlite::Result<FileSnapshot> {
 impl SqliteSnapshotStore {
     pub fn open(path: &Path) -> Result<Self, String> {
         let conn = Connection::open(path).map_err(|e| e.to_string())?;
+        conn.execute_batch("PRAGMA busy_timeout = 5000;")
+            .map_err(|e| e.to_string())?;
         let store = Self { conn };
         store.create_tables()?;
         Ok(store)
