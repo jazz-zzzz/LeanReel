@@ -2,6 +2,7 @@
   // import { VirtualList } from 'svelte-virtuallists';
   import { selectedFilePaths } from '$lib/stores/files';
   import { addSelectionRange } from '$lib/selection.js';
+  import { getFolderNodeRefreshId } from '$lib/treeNodes.js';
   import type { FileEntry } from '$lib/stores/files';
   import Select from './Select.svelte';
 
@@ -11,6 +12,7 @@
     filterKey = 'all',
     onViewChange = (_v: string) => {},
     onFilterChange = (_v: string) => {},
+    onRefreshFolder = async (_folderId: number) => {},
   } = $props();
 
   let selectedPaths = $derived(new Set($selectedFilePaths));
@@ -25,12 +27,14 @@
     totalSize: number;
     fileCount: number;
     children: TreeNode[];
+    folderId?: number;
     expanded?: boolean;
   }
 
   let expandedFolders = $state(new Set<string>());
   let flatNodes = $state<TreeNode[]>([]);
   let allSelected = $state(false);
+  let contextMenu = $state<{ x: number; y: number; folderId: number } | null>(null);
   let visibleFiles = $derived(flatNodes.flatMap(node => node.file ? [node.file] : []));
 
   type SortKey = 'name' | 'codec' | 'hdr' | 'resolution' | 'size' | 'count';
@@ -143,6 +147,7 @@
             totalSize: 0,
             fileCount: 0,
             children: [],
+            folderId: f.folder_id,
           };
           folderMap.set(folderKey, node);
           children.push(node);
@@ -285,6 +290,11 @@
             class="tree-row folder-row"
             role="button" tabindex="0"
             onclick={() => toggleFolder(node.key)}
+            oncontextmenu={(e) => {
+              e.preventDefault();
+              const folderId = getFolderNodeRefreshId(node);
+              if (folderId !== null) contextMenu = { x: e.clientX, y: e.clientY, folderId };
+            }}
             onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleFolder(node.key); } }}
           >
             <span class="col-check"></span>
@@ -322,6 +332,16 @@
     </div>
   {/if}
 </div>
+
+{#if contextMenu}
+  <div class="context-overlay" role="presentation" onclick={() => contextMenu = null} onkeydown={(e) => e.key === 'Escape' && (contextMenu = null)}>
+    <div class="context-menu" style="left: {contextMenu.x}px; top: {contextMenu.y}px">
+      <button onclick={() => { const menu = contextMenu; contextMenu = null; if (menu) onRefreshFolder(menu.folderId); }}>
+        刷新所在文件夹缓存
+      </button>
+    </div>
+  </div>
+{/if}
 
 <style>
   .tree-view { height: 100%; display: flex; flex-direction: column; }
@@ -411,4 +431,28 @@
   }
   .empty-icon { font-size: 28px; opacity: 0.3; margin-bottom: var(--space-md); }
   .empty-sub { font-size: var(--font-size-label); opacity: 0.6; }
+
+  .context-overlay { position: fixed; inset: 0; z-index: 9999; }
+  .context-menu {
+    position: fixed;
+    background: rgba(18, 22, 28, 0.95);
+    backdrop-filter: blur(20px);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    padding: 4px;
+    min-width: 150px;
+  }
+  .context-menu button {
+    display: block;
+    width: 100%;
+    padding: 6px 12px;
+    text-align: left;
+    font-size: var(--font-size-body);
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
+  .context-menu button:hover { background: var(--bg-hover); }
 </style>

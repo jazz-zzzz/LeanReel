@@ -40,7 +40,8 @@ fn test_app_state_store_works() {
 fn test_app_state_scanner_handles_bad_path() {
     let state = make_test_state();
     let scanner = state.scanner.lock().unwrap();
-    let result = scanner.scan_directory(std::path::Path::new("nonexistent_dir_xyz"), 1);
+    let result =
+        scanner.scan_directory(std::path::Path::new("nonexistent_dir_xyz"), 1, "test-scan");
     assert!(
         result.is_err(),
         "Bad path must abort scanning so cached rows are preserved"

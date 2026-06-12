@@ -1,9 +1,18 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { libraries, selectedLibraryId, selectedFolderId } from '$lib/stores/library';
-  import { files, scanStatus } from '$lib/stores/files';
+  import { scanStatus } from '$lib/stores/files';
   import { open } from '@tauri-apps/plugin-dialog';
-  import { createLibrary, deleteLibrary, listLibraries, addFolder, removeFolder, scanDirectory, getLibraryFiles, getFolderFiles } from '$lib/api';
+  import { createLibrary, deleteLibrary, listLibraries, addFolder, removeFolder, type ScanResult } from '$lib/api';
+  import { formatAddFolderStatus, scanErrorMessage } from '$lib/scanProgress.js';
+
+  type RefreshFolderResult =
+    | { ok: true; result: ScanResult }
+    | { ok: false; error: string };
+
+  let {
+    onRefreshFolder = async (_folderId: number): Promise<RefreshFolderResult> => ({ ok: false, error: '未配置刷新处理器' }),
+  } = $props();
 
   let expandedLibs = $state(new Set<number>());
   let status = $state('');
@@ -13,18 +22,18 @@
   let contextMenu = $state<{ x: number; y: number; folderId: number; libId: number } | null>(null);
 
   async function handleRefreshFolder(folderId: number) {
-    const lib = $libraries.find(l => l.folders.some(f => f.id === folderId));
-    const folder = lib?.folders.find(f => f.id === folderId);
-    if (folder) {
-      try {
-        await scanDirectory(folder.path, folderId);
-        if ($selectedFolderId === folderId) {
-          files.set((await getFolderFiles(folderId)).files);
-        } else if ($selectedLibraryId === lib?.id) {
-          files.set((await getLibraryFiles(lib.id)).files);
-        }
+    pending = true;
+    try {
+      const result = await onRefreshFolder(folderId);
+      if (!result.ok) {
+        status = `刷新失败: ${result.error}`;
+        scanStatus.set(status);
       }
-      catch (e) { status = `刷新失败: ${e}`; }
+    } catch (e) {
+      status = `刷新失败: ${scanErrorMessage(e)}`;
+      scanStatus.set(status);
+    } finally {
+      pending = false;
     }
   }
 
@@ -67,13 +76,13 @@
     try {
       const folderId = await addFolder(libId, selected);
       await refreshLibraries();
-      await scanDirectory(selected, folderId);
-      if ($selectedLibraryId === libId) {
-        files.set((await getLibraryFiles(libId)).files);
-      }
-      status = `已添加: ${selected}`;
+      const refreshResult = await onRefreshFolder(folderId);
+      status = formatAddFolderStatus(selected, refreshResult);
       scanStatus.set(status);
-    } catch (e) { status = `添加失败: ${e}`; }
+    } catch (e) {
+      status = `添加失败: ${scanErrorMessage(e)}`;
+      scanStatus.set(status);
+    }
     finally { pending = false; }
   }
 

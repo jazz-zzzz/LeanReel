@@ -115,11 +115,13 @@ pub fn get_folder_files(
 pub async fn scan_directory(
     path: String,
     folder_id: i64,
+    scan_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<ScanCommandResult, String> {
     let store = state.store.clone();
     let scanner = state.scanner.clone();
     let matcher = state.matcher.clone();
+    let scan_id = scan_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
     tauri::async_runtime::spawn_blocking(move || {
         let actual_folder_id = {
@@ -128,7 +130,7 @@ pub async fn scan_directory(
         };
 
         let scanner = scanner.lock().map_err(|e| format!("锁获取失败: {}", e))?;
-        scanner.scan_directory(std::path::Path::new(&path), actual_folder_id)?;
+        scanner.scan_directory(std::path::Path::new(&path), actual_folder_id, &scan_id)?;
         drop(scanner);
 
         let filter = crate::domain::models::FileFilter {
@@ -282,8 +284,9 @@ mod tests {
     use super::*;
     use std::future::Future;
 
-    fn assert_async_scan_command<Fut>(_command: fn(String, i64, State<'static, AppState>) -> Fut)
-    where
+    fn assert_async_scan_command<Fut>(
+        _command: fn(String, i64, Option<String>, State<'static, AppState>) -> Fut,
+    ) where
         Fut: Future<Output = Result<ScanCommandResult, String>>,
     {
     }

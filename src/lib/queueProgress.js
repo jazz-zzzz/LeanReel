@@ -29,7 +29,7 @@ function statusLabel(status) {
 }
 
 /**
- * @param {QueueStatus} status
+ * @param {QueueStatus | 'completed'} status
  * @returns {boolean}
  */
 export function isTerminalQueueStatus(status) {

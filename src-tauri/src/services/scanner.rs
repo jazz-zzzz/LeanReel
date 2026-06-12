@@ -1,7 +1,7 @@
 use super::time_utils::local_now;
 use crate::domain::models::*;
 use crate::domain::traits::{MediaProber, SnapshotStore};
-use crate::infrastructure::filesystem::find_video_files;
+use crate::infrastructure::filesystem::{find_video_files, FileDiscoveryProgress};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{
@@ -11,13 +11,41 @@ use std::sync::{
 
 type ResultCallback = Box<dyn Fn(&FileSnapshot) + Send>;
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScanPhase {
+    Discovering,
+    Probing,
+    Done,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ScanPhaseEvent {
+    pub scan_id: String,
+    pub folder_id: i64,
+    pub phase: ScanPhase,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ScanProgressEvent {
+    pub scan_id: String,
+    pub folder_id: i64,
+    pub phase: ScanPhase,
+    pub done: usize,
+    pub total: usize,
+    pub visited_entries: usize,
+    pub video_files_found: usize,
+}
+
 pub struct Scanner {
     prober: Box<dyn MediaProber + Send>,
     store: Box<dyn SnapshotStore + Send>,
     /// Optional cancellation token — when set and true, scan stops early.
     pub cancelled: Option<Arc<AtomicBool>>,
-    /// Optional progress callback — called with (current, total) during scan.
-    pub on_progress: Option<Box<dyn Fn(usize, usize) + Send>>,
+    /// Optional phase callback — called when scan switches work phases.
+    pub on_phase: Option<Box<dyn Fn(ScanPhaseEvent) + Send>>,
+    /// Optional progress callback — called with structured progress during scan.
+    pub on_progress: Option<Box<dyn Fn(ScanProgressEvent) + Send>>,
     /// Optional per-file result callback — called for each file (cached or newly probed).
     /// Mirrors Python's `on_result` callback in `ProbeBatch`.
     pub on_result: Option<ResultCallback>,
@@ -29,6 +57,7 @@ impl Scanner {
             prober,
             store,
             cancelled: None,
+            on_phase: None,
             on_progress: None,
             on_result: None,
         }
@@ -44,6 +73,38 @@ impl Scanner {
     pub fn with_on_result(mut self, cb: Box<dyn Fn(&FileSnapshot) + Send>) -> Self {
         self.on_result = Some(cb);
         self
+    }
+
+    fn emit_phase(&self, scan_id: &str, folder_id: i64, phase: ScanPhase) {
+        if let Some(ref cb) = self.on_phase {
+            cb(ScanPhaseEvent {
+                scan_id: scan_id.to_string(),
+                folder_id,
+                phase,
+            });
+        }
+    }
+
+    fn emit_progress(
+        &self,
+        scan_id: &str,
+        folder_id: i64,
+        phase: ScanPhase,
+        done: usize,
+        total: usize,
+        discovery: Option<FileDiscoveryProgress>,
+    ) {
+        if let Some(ref cb) = self.on_progress {
+            cb(ScanProgressEvent {
+                scan_id: scan_id.to_string(),
+                folder_id,
+                phase,
+                done,
+                total,
+                visited_entries: discovery.map(|p| p.visited_entries).unwrap_or(0),
+                video_files_found: discovery.map(|p| p.video_files_found).unwrap_or(0),
+            });
+        }
     }
 
     /// Check whether cancellation has been requested.
@@ -64,14 +125,30 @@ impl Scanner {
         self.store.query(&filter)
     }
 
-    pub fn scan_directory(&self, root: &Path, folder_id: i64) -> Result<ScanResult, String> {
+    pub fn scan_directory(
+        &self,
+        root: &Path,
+        folder_id: i64,
+        scan_id: &str,
+    ) -> Result<ScanResult, String> {
         // 1. Discover files: returns (files, warnings)
-        let (discovered, warnings) = find_video_files(root);
+        self.emit_phase(scan_id, folder_id, ScanPhase::Discovering);
+        let (discovered, warnings) = find_video_files(
+            root,
+            Some(&|progress| {
+                self.emit_progress(
+                    scan_id,
+                    folder_id,
+                    ScanPhase::Discovering,
+                    progress.video_files_found,
+                    0,
+                    Some(progress),
+                );
+                !self.is_cancelled()
+            }),
+        );
         if !warnings.is_empty() {
             return Err(warnings.join("\n"));
-        }
-        if let Some(ref cb) = self.on_progress {
-            cb(0, discovered.len());
         }
         if self.is_cancelled() {
             return Ok(ScanResult {
@@ -82,6 +159,15 @@ impl Scanner {
         }
         let discovered_set: HashSet<String> = discovered.iter().map(|(r, _)| r.clone()).collect();
         let total_discovered = discovered.len();
+        self.emit_phase(scan_id, folder_id, ScanPhase::Probing);
+        self.emit_progress(
+            scan_id,
+            folder_id,
+            ScanPhase::Probing,
+            0,
+            total_discovered,
+            None,
+        );
 
         // 2. Load cached snapshots for this folder
         let cache_filter = FileFilter {
@@ -125,9 +211,14 @@ impl Scanner {
                         // File unchanged and previously probed successfully — skip probing
                         // H-004: Fire per-file result callback for cached files
                         probed_count += 1;
-                        if let Some(ref cb) = self.on_progress {
-                            cb(probed_count, total);
-                        }
+                        self.emit_progress(
+                            scan_id,
+                            folder_id,
+                            ScanPhase::Probing,
+                            probed_count,
+                            total,
+                            None,
+                        );
                         if let Some(ref cb) = self.on_result {
                             cb(cached_snap);
                         }
@@ -140,9 +231,7 @@ impl Scanner {
 
         // 4. Probe new/changed files (check cancel before expensive work)
         let scanned = total.saturating_sub(to_probe.len());
-        if let Some(ref cb) = self.on_progress {
-            cb(scanned, total);
-        }
+        self.emit_progress(scan_id, folder_id, ScanPhase::Probing, scanned, total, None);
         if self.is_cancelled() {
             return Ok(ScanResult {
                 total_files: total_discovered,
@@ -234,9 +323,14 @@ impl Scanner {
                     };
                     // H-004: Fire per-file result callback
                     probed_count += 1;
-                    if let Some(ref cb) = self.on_progress {
-                        cb(probed_count, total);
-                    }
+                    self.emit_progress(
+                        scan_id,
+                        folder_id,
+                        ScanPhase::Probing,
+                        probed_count,
+                        total,
+                        None,
+                    );
                     if let Some(ref cb) = self.on_result {
                         cb(&snap);
                     }
@@ -269,9 +363,14 @@ impl Scanner {
                     };
                     // H-004: Fire per-file result callback even for failures
                     probed_count += 1;
-                    if let Some(ref cb) = self.on_progress {
-                        cb(probed_count, total);
-                    }
+                    self.emit_progress(
+                        scan_id,
+                        folder_id,
+                        ScanPhase::Probing,
+                        probed_count,
+                        total,
+                        None,
+                    );
                     if let Some(ref cb) = self.on_result {
                         cb(&snap);
                     }
@@ -286,9 +385,8 @@ impl Scanner {
         }
 
         // Signal scan complete
-        if let Some(ref cb) = self.on_progress {
-            cb(total, total);
-        }
+        self.emit_progress(scan_id, folder_id, ScanPhase::Probing, total, total, None);
+        self.emit_phase(scan_id, folder_id, ScanPhase::Done);
 
         // 7. Clean orphans: files in cache but no longer on disk
         let cached_paths: HashSet<String> = cache_map.keys().cloned().collect();

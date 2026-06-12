@@ -1,12 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { files, scanStatus, scanProgress, selectedFilePaths } from '$lib/stores/files';
+  import { files, scanStatus, scanProgress, selectedFilePaths, type ScanPhaseEvent, type ScanProgressState } from '$lib/stores/files';
   import { strategies, selectedStrategy } from '$lib/stores/strategy';
   import { showHistory, history } from '$lib/stores/history';
   import { selectedLibraryId, selectedFolderId, libraries } from '$lib/stores/library';
   import { queue } from '$lib/stores/queue';
   import { applyEncodeProgress, hasActiveQueueItems, isTerminalQueueStatus, retainActiveQueueItems } from '$lib/queueProgress.js';
-  import { getLibraryFiles, getFolderFiles, scanDirectory, loadStrategies, startEncode, listLibraries, getSettings, saveSettings, getHistory, type AppSettings, type FileEntry } from '$lib/api';
+  import { createInitialScanUiState, beginScan, applyScanPhase, applyScanProgress, formatLibraryScanStatus, scanErrorMessage } from '$lib/scanProgress.js';
+  import { getLibraryFiles, getFolderFiles, scanDirectory, loadStrategies, startEncode, listLibraries, getSettings, saveSettings, getHistory, type AppSettings, type FileEntry, type ScanResult } from '$lib/api';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { listen } from '@tauri-apps/api/event';
   import { open } from '@tauri-apps/plugin-dialog';
@@ -16,6 +17,14 @@
   import StrategyPanel from '$lib/components/StrategyPanel.svelte';
   import HistoryPanel from '$lib/components/HistoryPanel.svelte';
 
+  type QueueStatusEvent = {
+    status: 'pending' | 'running' | 'done' | 'completed' | 'failed' | 'cancelled' | 'discarded';
+  };
+
+  type FolderRefreshResult =
+    | { ok: true; result: ScanResult }
+    | { ok: false; error: string };
+
   const appWindow = getCurrentWindow();
 
   let viewModes = $state<Record<number, 'flat' | 'tree'>>({});
@@ -24,6 +33,8 @@
   let appSettings = $state<AppSettings>({ ffprobe_custom: '', ffmpeg_custom: '', ffprobe_path: '', ffmpeg_path: '', ffprobe_ok: false, ffmpeg_ok: false, gpu_ok: false, gpu_info: '' });
   let toolWarning = $state('');
   let strategyPanel: any;
+  let scanUi = $state(createInitialScanUiState());
+  let scanHideTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Reset filter and progress when switching libraries
   let filterKey = $state('all');
@@ -31,6 +42,11 @@
     if ($selectedLibraryId) {
       filterKey = 'all';
       scanProgress.set(null);
+      scanUi = createInitialScanUiState();
+      if (scanHideTimer) {
+        clearTimeout(scanHideTimer);
+        scanHideTimer = null;
+      }
     }
   });
 
@@ -51,11 +67,25 @@
   let displayTask = $derived(runningCount > 0 ? runningTasks[rotateIdx % runningCount] : null);
 
   onMount(async () => {
-    listen<{done: number, total: number}>('scan-progress', (event) => {
-      scanProgress.set({ done: event.payload.done, total: event.payload.total });
-      if (event.payload.done >= event.payload.total && event.payload.total > 0) {
-        setTimeout(() => scanProgress.set(null), 1500);
+    listen<ScanPhaseEvent>('scan-phase', (event) => {
+      if (scanUi.activeScanId !== event.payload.scan_id) return;
+      scanUi = applyScanPhase(scanUi, event.payload);
+      scanProgress.set(scanUi.progress);
+      scanStatus.set(scanUi.statusText);
+      if (event.payload.phase === 'done') {
+        if (scanHideTimer) clearTimeout(scanHideTimer);
+        scanHideTimer = setTimeout(() => {
+          scanProgress.set(null);
+          scanUi = createInitialScanUiState();
+          scanHideTimer = null;
+        }, 1500);
       }
+    });
+    listen<ScanProgressState>('scan-progress', (event) => {
+      if (scanUi.activeScanId !== event.payload.scan_id) return;
+      scanUi = applyScanProgress(scanUi, event.payload);
+      scanProgress.set(scanUi.progress);
+      scanStatus.set(scanUi.statusText);
     });
     listen<FileEntry>('scan-result', (event) => {
       const entry = event.payload;
@@ -90,7 +120,7 @@
     // Preload history in background so the panel opens instantly
     void getHistory().then(h => history.set(h)).catch(() => {});
     const histTimer = setInterval(() => { void getHistory().then(h => history.set(h)).catch(() => {}); }, 10000);
-    const unlistenHist = listen<{status: string}>('encode-progress', (event) => {
+    const unlistenHist = listen<QueueStatusEvent>('encode-progress', (event) => {
       if (isTerminalQueueStatus(event.payload.status)) {
         void getHistory().then(h => history.set(h)).catch(() => {});
       }
@@ -144,54 +174,96 @@
   }
 
   async function handleScan() {
-    // Scan a specific folder if one is selected
+    await handleUnifiedScan();
+  }
+
+  function folderLabel(path: string): string {
+    return path.split(/[/\\]/).pop() || path;
+  }
+
+  function makeScanId(folderId: number): string {
+    return `scan-${folderId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  function selectedFolderPath(folderId: number): string | null {
+    for (const lib of $libraries) {
+      const folder = lib.folders.find(f => f.id === folderId);
+      if (folder) return folder.path;
+    }
+    return null;
+  }
+
+  async function reloadVisibleFiles() {
     if ($selectedFolderId) {
-      const path = getSelectedFolderPath();
-      if (!path) { scanStatus.set('未找到文件夹路径'); return; }
-      scanStatus.set('扫描中...');
-      try {
-        const result = await scanDirectory(path, $selectedFolderId);
-        files.set(result.files);
-        scanStatus.set(`扫描完成: ${result.total_files} 文件, ${result.probe_ok} 成功`);
-        const libs = await listLibraries(); libraries.set(libs);
-      } catch (e) { scanStatus.set(`错误: ${e}`); }
+      await loadFolderFiles($selectedFolderId);
+    } else if ($selectedLibraryId) {
+      await loadLibraryFiles($selectedLibraryId);
+    }
+  }
+
+  async function refreshFolder(folderId: number): Promise<FolderRefreshResult> {
+    const path = selectedFolderPath(folderId);
+    if (!path) {
+      const error = '未找到文件夹路径';
+      scanStatus.set(error);
+      return { ok: false, error };
+    }
+
+    if (scanHideTimer) {
+      clearTimeout(scanHideTimer);
+      scanHideTimer = null;
+    }
+
+    const scanId = makeScanId(folderId);
+    scanUi = beginScan(scanUi, { scanId, folderId, label: folderLabel(path) });
+    scanProgress.set(scanUi.progress);
+    scanStatus.set(scanUi.statusText);
+
+    try {
+      const result = await scanDirectory(path, folderId, scanId);
+      await reloadVisibleFiles();
+      libraries.set(await listLibraries());
+      scanStatus.set(formatLibraryScanStatus({
+        totalFiles: result.total_files,
+        totalOk: result.probe_ok,
+      }));
+      return { ok: true, result };
+    } catch (e) {
+      const error = scanErrorMessage(e);
+      scanProgress.set(null);
+      scanUi = createInitialScanUiState();
+      scanStatus.set(`错误: ${error}`);
+      return { ok: false, error };
+    }
+  }
+
+  async function handleUnifiedScan() {
+    if ($selectedFolderId) {
+      await refreshFolder($selectedFolderId);
       return;
     }
 
-    // Scan all folders in the selected library
     if ($selectedLibraryId) {
       const lib = $libraries.find(l => l.id === $selectedLibraryId);
       if (!lib || lib.folders.length === 0) { scanStatus.set('请先在库中添加文件夹'); return; }
-      scanStatus.set(`扫描中 (${lib.folders.length} 个文件夹)...`);
-      let totalFiles = 0, totalOk = 0;
-      let idx = 0;
-      for (const folder of lib.folders) {
-        idx++;
-        scanStatus.set(`扫描 ${idx}/${lib.folders.length}: ${folder.path.split(/[/\\]/).pop() || folder.path}...`);
-        try {
-          const result = await scanDirectory(folder.path, folder.id);
-          totalFiles += result.total_files;
-          totalOk += result.probe_ok;
-        } catch (_) {}
+      let totalFiles = 0, totalOk = 0, failedCount = 0;
+      for (const [idx, folder] of lib.folders.entries()) {
+        scanStatus.set(`扫描 ${idx + 1}/${lib.folders.length}: ${folderLabel(folder.path)}...`);
+        const refresh = await refreshFolder(folder.id);
+        if (!refresh.ok) {
+          failedCount += 1;
+          continue;
+        }
+        totalFiles += refresh.result.total_files;
+        totalOk += refresh.result.probe_ok;
       }
-      try {
-        const result = await getLibraryFiles($selectedLibraryId);
-        files.set(result.files);
-      } catch (_) {}
-      scanStatus.set(`扫描完成: ${totalFiles} 文件, ${totalOk} 成功`);
-      const libs = await listLibraries(); libraries.set(libs);
+      await reloadVisibleFiles();
+      libraries.set(await listLibraries());
+      scanStatus.set(formatLibraryScanStatus({ totalFiles, totalOk, failedCount }));
       return;
     }
 
     scanStatus.set('请先在左侧选择一个库');
-  }
-
-  function getSelectedFolderPath(): string | null {
-    for (const lib of $libraries) {
-      const f = lib.folders.find(f => f.id === $selectedFolderId);
-      if (f) return f.path;
-    }
-    return null;
   }
 
   async function handleEncode() {
@@ -252,15 +324,15 @@
 
   <div class="app-layout">
     <aside class="sidebar">
-      <LibraryPanel />
+      <LibraryPanel onRefreshFolder={refreshFolder} />
     </aside>
 
     <main class="content">
       <div class="toolbar">
         <button onclick={handleScan}>扫描</button>
         {#if $scanProgress}
-          <div class="scan-progress">
-            <div class="scan-progress-fill" style="width: {$scanProgress.total > 0 ? $scanProgress.done / $scanProgress.total * 100 : 0}%"></div>
+          <div class="scan-progress" class:indeterminate={scanUi.progressMode === 'indeterminate'}>
+            <div class="scan-progress-fill" style="width: {$scanProgress.total > 0 ? Math.min(100, ($scanProgress.done / $scanProgress.total) * 100) : 100}%"></div>
           </div>
         {/if}
         <button class="primary tasks-btn" class:pulse={hasActiveTasks} onclick={() => showHistory.set(true)}>查看任务</button>
@@ -282,7 +354,7 @@
         {#if viewMode === 'flat'}
           <FileTable viewMode={viewMode} filterKey={filterKey} onViewChange={(v: 'flat' | 'tree') => { if ($selectedLibraryId) { viewModes[$selectedLibraryId] = v; viewModes = viewModes; } }} onFilterChange={(v: string) => filterKey = v} />
         {:else}
-          <TreeView files={$files} viewMode={viewMode} filterKey={filterKey} onViewChange={(v: 'flat' | 'tree') => { if ($selectedLibraryId) { viewModes[$selectedLibraryId] = v; viewModes = viewModes; } }} onFilterChange={(v: string) => filterKey = v} />
+          <TreeView files={$files} viewMode={viewMode} filterKey={filterKey} onRefreshFolder={refreshFolder} onViewChange={(v: 'flat' | 'tree') => { if ($selectedLibraryId) { viewModes[$selectedLibraryId] = v; viewModes = viewModes; } }} onFilterChange={(v: string) => filterKey = v} />
         {/if}
       </div>
     </main>
@@ -438,6 +510,14 @@
 
   .scan-progress { width: 100px; height: 3px; background: var(--border-subtle); border-radius: 2px; overflow: hidden; flex-shrink: 0; }
   .scan-progress-fill { height: 100%; background: var(--accent); transition: width 0.3s var(--ease-expo); }
+  .scan-progress.indeterminate .scan-progress-fill {
+    width: 45%;
+    animation: scan-progress-pulse 1.1s var(--ease-expo) infinite;
+  }
+  @keyframes scan-progress-pulse {
+    0% { transform: translateX(-110%); }
+    100% { transform: translateX(230%); }
+  }
 
   .encode-progress { display: flex; align-items: center; gap: var(--space-sm); flex: 1; }
   .encode-progress-bar { flex: 1; height: 3px; background: var(--border-subtle); border-radius: 2px; overflow: hidden; max-width: 200px; }
