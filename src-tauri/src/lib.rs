@@ -93,19 +93,17 @@ pub fn run() {
 
             state.worker.set_app_handle(app.handle().clone());
 
-            // Task 6: Wire scanner progress callback to Tauri events
-            let app_handle = app.handle().clone();
+            // Wire scanner progress callbacks to Tauri events.
+            let phase_handle = app.handle().clone();
+            let progress_handle = app.handle().clone();
             let result_handle = app.handle().clone();
             let matcher = state.matcher.clone();
             if let Ok(mut scanner) = state.scanner.lock() {
-                scanner.on_progress = Some(Box::new(move |done, total| {
-                    let _ = app_handle.emit(
-                        "scan-progress",
-                        serde_json::json!({
-                            "done": done,
-                            "total": total,
-                        }),
-                    );
+                scanner.on_phase = Some(Box::new(move |event| {
+                    let _ = phase_handle.emit("scan-phase", event);
+                }));
+                scanner.on_progress = Some(Box::new(move |event| {
+                    let _ = progress_handle.emit("scan-progress", event);
                 }));
                 scanner.on_result = Some(Box::new(move |snapshot| {
                     if let Ok(matcher) = matcher.lock() {

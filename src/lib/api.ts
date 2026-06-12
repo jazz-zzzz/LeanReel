@@ -50,8 +50,8 @@ export async function getFolderFiles(folderId: number): Promise<ScanResult> {
   return invoke('get_folder_files', { folderId });
 }
 
-export async function scanDirectory(path: string, folderId: number): Promise<ScanResult> {
-  return invoke('scan_directory', { path, folderId });
+export async function scanDirectory(path: string, folderId: number, scanId?: string): Promise<ScanResult> {
+  return invoke('scan_directory', { path, folderId, scanId });
 }
 
 export interface LibraryInfo {

@@ -116,7 +116,7 @@ fn test_scanner_scan_nonexistent_dir() {
     let (prober, _) = CountingProber::new();
     let (store, _) = CountingStore::new();
     let scanner = Scanner::new(Box::new(prober), Box::new(store));
-    let result = scanner.scan_directory(Path::new("nonexistent_12345"), 1);
+    let result = scanner.scan_directory(Path::new("nonexistent_12345"), 1, "test-scan");
     assert!(
         result.is_err(),
         "Unavailable roots must not be treated as empty scans"
@@ -130,7 +130,7 @@ fn test_scanner_scan_empty_dir() {
     let (prober, _) = CountingProber::new();
     let (store, _) = CountingStore::new();
     let scanner = Scanner::new(Box::new(prober), Box::new(store));
-    let result = scanner.scan_directory(&dir, 1).unwrap();
+    let result = scanner.scan_directory(&dir, 1, "test-scan").unwrap();
     std::fs::remove_dir_all(&dir).ok();
     assert_eq!(result.total_files, 0);
     assert_eq!(result.probe_ok, 0);
@@ -144,7 +144,7 @@ fn test_scanner_probes_and_stores_real_file() {
     let (prober, _) = CountingProber::new();
     let (store, _) = CountingStore::new();
     let scanner = Scanner::new(Box::new(prober), Box::new(store));
-    let result = scanner.scan_directory(&dir, 1).unwrap();
+    let result = scanner.scan_directory(&dir, 1, "test-scan").unwrap();
     std::fs::remove_dir_all(&dir).ok();
     assert_eq!(result.total_files, 1);
     assert_eq!(result.probe_ok, 1);
@@ -165,11 +165,11 @@ fn test_scanner_skips_unchanged_files_on_second_scan() {
     let (prober, probe_count) = CountingProber::new();
     let (store, _) = CountingStore::new();
     let scanner = Scanner::new(Box::new(prober), Box::new(store));
-    let result1 = scanner.scan_directory(&dir, 1).unwrap();
+    let result1 = scanner.scan_directory(&dir, 1, "test-scan").unwrap();
     assert_eq!(result1.total_files, 1);
     assert_eq!(result1.probe_ok, 1);
     let count_after_first = *probe_count.lock().unwrap();
-    let result2 = scanner.scan_directory(&dir, 1).unwrap();
+    let result2 = scanner.scan_directory(&dir, 1, "test-scan").unwrap();
     assert_eq!(result2.total_files, 1);
     assert_eq!(result2.probe_ok, 1);
     assert_eq!(
@@ -189,10 +189,10 @@ fn test_scanner_cleans_orphans() {
     let (prober, _) = CountingProber::new();
     let (store, deleted_paths) = CountingStore::new();
     let scanner = Scanner::new(Box::new(prober), Box::new(store));
-    let result1 = scanner.scan_directory(&dir, 1).unwrap();
+    let result1 = scanner.scan_directory(&dir, 1, "test-scan").unwrap();
     assert_eq!(result1.total_files, 2);
     std::fs::remove_file(dir.join("movie2.mkv")).unwrap();
-    let result2 = scanner.scan_directory(&dir, 1).unwrap();
+    let result2 = scanner.scan_directory(&dir, 1, "test-scan").unwrap();
     assert_eq!(result2.total_files, 1);
     let deleted = deleted_paths.lock().unwrap();
     assert!(
@@ -223,7 +223,7 @@ fn test_scanner_on_result_fires_for_each_file() {
         },
     ));
 
-    let _ = scanner.scan_directory(&dir, 1).unwrap();
+    let _ = scanner.scan_directory(&dir, 1, "test-scan").unwrap();
     std::fs::remove_dir_all(&dir).ok();
 
     let captured = results.lock().unwrap();
@@ -255,12 +255,12 @@ fn test_scanner_on_result_fires_for_cached_files_on_second_scan() {
     ));
 
     // First scan — probes and saves
-    let _ = scanner.scan_directory(&dir, 1).unwrap();
+    let _ = scanner.scan_directory(&dir, 1, "test-scan").unwrap();
 
     // Second scan — same scanner, should use cache
     // Clear results to track second scan's callbacks separately
     results.lock().unwrap().clear();
-    let _ = scanner.scan_directory(&dir, 1).unwrap();
+    let _ = scanner.scan_directory(&dir, 1, "test-scan").unwrap();
 
     std::fs::remove_dir_all(&dir).ok();
 
@@ -298,7 +298,7 @@ fn test_scanner_on_result_receives_probe_metadata() {
         },
     ));
 
-    let _ = scanner.scan_directory(&dir, 1).unwrap();
+    let _ = scanner.scan_directory(&dir, 1, "test-scan").unwrap();
     std::fs::remove_dir_all(&dir).ok();
 
     let captured = snaps.lock().unwrap();
@@ -315,4 +315,77 @@ fn test_scanner_on_result_receives_probe_metadata() {
     assert!(final_snapshot.probe_ok);
     // H-029: New extended fields should be present (CountingProber returns empty strings)
     assert_eq!(final_snapshot.pix_fmt, "");
+}
+
+#[test]
+fn test_scanner_emits_discovering_probing_and_done_phases_with_scan_id() {
+    use leanreel_rs_lib::services::scanner::{ScanPhase, ScanPhaseEvent};
+    use std::sync::{Arc, Mutex};
+
+    let dir = std::env::temp_dir().join("leanreel_test_scan_phase");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("movie.mkv"), b"content").unwrap();
+
+    let (prober, _) = CountingProber::new();
+    let (store, _) = CountingStore::new();
+    let phases: Arc<Mutex<Vec<ScanPhaseEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let phases_clone = phases.clone();
+    let mut scanner = Scanner::new(Box::new(prober), Box::new(store));
+    scanner.on_phase = Some(Box::new(move |event| {
+        phases_clone.lock().unwrap().push(event.clone());
+    }));
+
+    let result = scanner.scan_directory(&dir, 7, "scan-test-1").unwrap();
+    std::fs::remove_dir_all(&dir).ok();
+
+    assert_eq!(result.total_files, 1);
+    let phases = phases.lock().unwrap();
+    assert_eq!(phases.len(), 3);
+    assert_eq!(phases[0].scan_id, "scan-test-1");
+    assert_eq!(phases[0].folder_id, 7);
+    assert_eq!(phases[0].phase, ScanPhase::Discovering);
+    assert_eq!(phases[1].phase, ScanPhase::Probing);
+    assert_eq!(phases[2].phase, ScanPhase::Done);
+}
+
+#[test]
+fn test_scanner_progress_includes_discovery_and_probe_payloads() {
+    use leanreel_rs_lib::services::scanner::{ScanPhase, ScanProgressEvent};
+    use std::sync::{Arc, Mutex};
+
+    let dir = std::env::temp_dir().join("leanreel_test_scan_progress_payload");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("movie_a.mkv"), b"content a").unwrap();
+    std::fs::write(dir.join("movie_b.mp4"), b"content b").unwrap();
+
+    let (prober, _) = CountingProber::new();
+    let (store, _) = CountingStore::new();
+    let progress: Arc<Mutex<Vec<ScanProgressEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let progress_clone = progress.clone();
+    let mut scanner = Scanner::new(Box::new(prober), Box::new(store));
+    scanner.on_progress = Some(Box::new(move |event| {
+        progress_clone.lock().unwrap().push(event.clone());
+    }));
+
+    let result = scanner.scan_directory(&dir, 9, "scan-test-2").unwrap();
+    std::fs::remove_dir_all(&dir).ok();
+
+    assert_eq!(result.total_files, 2);
+    let progress = progress.lock().unwrap();
+    assert!(
+        progress
+            .iter()
+            .any(|event| event.phase == ScanPhase::Discovering
+                && event.scan_id == "scan-test-2"
+                && event.folder_id == 9
+                && event.total == 0
+                && event.video_files_found >= 1),
+        "expected discovery progress payload: {progress:?}"
+    );
+    assert!(
+        progress
+            .iter()
+            .any(|event| event.phase == ScanPhase::Probing && event.done == 2 && event.total == 2),
+        "expected probing progress payload: {progress:?}"
+    );
 }

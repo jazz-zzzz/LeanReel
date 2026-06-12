@@ -20,6 +20,7 @@ export function normalizeIoMetrics(json) {
     typeof parsed.io_write_bytes_sec === 'number' ? parsed.io_write_bytes_sec : undefined;
 
   if (ioType && ioRead !== undefined && ioWrite !== undefined) {
+    /** @type {Record<string, string>} */
     const labels = { local: '本地', smb: 'SMB', mixed: '混合' };
     return { type: labels[ioType] || ioType, readBytesSec: ioRead, writeBytesSec: ioWrite };
   }
